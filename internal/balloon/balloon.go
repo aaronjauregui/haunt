@@ -99,6 +99,29 @@ func (r *Renderer) Render(text string) *sprite.Sprite {
 	return &sprite.Sprite{Img: img}
 }
 
+// RenderImage paints an image inside a balloon panel, scaled down to fit
+// MaxWidth if needed (nearest-neighbor; panels are small).
+func (r *Renderer) RenderImage(src image.Image) *sprite.Sprite {
+	t := r.theme
+	b := src.Bounds()
+	w, h := b.Dx(), b.Dy()
+	maxInner := t.MaxWidth - 2*t.Padding
+	if w > maxInner {
+		h = h * maxInner / w
+		w = maxInner
+	}
+	panel := image.NewNRGBA(image.Rect(0, 0, w+2*t.Padding, h+2*t.Padding))
+	paintPanel(panel, t)
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			sx := b.Min.X + x*b.Dx()/w
+			sy := b.Min.Y + y*b.Dy()/h
+			panel.Set(t.Padding+x, t.Padding+y, src.At(sx, sy))
+		}
+	}
+	return &sprite.Sprite{Img: panel}
+}
+
 // wrap breaks text into lines no wider than maxWidth pixels, on spaces where
 // possible. Explicit newlines are respected.
 func (r *Renderer) wrap(text string, maxWidth int) []string {

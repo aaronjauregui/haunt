@@ -126,12 +126,12 @@ func loadAllCursorsFromDir(path string, size int, loadCallback func(name string,
 // will be called multiple times, with possibly different []Image
 // which have the same name.
 //
-//  theme: The name of theme that should be loaded
-//  size: The desired size of the cursor images
-//  loadCallback: A callback function that will be called
-//   for each cursor loaded. The first parameter is name of the cursor
-//   representing the loaded cursor and the second is []Image representing
-//   the cursor's animated frames, for static ones slice will contain single image.
+//	theme: The name of theme that should be loaded
+//	size: The desired size of the cursor images
+//	loadCallback: A callback function that will be called
+//	 for each cursor loaded. The first parameter is name of the cursor
+//	 representing the loaded cursor and the second is []Image representing
+//	 the cursor's animated frames, for static ones slice will contain single image.
 func LoadTheme(theme string, size int, loadCallback func(name string, images []Image)) {
 	if theme == "" {
 		theme = "default"

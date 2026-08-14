@@ -6,6 +6,7 @@ package ghost
 import (
 	"context"
 	"fmt"
+	"image"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/robfig/cron/v3"
 
+	"github.com/aaronjauregui/haunt/internal/ai"
 	"github.com/aaronjauregui/haunt/internal/balloon"
 	"github.com/aaronjauregui/haunt/internal/brain"
 	"github.com/aaronjauregui/haunt/internal/bus"
@@ -77,6 +79,10 @@ type Ghost struct {
 	brain brain.Runner
 	store Store
 	quiet *quiet.Checker
+
+	aiSvc    *ai.Service
+	cacheDir string
+	aiMu     sync.Mutex // one AI request at a time per ghost
 
 	timersMu sync.Mutex
 	timers   map[string]*time.Timer
@@ -166,6 +172,18 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	// Quiet hours (config windows + manual shush).
 	if g.quiet, err = quiet.Load(); err != nil {
 		return err
+	}
+
+	// AI services (backends are user-configured; absent config just means
+	// the capabilities error out when used).
+	aiCfg, err := ai.LoadConfig()
+	if err != nil {
+		return err
+	}
+	g.aiSvc = ai.NewService(aiCfg)
+	g.cacheDir = filepath.Join(opts.StateDir, "cache")
+	if opts.StateDir == "" {
+		g.cacheDir = filepath.Join(os.TempDir(), "haunt-cache-"+m.Ghost.Name)
 	}
 
 	// Brain: sandboxed WASM by default; a native process only when the
@@ -259,7 +277,7 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	if err != nil {
 		return err
 	}
-	g.publish(proto.Event{Type: proto.EventBoot, KV: kv})
+	g.publish(proto.Event{Type: proto.EventBoot, KV: visibleKV(kv)})
 	if opts.OnReady != nil {
 		opts.OnReady()
 	}
@@ -360,11 +378,29 @@ func (g *Ghost) execIntent(in proto.Intent) {
 		}
 		g.timersMu.Unlock()
 	case proto.IntentKVSet:
+		if strings.HasPrefix(in.Name, internalKeyPrefix) {
+			g.opts.Log(fmt.Sprintf("haunt: kv_set %s dropped: reserved prefix", in.Name))
+			return
+		}
 		if err := g.store.Set(in.Name, in.Value); err != nil {
 			g.opts.Log(fmt.Sprintf("haunt: kv_set %s: %v", in.Name, err))
 		}
 	case proto.IntentLog:
 		g.opts.Log("ghost: " + in.Text)
+	case proto.IntentChat:
+		// Own goroutine: a slow backend must not block other intents.
+		// aiMu keeps one request in flight per ghost.
+		go func() {
+			g.aiMu.Lock()
+			defer g.aiMu.Unlock()
+			g.execChat(in.Text)
+		}()
+	case proto.IntentImagine:
+		go func() {
+			g.aiMu.Lock()
+			defer g.aiMu.Unlock()
+			g.execImagine(in.Text)
+		}()
 	case proto.IntentTell:
 		if !g.capabilityActive("tell") {
 			g.opts.Log(fmt.Sprintf("haunt: tell intent dropped: capability not granted"))
@@ -423,6 +459,25 @@ func (g *Ghost) showBalloon(text string) {
 	bln, err := g.app.CreateSpriteOpts(sp, x, y, wlclient.SurfaceOptions{PassThrough: true})
 	if err != nil {
 		g.opts.Log(fmt.Sprintf("haunt: balloon failed: %v", err))
+		return
+	}
+	g.blnMu.Lock()
+	g.bln = bln
+	g.blnMu.Unlock()
+}
+
+// showImageBalloon renders an image into a balloon panel beside the sprite.
+func (g *Ghost) showImageBalloon(img image.Image) {
+	if muted, why := g.quiet.Active(); muted {
+		g.opts.Log(fmt.Sprintf("haunt: image balloon suppressed (%s)", why))
+		return
+	}
+	g.hideBalloon()
+	sp := g.blnRend.RenderImage(img)
+	x, y := g.balloonPos()
+	bln, err := g.app.CreateSpriteOpts(sp, x, y, wlclient.SurfaceOptions{PassThrough: true})
+	if err != nil {
+		g.opts.Log(fmt.Sprintf("haunt: image balloon failed: %v", err))
 		return
 	}
 	g.blnMu.Lock()

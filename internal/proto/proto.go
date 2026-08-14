@@ -37,6 +37,11 @@ const (
 	EventCron   EventType = "cron"   // a manifest-scheduled trigger fired
 	EventIdle   EventType = "idle"   // user went idle
 	EventActive EventType = "active" // user came back
+
+	// AI results, delivered after chat/imagine intents.
+	EventAIReply EventType = "ai_reply" // Text holds the full reply
+	EventAIImage EventType = "ai_image" // Name holds the cached image path
+	EventAIError EventType = "ai_error" // Text holds the failure reason
 )
 
 // Event is one occurrence delivered to a brain.
@@ -70,9 +75,11 @@ const (
 	IntentMove        IntentType = "move"      // reposition the sprite
 	IntentSetTimer    IntentType = "set_timer" // fire EventTimer after delay
 	IntentCancelTimer IntentType = "cancel_timer"
-	IntentKVSet       IntentType = "kv_set" // persist a value
-	IntentLog         IntentType = "log"    // debug output
-	IntentTell        IntentType = "tell"   // message another ghost
+	IntentKVSet       IntentType = "kv_set"  // persist a value
+	IntentLog         IntentType = "log"     // debug output
+	IntentTell        IntentType = "tell"    // message another ghost
+	IntentChat        IntentType = "chat"    // LLM reply to Text, streamed to the balloon
+	IntentImagine     IntentType = "imagine" // generate an image of Text
 )
 
 // Intent is one request emitted by a brain. The driver validates and
@@ -135,6 +142,14 @@ func (i *Intent) Validate() error {
 		}
 		if i.Text == "" {
 			return fmt.Errorf("tell intent with empty text")
+		}
+	case IntentChat:
+		if i.Text == "" {
+			return fmt.Errorf("chat intent with empty text")
+		}
+	case IntentImagine:
+		if i.Text == "" {
+			return fmt.Errorf("imagine intent with empty prompt")
 		}
 	case IntentHideSay, IntentMove, IntentLog:
 	default:

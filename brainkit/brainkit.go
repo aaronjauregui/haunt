@@ -78,6 +78,19 @@ func (em *Emitter) Tell(ghostName, text string) {
 	em.emit(Intent{Type: proto.IntentTell, Name: ghostName, Text: text})
 }
 
+// Chat asks the user's LLM to reply to text in this ghost's persona
+// (requires the llm capability). The reply streams into the balloon and
+// arrives back as an ai_reply event; failures arrive as ai_error.
+func (em *Emitter) Chat(text string) {
+	em.emit(Intent{Type: proto.IntentChat, Text: text})
+}
+
+// Imagine generates an image (requires the imagine capability), shown as an
+// image balloon and reported by an ai_image event.
+func (em *Emitter) Imagine(prompt string) {
+	em.emit(Intent{Type: proto.IntentImagine, Text: prompt})
+}
+
 // Run reads events from stdin until EOF, dispatching each to b. Call it from
 // main; it returns when the driver closes the event stream.
 func Run(b Brain) {

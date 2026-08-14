@@ -15,7 +15,18 @@ type Manifest struct {
 	Ghost    GhostSection     `toml:"ghost"`
 	Shell    ShellSection     `toml:"shell"`
 	Brain    BrainSection     `toml:"brain"`
+	Persona  PersonaSection   `toml:"persona"`
 	Triggers []TriggerSection `toml:"trigger"`
+}
+
+// PersonaSection shapes LLM-generated dialogue. Only meaningful with the
+// llm capability.
+type PersonaSection struct {
+	// System is the character's system prompt.
+	System string `toml:"system"`
+	// HistoryTurns caps how many past exchanges accompany each request
+	// (default 12).
+	HistoryTurns int `toml:"history_turns"`
 }
 
 // TriggerSection is a scheduled event: at each cron time, an EventCron with
@@ -34,6 +45,8 @@ var KnownCapabilities = map[string]string{
 	"message":      "receive text messages from outside (haunt say, scripts)",
 	"tell":         "send messages to other running ghosts",
 	"native-brain": "run its brain as a native process instead of the WASM sandbox",
+	"llm":          "generate dialogue with your configured language model",
+	"imagine":      "generate images with your configured image model",
 }
 
 type GhostSection struct {
