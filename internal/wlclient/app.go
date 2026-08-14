@@ -347,10 +347,16 @@ func (a *App) initKeyboard(k *client.Keyboard) {
 	})
 }
 
-// TakeKeyboard asks the compositor to send keys to s, or to stop. Keyboard
-// interactivity is on-demand: the ghost holds focus only while an input
-// line is open, so it never swallows the keystrokes of whatever you were
-// actually working in.
+// TakeKeyboard asks the compositor to send keys to s, or to stop.
+//
+// While it wants keys the surface takes *exclusive* interactivity, and the
+// timing is the whole point: on-demand focus is surrendered as soon as the
+// pointer wanders onto something else, so under focus-follows-mouse a
+// half-typed line evaporates the moment you reach for the mouse. Exclusive
+// keeps the keyboard until the line is closed, which is what every
+// launcher on this layer does for the same reason. The ghost holds it only
+// while a line is open, so it never swallows keystrokes meant for whatever
+// you were actually working in.
 func (a *App) TakeKeyboard(s *SpriteSurface, want bool) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -359,7 +365,7 @@ func (a *App) TakeKeyboard(s *SpriteSurface, want bool) error {
 	}
 	mode := uint32(layershell.LayerSurfaceKeyboardInteractivityNone)
 	if want {
-		mode = uint32(layershell.LayerSurfaceKeyboardInteractivityOnDemand)
+		mode = uint32(layershell.LayerSurfaceKeyboardInteractivityExclusive)
 	}
 	if err := s.layerSurface.SetKeyboardInteractivity(mode); err != nil {
 		return err
