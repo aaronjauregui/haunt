@@ -68,9 +68,13 @@ func (g *Ghost) execChat(in proto.Intent) {
 		system = "You are " + g.manifest.Ghost.Name + ", a small desktop companion. Reply in one or two short sentences."
 	}
 	// The journal makes the persona self-modifying: notes the ghost wrote
-	// about past interactions ride along with every request.
+	// about past interactions ride along with every request. Recall then
+	// adds whatever the utterance is actually about, however long ago it
+	// happened — the part the history window and the recent-notes window
+	// both drop.
 	if !silent {
-		system += g.notesContext()
+		notes, recentNotes := g.notesContext()
+		system += notes + g.recallContext(g.recall(text, recentNotes))
 	}
 	msgs = append(msgs, ai.Message{Role: "system", Content: system})
 	msgs = append(msgs, history...)
@@ -113,6 +117,10 @@ func (g *Ghost) execChat(in proto.Intent) {
 		history = history[len(history)-max:]
 	}
 	g.saveHistory(history)
+
+	// The exchange leaves the history window eventually; this is what
+	// outlives it.
+	g.remember("exchange", text+"\n"+full)
 
 	g.publish(proto.Event{Type: proto.EventAIReply, Text: full, Tag: tag})
 }

@@ -83,6 +83,9 @@ type Ghost struct {
 	aiSvc    *ai.Service
 	cacheDir string
 	aiMu     sync.Mutex // one AI request at a time per ghost
+	// autoGranted tracks which dev-mode grants have been logged, so the
+	// notice appears once per capability rather than once per check.
+	autoGranted sync.Map
 
 	timersMu sync.Mutex
 	timers   map[string]*time.Timer
@@ -342,7 +345,11 @@ func (g *Ghost) capabilityActive(cap string) bool {
 		return false
 	}
 	if g.opts.Granted == nil {
-		g.opts.Log(fmt.Sprintf("haunt: dev mode, auto-granting capability %q", cap))
+		// Once per capability: this is checked on every use, and memory
+		// work checks it several times per exchange.
+		if _, seen := g.autoGranted.LoadOrStore(cap, true); !seen {
+			g.opts.Log(fmt.Sprintf("haunt: dev mode, auto-granting capability %q", cap))
+		}
 		return true
 	}
 	return g.opts.Granted(cap)

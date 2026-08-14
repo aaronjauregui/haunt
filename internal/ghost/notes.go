@@ -41,6 +41,19 @@ func (g *Ghost) execNote(text string) {
 	}
 	if err := g.store.Set(notesKey, string(b)); err != nil {
 		g.opts.Log(fmt.Sprintf("haunt: saving note: %v", err))
+		return
+	}
+	// Notes age out of the recency window after 20 more; the memory index
+	// is how one from a year ago can still surface. Off the intent path —
+	// unlike chat, execNote runs inline, and an embedding backend that
+	// hangs must not take the intent loop with it. aiMu keeps the ring
+	// cursor to one writer.
+	if g.memoryEnabled() {
+		go func() {
+			g.aiMu.Lock()
+			defer g.aiMu.Unlock()
+			g.remember("note", text)
+		}()
 	}
 }
 
@@ -56,21 +69,25 @@ func (g *Ghost) loadNotes() []Note {
 	return n
 }
 
-// notesContext renders recent notes for the LLM system context.
-func (g *Ghost) notesContext() string {
+// notesContext renders recent notes for the LLM system context, and returns
+// the set of texts it included so similarity recall (memory.go) can spend
+// its slots on things recency did not already cover.
+func (g *Ghost) notesContext() (string, map[string]bool) {
 	notes := g.loadNotes()
 	if len(notes) == 0 {
-		return ""
+		return "", nil
 	}
 	if len(notes) > notesInContext {
 		notes = notes[len(notes)-notesInContext:]
 	}
+	included := make(map[string]bool, len(notes))
 	var b strings.Builder
 	b.WriteString("\n\nYour private journal (things you chose to remember; let them shape you):\n")
 	for _, n := range notes {
 		fmt.Fprintf(&b, "- [%s] %s\n", n.Time.Format("Jan 2"), n.Text)
+		included[n.Text] = true
 	}
-	return b.String()
+	return b.String(), included
 }
 
 // DecodeNotes parses a stored journal value; used by the journal CLI.

@@ -21,6 +21,7 @@ import (
 type Config struct {
 	LLM    LLMConfig    `toml:"llm"`
 	Image  ImageConfig  `toml:"image"`
+	Embed  EmbedConfig  `toml:"embed"`
 	Budget BudgetConfig `toml:"budget"`
 
 	// LogPrompts dumps every request this layer sends — the full message
@@ -93,11 +94,16 @@ type ImageConfig struct {
 type BudgetConfig struct {
 	LLMRequestsPerHour   int `toml:"llm_requests_per_hour"`
 	ImageRequestsPerHour int `toml:"image_requests_per_hour"`
+	// EmbedRequestsPerHour is separate and generous: memory work rides
+	// along with dialogue (a recall on the way in, a write on the way out)
+	// and must not consume the conversation's own allowance.
+	EmbedRequestsPerHour int `toml:"embed_requests_per_hour"`
 }
 
 const (
 	defaultLLMPerHour   = 120
 	defaultImagePerHour = 12
+	defaultEmbedPerHour = 600
 )
 
 // LoadConfig reads the [ai] section of the user config file.
@@ -124,6 +130,9 @@ func LoadConfig() (*Config, error) {
 	}
 	if cfg.Budget.ImageRequestsPerHour == 0 {
 		cfg.Budget.ImageRequestsPerHour = defaultImagePerHour
+	}
+	if cfg.Budget.EmbedRequestsPerHour == 0 {
+		cfg.Budget.EmbedRequestsPerHour = defaultEmbedPerHour
 	}
 	return &cfg, nil
 }
@@ -153,6 +162,7 @@ type Service struct {
 	cfg         *Config
 	llmBudget   *budget
 	imageBudget *budget
+	embedBudget *budget
 	log         func(string)
 }
 
@@ -163,8 +173,19 @@ func NewService(cfg *Config, log func(string)) *Service {
 		cfg:         cfg,
 		llmBudget:   newBudget(cfg.Budget.LLMRequestsPerHour),
 		imageBudget: newBudget(cfg.Budget.ImageRequestsPerHour),
+		embedBudget: newBudget(embedPerHour(cfg)),
 		log:         log,
 	}
+}
+
+// embedPerHour resolves the embed allowance, defaulting for Configs built
+// directly rather than through LoadConfig. Memory is a driver-side detail
+// callers should not have to remember to budget for.
+func embedPerHour(cfg *Config) int {
+	if cfg.Budget.EmbedRequestsPerHour <= 0 {
+		return defaultEmbedPerHour
+	}
+	return cfg.Budget.EmbedRequestsPerHour
 }
 
 // logPrompts reports whether request tracing is on.
