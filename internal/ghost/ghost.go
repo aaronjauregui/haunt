@@ -22,6 +22,7 @@ import (
 	"github.com/aaronjauregui/haunt/internal/control"
 	"github.com/aaronjauregui/haunt/internal/proto"
 	"github.com/aaronjauregui/haunt/internal/quiet"
+	"github.com/aaronjauregui/haunt/internal/shell"
 	"github.com/aaronjauregui/haunt/internal/sprite"
 	"github.com/aaronjauregui/haunt/internal/store"
 	"github.com/aaronjauregui/haunt/internal/wlclient"
@@ -70,6 +71,7 @@ type Ghost struct {
 
 	app     *wlclient.App
 	surface *wlclient.SpriteSurface
+	shell   *shell.Shell
 	blnRend *balloon.Renderer
 
 	blnMu sync.Mutex
@@ -148,15 +150,14 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	}
 	defer g.store.Close()
 
-	// Shell.
-	var sp *sprite.Sprite
-	if m.Shell.Sprite != "" {
-		if sp, err = sprite.Load(filepath.Join(dir, m.Shell.Sprite)); err != nil {
-			return err
-		}
-	} else {
-		sp = sprite.Builtin(160)
+	// Shell: a layer stack with named poses, or a single image, or the
+	// built-in placeholder — all three arrive here as the same thing.
+	if m.Shell.Sprite == "" && len(m.Shell.Layers) == 0 {
+		g.shell = shell.Builtin(160)
+	} else if g.shell, err = shell.Load(dir, m.Shell); err != nil {
+		return err
 	}
+	sp := g.shell.Sprite()
 
 	// Renderer.
 	if g.app, err = wlclient.Connect(); err != nil {
@@ -233,7 +234,7 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		// clicking off an input box does anywhere else — and does it first,
 		// so the brain's reaction is not suppressed as "user is typing".
 		g.closeInput()
-		g.publish(proto.Event{Type: proto.EventClick, X: x, Y: y})
+		g.publish(proto.Event{Type: proto.EventClick, X: x, Y: y, Region: g.shell.RegionAt(x, y)})
 	}
 	// Right-click opens a line to type at the ghost. A separate gesture
 	// from the left click, which belongs to the brain: a scripted ghost's
@@ -249,7 +250,7 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		}
 	}
 	g.surface.OnDragEnd = func(x, y int) {
-		g.publish(proto.Event{Type: proto.EventDragEnd, X: x, Y: y})
+		g.publish(proto.Event{Type: proto.EventDragEnd, X: x, Y: y, Region: g.shell.RegionAt(x, y)})
 	}
 	// The balloon belongs to the ghost: it follows the sprite while dragged.
 	g.surface.OnMove = func(x, y int) {
@@ -489,6 +490,8 @@ func (g *Ghost) execIntent(in proto.Intent) {
 			defer g.aiMu.Unlock()
 			g.execImagine(in, userDriven)
 		}()
+	case proto.IntentSetExpression:
+		g.setExpression(in.Name)
 	case proto.IntentNote:
 		g.execNote(in.Text)
 	case proto.IntentTell:
@@ -601,5 +604,28 @@ func (g *Ghost) hideBalloon() {
 	g.blnMu.Unlock()
 	if bln != nil {
 		bln.Destroy()
+	}
+}
+
+// setExpression wears a declared pose. An unknown pose is a no-op with a
+// log line rather than an error: a brain written for a richer shell should
+// degrade quietly on a simpler one, not fall over.
+func (g *Ghost) setExpression(pose string) {
+	if g.shell == nil {
+		return
+	}
+	if g.shell.Pose() == pose {
+		return
+	}
+	if !g.shell.SetPose(pose) {
+		g.opts.Log(fmt.Sprintf("haunt: expression %q is not one of this shell's poses %v",
+			pose, g.shell.Poses()))
+		return
+	}
+	sp := g.shell.Sprite()
+	// Poses composite onto one canvas, so the surface can be repainted in
+	// place — no flicker, and no re-derived input region.
+	if err := g.surface.Redraw(sp); err != nil {
+		g.opts.Log(fmt.Sprintf("haunt: expression %q: %v", pose, err))
 	}
 }

@@ -120,6 +120,13 @@ func (em *Emitter) ImagineFresh(prompt string) {
 	em.emit(Intent{Type: proto.IntentImagine, Text: prompt, Fresh: true})
 }
 
+// SetExpression wears one of the poses the ghost's shell declares — the
+// driver ignores a pose the shell does not have, so a brain written for a
+// richer shell degrades quietly on a simpler one.
+func (em *Emitter) SetExpression(pose string) {
+	em.emit(Intent{Type: proto.IntentSetExpression, Name: pose})
+}
+
 // Note writes a private journal entry. Recent notes are injected into LLM
 // context on every Chat, so what the ghost chooses to remember shapes its
 // future behavior. The user can read the journal with `haunt journal`.

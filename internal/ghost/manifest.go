@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/aaronjauregui/haunt/internal/shell"
 )
 
 // Manifest is ghost.toml, the package descriptor. v1 covers identity, shell
@@ -57,11 +59,9 @@ type GhostSection struct {
 	Capabilities []string `toml:"capabilities"`
 }
 
-type ShellSection struct {
-	// Sprite is the shell image path, relative to the ghost directory.
-	// Empty uses the built-in placeholder.
-	Sprite string `toml:"sprite"`
-}
+// ShellSection is the ghost's visual form: one image, or a stack of layers
+// with named poses. See internal/shell.
+type ShellSection = shell.Manifest
 
 type BrainSection struct {
 	// Wasm is the brain module path, relative to the ghost directory.

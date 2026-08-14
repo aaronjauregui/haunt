@@ -108,20 +108,29 @@ func TestWhisperBrainLifecycle(t *testing.T) {
 		t.Errorf("intent 2 = %+v, want settle timer", intents[2])
 	}
 
-	// Click twice: distinct quips.
+	// Click twice: distinct quips. Matched by content rather than by
+	// position, so a brain that emits an extra intent per reaction — an
+	// expression, say — does not break the assertion.
 	mustDeliver(t, h, proto.Event{Type: proto.EventClick, X: 5, Y: 5})
 	mustDeliver(t, h, proto.Event{Type: proto.EventClick, X: 5, Y: 5})
-	intents = col.waitFor(t, "click intents", func(in []proto.Intent) bool { return len(in) >= 7 })
-	if intents[3].Text != "Boo." || intents[5].Text != "Careful, I'm translucent." {
-		t.Errorf("click quips = %q, %q", intents[3].Text, intents[5].Text)
+	intents = col.waitFor(t, "click intents", func(in []proto.Intent) bool {
+		return countSays(in) >= 3
+	})
+	says := saidTexts(intents)
+	if len(says) < 3 || says[1] != "Boo." || says[2] != "Careful, I'm translucent." {
+		t.Errorf("click quips = %q", says)
 	}
 
 	// Timer fires -> balloon hidden.
 	mustDeliver(t, h, proto.Event{Type: proto.EventTimer, Name: "settle"})
-	intents = col.waitFor(t, "hide_say", func(in []proto.Intent) bool { return len(in) >= 8 })
-	if intents[7].Type != proto.IntentHideSay {
-		t.Errorf("intent 7 = %+v, want hide_say", intents[7])
-	}
+	col.waitFor(t, "hide_say", func(in []proto.Intent) bool {
+		for _, i := range in {
+			if i.Type == proto.IntentHideSay {
+				return true
+			}
+		}
+		return false
+	})
 
 	// Clean shutdown.
 	if err := h.Close(); err != nil {
@@ -150,3 +159,16 @@ func mustDeliver(t *testing.T, h *Host, e proto.Event) {
 		t.Fatal(err)
 	}
 }
+
+// saidTexts pulls the balloon lines out of an intent stream.
+func saidTexts(in []proto.Intent) []string {
+	var out []string
+	for _, i := range in {
+		if i.Type == proto.IntentSay {
+			out = append(out, i.Text)
+		}
+	}
+	return out
+}
+
+func countSays(in []proto.Intent) int { return len(saidTexts(in)) }

@@ -64,6 +64,10 @@ type Event struct {
 	// Tag echoes the tag of the intent this event answers, so a brain that
 	// has several AI requests in flight can tell their results apart.
 	Tag string `json:"tag,omitempty"`
+	// Region names the part of the shell an interaction landed on ("head",
+	// "hand"), when the shell declares regions. Empty otherwise, so a brain
+	// may ignore it entirely.
+	Region string `json:"region,omitempty"`
 	// KV is the ghost's persisted state, included only with EventBoot so
 	// brains start with their memory in hand.
 	KV map[string]string `json:"kv,omitempty"`
@@ -73,17 +77,18 @@ type Event struct {
 type IntentType string
 
 const (
-	IntentSay         IntentType = "say"       // show balloon text
-	IntentHideSay     IntentType = "hide_say"  // dismiss the balloon
-	IntentMove        IntentType = "move"      // reposition the sprite
-	IntentSetTimer    IntentType = "set_timer" // fire EventTimer after delay
-	IntentCancelTimer IntentType = "cancel_timer"
-	IntentKVSet       IntentType = "kv_set"  // persist a value
-	IntentLog         IntentType = "log"     // debug output
-	IntentTell        IntentType = "tell"    // message another ghost
-	IntentChat        IntentType = "chat"    // LLM reply to Text, streamed to the balloon
-	IntentImagine     IntentType = "imagine" // generate an image of Text
-	IntentNote        IntentType = "note"    // journal a self-note; recent notes join LLM context
+	IntentSay           IntentType = "say"       // show balloon text
+	IntentHideSay       IntentType = "hide_say"  // dismiss the balloon
+	IntentMove          IntentType = "move"      // reposition the sprite
+	IntentSetTimer      IntentType = "set_timer" // fire EventTimer after delay
+	IntentCancelTimer   IntentType = "cancel_timer"
+	IntentKVSet         IntentType = "kv_set"         // persist a value
+	IntentLog           IntentType = "log"            // debug output
+	IntentTell          IntentType = "tell"           // message another ghost
+	IntentChat          IntentType = "chat"           // LLM reply to Text, streamed to the balloon
+	IntentImagine       IntentType = "imagine"        // generate an image of Text
+	IntentNote          IntentType = "note"           // journal a self-note; recent notes join LLM context
+	IntentSetExpression IntentType = "set_expression" // wear a declared pose
 )
 
 // Intent is one request emitted by a brain. The driver validates and
@@ -175,6 +180,10 @@ func (i *Intent) Validate() error {
 	case IntentNote:
 		if i.Text == "" {
 			return fmt.Errorf("note intent with empty text")
+		}
+	case IntentSetExpression:
+		if i.Name == "" {
+			return fmt.Errorf("set_expression intent with empty pose")
 		}
 	case IntentHideSay, IntentMove, IntentLog:
 	default:
