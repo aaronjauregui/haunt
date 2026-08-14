@@ -436,6 +436,9 @@ func (g *Ghost) execIntent(in proto.Intent) {
 		if !g.allowInitiative("say") {
 			return
 		}
+		// Scripted dialogue gets the free tier of expression inference. A
+		// brain that also sets an expression runs after this and wins.
+		g.inferExpression(in.Text, false)
 		g.showBalloon(in.Text)
 	case proto.IntentHideSay:
 		g.hideBalloon()
@@ -621,6 +624,9 @@ func (g *Ghost) setExpression(pose string) {
 		g.opts.Log(fmt.Sprintf("haunt: expression %q is not one of this shell's poses %v",
 			pose, g.shell.Poses()))
 		return
+	}
+	if g.surface == nil {
+		return // no compositor: tests drive the shell without one
 	}
 	sp := g.shell.Sprite()
 	// Poses composite onto one canvas, so the surface can be repainted in

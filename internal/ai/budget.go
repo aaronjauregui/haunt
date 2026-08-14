@@ -30,6 +30,12 @@ func (b *budget) spend() error {
 		}
 	}
 	b.spends = kept
+	// A limit of zero means the caller never configured one. Refusing is
+	// right; indexing spends[0] to explain when to try again is not, and
+	// used to panic.
+	if b.limit <= 0 {
+		return fmt.Errorf("no allowance configured")
+	}
 	if len(b.spends) >= b.limit {
 		wait := time.Until(b.spends[0].Add(time.Hour))
 		if w := b.spends[0].Add(time.Hour).Sub(b.now()); w > 0 {

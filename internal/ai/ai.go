@@ -24,6 +24,18 @@ type Config struct {
 	Embed  EmbedConfig  `toml:"embed"`
 	Budget BudgetConfig `toml:"budget"`
 
+	// ExpressionInference chooses how dialogue is mapped to shell poses:
+	// "lexicon" (default) uses the driver's free word table, "llm" adds a
+	// classifying request per generated line and lets the model decide,
+	// and "off" leaves the face alone entirely.
+	//
+	// "llm" costs one extra request per generated line — nothing against a
+	// local model, a doubled bill against a cloud one — and wants a model
+	// competent at a one-word classification. Very small models do this
+	// badly enough to be worse than the word table, so the default stays
+	// free and this is opt-in.
+	ExpressionInference string `toml:"expression_inference"`
+
 	// LogPrompts dumps every request this layer sends — the full message
 	// array, the resolved image parameters — to the driver log. Off by
 	// default: prompts carry the conversation and the ghost's journal, so
@@ -170,22 +182,23 @@ type Service struct {
 // they are enabled; nil discards them.
 func NewService(cfg *Config, log func(string)) *Service {
 	return &Service{
-		cfg:         cfg,
-		llmBudget:   newBudget(cfg.Budget.LLMRequestsPerHour),
-		imageBudget: newBudget(cfg.Budget.ImageRequestsPerHour),
-		embedBudget: newBudget(embedPerHour(cfg)),
+		cfg: cfg,
+		// Defaulted here as well as in LoadConfig, so a Config built
+		// directly — tests, embedders — gets a working allowance rather
+		// than one that refuses everything.
+		llmBudget:   newBudget(orDefault(cfg.Budget.LLMRequestsPerHour, defaultLLMPerHour)),
+		imageBudget: newBudget(orDefault(cfg.Budget.ImageRequestsPerHour, defaultImagePerHour)),
+		embedBudget: newBudget(orDefault(cfg.Budget.EmbedRequestsPerHour, defaultEmbedPerHour)),
 		log:         log,
 	}
 }
 
-// embedPerHour resolves the embed allowance, defaulting for Configs built
-// directly rather than through LoadConfig. Memory is a driver-side detail
-// callers should not have to remember to budget for.
-func embedPerHour(cfg *Config) int {
-	if cfg.Budget.EmbedRequestsPerHour <= 0 {
-		return defaultEmbedPerHour
+// orDefault fills in an unconfigured allowance.
+func orDefault(configured, fallback int) int {
+	if configured <= 0 {
+		return fallback
 	}
-	return cfg.Budget.EmbedRequestsPerHour
+	return configured
 }
 
 // logPrompts reports whether request tracing is on.
@@ -232,6 +245,25 @@ type Options struct {
 	Silent bool
 	// Tag is the brain's label for the request, echoed into traces.
 	Tag string
+}
+
+// Expression modes.
+const (
+	ExpressionOff     = "off"
+	ExpressionLexicon = "lexicon"
+	ExpressionLLM     = "llm"
+)
+
+// ExpressionMode is how dialogue should be mapped to faces, defaulting to
+// the free tier: a ghost should animate out of the box, but nobody should
+// discover a doubled model bill because their ghost has eyebrows.
+func (s *Service) ExpressionMode() string {
+	switch s.cfg.ExpressionInference {
+	case ExpressionOff, ExpressionLexicon, ExpressionLLM:
+		return s.cfg.ExpressionInference
+	default:
+		return ExpressionLexicon
+	}
 }
 
 // LLMEnabled reports whether the user configured an LLM backend.

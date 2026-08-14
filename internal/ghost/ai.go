@@ -104,6 +104,10 @@ func (g *Ghost) execChat(in proto.Intent, userDriven bool) {
 		g.publishAIResult(proto.Event{Type: proto.EventAIReply, Text: full, Tag: tag}, userDriven)
 		return
 	}
+	// The face before the words: inference runs ahead of the balloon so the
+	// expression is already right when the line appears, and ahead of the
+	// ai_reply event so a brain that sets its own expression lands last.
+	g.inferExpression(full, true)
 	g.showBalloon(full)
 
 	turns := g.manifest.Persona.HistoryTurns
