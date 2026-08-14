@@ -33,7 +33,7 @@ func TestDevReloadsOnChange(t *testing.T) {
 	}
 
 	cmd := exec.Command(bin, "dev", "-state", filepath.Join(dir, "state"), ghostDir)
-	cmd.Env = c.Env()
+	cmd.Env = append(c.Env(), "HAUNT_RUNTIME_DIR="+dir)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)

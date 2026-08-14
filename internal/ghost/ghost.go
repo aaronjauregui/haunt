@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/aaronjauregui/haunt/internal/balloon"
 	"github.com/aaronjauregui/haunt/internal/brain"
 	"github.com/aaronjauregui/haunt/internal/bus"
+	"github.com/aaronjauregui/haunt/internal/control"
 	"github.com/aaronjauregui/haunt/internal/proto"
 	"github.com/aaronjauregui/haunt/internal/sprite"
 	"github.com/aaronjauregui/haunt/internal/store"
@@ -183,6 +185,13 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		}
 	}()
 
+	// Control socket: external programs push events in (haunt say, hooks).
+	ctl, err := control.Listen(m.Ghost.Name, g.bus.Publish, opts.Log)
+	if err != nil {
+		return err
+	}
+	defer ctl.Close()
+
 	// Boot with the persisted KV snapshot.
 	kv, err := g.store.All()
 	if err != nil {
@@ -203,6 +212,13 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		}()
 		for {
 			if err := g.app.Dispatch(); err != nil {
+				// The library unregisters proxies on Destroy without
+				// waiting for the server's delete confirmation, so events
+				// already in flight for a destroyed surface (balloon
+				// swaps) surface as "unable find sender". Benign: skip.
+				if strings.Contains(err.Error(), "unable find sender") {
+					continue
+				}
 				dispatchErr <- err
 				return
 			}

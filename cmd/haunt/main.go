@@ -31,6 +31,8 @@ func main() {
 		err = cmdNew(os.Args[2:])
 	case "dev":
 		err = cmdDev(os.Args[2:])
+	case "say":
+		err = cmdSay(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -44,6 +46,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `usage:
   haunt run [-x N] [-y N] [-record FILE] [-state DIR] <ghost-dir>
   haunt dev [-x N] [-y N] [-state DIR] <ghost-dir>
+  haunt say [-ghost NAME] <text>
   haunt new <name>`)
 }
 

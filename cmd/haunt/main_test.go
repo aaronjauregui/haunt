@@ -45,11 +45,15 @@ wasm = "brain.wasm"
 	}
 
 	stateDir := filepath.Join(dir, "state")
+	recordPath := filepath.Join(dir, "session.jsonl")
 	const posX, posY = 200, 200
 	start := func() (*exec.Cmd, chan string) {
 		cmd := exec.Command(bin, "run",
-			"-x", fmt.Sprint(posX), "-y", fmt.Sprint(posY), "-state", stateDir, ghostDir)
-		cmd.Env = c.Env()
+			"-x", fmt.Sprint(posX), "-y", fmt.Sprint(posY),
+			"-state", stateDir, "-record", recordPath, ghostDir)
+		// Isolated runtime dir: control sockets must not touch the real
+		// session's. Later duplicates win on Linux.
+		cmd.Env = append(c.Env(), "HAUNT_RUNTIME_DIR="+dir)
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
 			t.Fatal(err)
@@ -141,7 +145,23 @@ wasm = "brain.wasm"
 		t.Fatal(err)
 	}
 	waitBalloon(t, c, dir, posX+dragX, posY+dragY, true)
+
+	// Inbound messaging: haunt say reaches the running ghost.
+	say := exec.Command(bin, "say", "-ghost", "whisper", "hello", "from", "outside")
+	say.Env = append(c.Env(), "HAUNT_RUNTIME_DIR="+dir)
+	if out, err := say.CombinedOutput(); err != nil {
+		t.Fatalf("haunt say failed: %v: %s", err, out)
+	}
 	stop(cmd)
+
+	// The recording proves the message flowed through the bus.
+	rec, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(rec), `"hello from outside"`) {
+		t.Errorf("session recording missing inbound message; got:\n%s", rec)
+	}
 
 	// State survived on disk.
 	if _, err := os.Stat(filepath.Join(stateDir, "state.db")); err != nil {
