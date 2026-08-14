@@ -28,8 +28,34 @@ const (
 
 	maxMemories    = 500
 	recallCount    = 5
-	minSimilarity  = 0.35
 	maxMemoryChars = 600
+
+	// Selecting by absolute similarity does not work: embedding models
+	// have a high baseline, and nomic-embed-text scores "my socks are wet"
+	// at 0.44 against "what tea should I buy" — well above any floor loose
+	// enough to admit real matches. What distinguishes a real match is that
+	// it stands out from the rest of the index, so selection is relative to
+	// the scores actually observed, which also survives changing models.
+	//
+	// minStandout is how far the best score must exceed the median before
+	// anything is recalled at all; below it, nothing here is about the
+	// utterance and the honest answer is silence.
+	minStandout = 0.12
+	// standoutShare keeps everything at least this far from the median
+	// toward the best score — the shoulder of the distribution, not just
+	// its peak, so a second genuinely relevant memory still gets in.
+	standoutShare = 0.5
+	// strongMatch is the one absolute threshold in the system, used only
+	// where the distribution cannot answer: an index too small to have a
+	// baseline, or one so homogeneous that nothing can stand out from it.
+	// It is calibrated against nomic-embed-text, where a genuine match on
+	// an exchange scores ~0.57-0.77 and an unrelated one ~0.40-0.50;
+	// another embedding model will want another number, which is exactly
+	// why the primary mechanism is relative instead.
+	strongMatch = 0.55
+	// distributionMin is how many scores it takes before a median means
+	// anything.
+	distributionMin = 4
 )
 
 // memory is one remembered item and its embedding.
@@ -177,28 +203,61 @@ func (g *Ghost) recall(text string, skip map[string]bool) []memory {
 		return nil
 	}
 
-	type scored struct {
-		m   memory
-		sim float64
-	}
 	ranked := make([]scored, 0, len(mems))
 	for _, m := range mems {
 		if skip[m.Text] {
 			continue
 		}
-		if sim := cosine(vec, decodeVec(m.Vec)); sim >= minSimilarity {
-			ranked = append(ranked, scored{m, sim})
-		}
+		ranked = append(ranked, scored{m, cosine(vec, decodeVec(m.Vec))})
+	}
+	return pickRelevant(ranked)
+}
+
+// scored is a memory and its similarity to the utterance being answered.
+type scored struct {
+	m   memory
+	sim float64
+}
+
+// pickRelevant chooses which scored memories are worth the model's
+// attention: nothing at all unless the best clearly stands out from the
+// index's own baseline, then everything on the shoulder below it.
+func pickRelevant(ranked []scored) []memory {
+	if len(ranked) == 0 {
+		return nil
 	}
 	sort.SliceStable(ranked, func(i, j int) bool { return ranked[i].sim > ranked[j].sim })
-	if len(ranked) > recallCount {
-		ranked = ranked[:recallCount]
+
+	best := ranked[0].sim
+	// Too few memories to have a baseline: nothing to stand out from, so
+	// the score has to carry itself.
+	cut := strongMatch
+	if len(ranked) >= distributionMin {
+		baseline := median(ranked)
+		if best-baseline < minStandout && best < strongMatch {
+			return nil // nothing here is distinctly about this
+		}
+		cut = baseline + standoutShare*(best-baseline)
 	}
-	out := make([]memory, len(ranked))
-	for i, r := range ranked {
-		out[i] = r.m
+
+	out := make([]memory, 0, recallCount)
+	for _, r := range ranked {
+		if r.sim < cut || len(out) == recallCount {
+			break
+		}
+		out = append(out, r.m)
 	}
 	return out
+}
+
+// median is the typical similarity in a sorted-descending ranking: the
+// index's own baseline for "unrelated".
+func median(sorted []scored) float64 {
+	n := len(sorted)
+	if n%2 == 1 {
+		return sorted[n/2].sim
+	}
+	return (sorted[n/2-1].sim + sorted[n/2].sim) / 2
 }
 
 // recallContext renders recalled memories for the system prompt. Kept
@@ -211,7 +270,10 @@ func (g *Ghost) recallContext(mems []memory) string {
 	var b strings.Builder
 	b.WriteString("\n\nThings this reminds you of (from further back):\n")
 	for _, m := range mems {
-		fmt.Fprintf(&b, "- [%s] %s\n", m.Time.Format("Jan 2"), m.Text)
+		// Continuation lines are indented so a multi-line exchange still
+		// reads as one item of the list.
+		fmt.Fprintf(&b, "- [%s] %s\n", m.Time.Format("Jan 2"),
+			strings.ReplaceAll(m.Text, "\n", "\n  "))
 	}
 	return b.String()
 }

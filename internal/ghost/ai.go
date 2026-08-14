@@ -119,8 +119,9 @@ func (g *Ghost) execChat(in proto.Intent) {
 	g.saveHistory(history)
 
 	// The exchange leaves the history window eventually; this is what
-	// outlives it.
-	g.remember("exchange", text+"\n"+full)
+	// outlives it. Labelled, because recall pastes it into a prompt months
+	// later where two bare lines would be ambiguous about who said what.
+	g.remember("exchange", "The user said: "+text+"\nYou answered: "+full)
 
 	g.publish(proto.Event{Type: proto.EventAIReply, Text: full, Tag: tag})
 }
