@@ -29,6 +29,8 @@ func main() {
 		err = cmdRun(os.Args[2:])
 	case "new":
 		err = cmdNew(os.Args[2:])
+	case "dev":
+		err = cmdDev(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -41,6 +43,7 @@ func main() {
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage:
   haunt run [-x N] [-y N] [-record FILE] [-state DIR] <ghost-dir>
+  haunt dev [-x N] [-y N] [-state DIR] <ghost-dir>
   haunt new <name>`)
 }
 
