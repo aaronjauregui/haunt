@@ -6,9 +6,14 @@ import (
 	"path/filepath"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/aaronjauregui/haunt/internal/testenv"
 )
+
+// caretBlinks is the input caret's blink period, mirrored from
+// internal/ghost so the timing here follows it.
+const caretBlinks = 500 * time.Millisecond
 
 // TestTypeAtGhost: right-clicking the sprite opens a line to type at, and
 // the ghost holds the keyboard only while it is open. Whisper is used
@@ -36,12 +41,14 @@ wasm = "brain.wasm"
 	const spriteX, spriteY = 200, 200
 	cmd := exec.Command(bin, "run", "-x", "200", "-y", "200",
 		"-state", filepath.Join(dir, "state"), "-record", record, gDir)
-	cmd.Env = append(c.Env(), "HAUNT_RUNTIME_DIR="+rt)
+	// HAUNT_DEBUG makes wlclient log every surface it creates.
+	cmd.Env = append(c.Env(), "HAUNT_RUNTIME_DIR="+rt, "HAUNT_DEBUG=1")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd.Stderr = os.Stderr
+	stderr := &syncBuffer{}
+	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -62,18 +69,38 @@ wasm = "brain.wasm"
 		t.Fatal(err)
 	}
 
-	// Right-click opens the input line: a balloon appears without the brain
-	// having said anything.
+	// Right-click opens the input line. Assert on the input panel's own
+	// fixed width rather than "a balloon appeared": whisper's boot greeting
+	// is a balloon too, and an earlier version of this test was satisfied
+	// by it while the input line never opened at all.
 	if err := ptr.RightClick(); err != nil {
 		t.Fatal(err)
 	}
-	waitBalloon(t, c, dir, spriteX, spriteY, true)
+	waitLog(t, stderr, "surface create 320x")
+	if !balloonVisible(t, c, dir, spriteX, spriteY) {
+		t.Error("the input line was created but is not on screen")
+	}
 	if data, _ := os.ReadFile(record); len(data) > 0 {
 		// The input line is the driver's, not the brain's: no click event
 		// is fabricated for it.
 		if n := countOccurrences(string(data), `"type":"click"`); n != 0 {
 			t.Errorf("right-click produced %d click events, want 0", n)
 		}
+	}
+
+	// The caret blinks for a while. It must repaint the panel in place: a
+	// surface recreated per blink is what flickering looks like, and
+	// screenshots are too coarse to catch the gap, so count the surfaces.
+	// Sampling for a visible gap here passes even with the bug, which is
+	// why this counts instead.
+	before := countOccurrences(stderr.String(), "surface create")
+	time.Sleep(4 * caretBlinks)
+	created := countOccurrences(stderr.String(), "surface create") - before
+	if created != 0 {
+		t.Errorf("%d surfaces created while the caret blinked; the input line is flickering", created)
+	}
+	if !balloonVisible(t, c, dir, spriteX, spriteY) {
+		t.Error("input panel disappeared while blinking")
 	}
 
 	// The left click still belongs to the ghost.

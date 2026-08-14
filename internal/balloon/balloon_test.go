@@ -1,6 +1,7 @@
 package balloon
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -78,5 +79,34 @@ func TestExplicitNewlines(t *testing.T) {
 	pad := 2 * DefaultTheme().Padding
 	if h3-pad != 3*(h1-pad) {
 		t.Errorf("text block heights: three lines %d, one line %d, want exact 3x", h3-pad, h1-pad)
+	}
+}
+
+// TestRenderInputFixedSize: the input panel must not change size as you
+// type, which is what lets the surface be repainted in place instead of
+// destroyed and recreated — the difference between a steady box and a
+// flickering one.
+func TestRenderInputFixedSize(t *testing.T) {
+	r, err := NewRenderer(DefaultTheme())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := r.RenderInput("", true).Img.Bounds()
+	for _, tc := range []struct {
+		name  string
+		text  string
+		caret bool
+	}{
+		{"empty, caret off", "", false},
+		{"a word", "hello", true},
+		{"a sentence", "hello ghost, what have you been thinking about", false},
+		{"longer than the panel", strings.Repeat("verbose ", 40), true},
+		{"multibyte", "☕☕☕ 日本語 ☕☕☕", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := r.RenderInput(tc.text, tc.caret).Img.Bounds(); got != want {
+				t.Errorf("bounds = %v, want %v", got, want)
+			}
+		})
 	}
 }

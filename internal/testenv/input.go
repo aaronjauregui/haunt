@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/rajveermalviya/go-wayland/wayland/client"
 
@@ -94,8 +95,19 @@ func (p *Pointer) MoveTo(x, y int) error {
 	if err := p.ptr.Frame(); err != nil {
 		return err
 	}
-	return p.roundtrip()
+	if err := p.roundtrip(); err != nil {
+		return err
+	}
+	time.Sleep(settle)
+	return nil
 }
+
+// settle gives the compositor a moment to recompute pointer focus after a
+// warp. A roundtrip only proves the motion was received, not that focus
+// moved with it, and a button sent inside that gap is delivered to nothing
+// — a race no human hand could lose, but one a test wins about half the
+// time.
+const settle = 60 * time.Millisecond
 
 // Press presses the left mouse button.
 func (p *Pointer) Press() error {

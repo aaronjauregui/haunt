@@ -1,11 +1,13 @@
 package ghost
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/aaronjauregui/haunt/internal/proto"
 	"github.com/aaronjauregui/haunt/internal/textinput"
+	"github.com/aaronjauregui/haunt/internal/wlclient"
 )
 
 // Talking to your ghost without a terminal. Clicking the sprite opens a
@@ -134,7 +136,23 @@ func (g *Ghost) drawInput() {
 	if !open || g.blnRend == nil {
 		return
 	}
-	g.showBalloonSprite(g.blnRend.RenderInput(text, caret))
+	sp := g.blnRend.RenderInput(text, caret)
+
+	// Repaint the existing panel rather than swapping surfaces: an input
+	// line redraws on every keystroke and twice a second for the caret, and
+	// destroying the surface each time makes it flicker. RenderInput keeps
+	// a fixed width precisely so this stays possible.
+	g.blnMu.Lock()
+	bln := g.bln
+	g.blnMu.Unlock()
+	if bln != nil {
+		if err := bln.Redraw(sp); err == nil {
+			return
+		} else if !errors.Is(err, wlclient.ErrSizeChanged) {
+			g.opts.Log(fmt.Sprintf("haunt: input: redraw: %v", err))
+		}
+	}
+	g.showBalloonSprite(sp)
 }
 
 // inputOpen reports whether a line is being typed, so balloon updates from

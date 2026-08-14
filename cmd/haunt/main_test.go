@@ -172,6 +172,26 @@ wasm = "brain.wasm"
 
 // waitBalloon polls screenshots for balloon-background pixels in the region
 // right of the sprite.
+// balloonVisible reports whether a balloon panel is on screen right now.
+func balloonVisible(t *testing.T, c *testenv.Compositor, dir string, spriteX, spriteY int) bool {
+	t.Helper()
+	return balloonInShot(shot(t, c, filepath.Join(dir, "balloon-now.png")), spriteX, spriteY)
+}
+
+// balloonInShot looks for the panel's dark navy in the band beside the
+// sprite.
+func balloonInShot(img image.Image, spriteX, spriteY int) bool {
+	for y := spriteY; y < spriteY+160; y++ {
+		for x := spriteX + 160; x < min(spriteX+560, img.Bounds().Max.X); x++ {
+			r, g, b, _ := img.At(x, y).RGBA()
+			if r>>8 < 60 && g>>8 < 60 && b>>8 > 40 && b>>8 < 90 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func waitBalloon(t *testing.T, c *testenv.Compositor, dir string, spriteX, spriteY int, want bool) {
 	t.Helper()
 	// Balloon background from balloon.DefaultTheme(), fully composited over
@@ -180,19 +200,7 @@ func waitBalloon(t *testing.T, c *testenv.Compositor, dir string, spriteX, sprit
 	path := filepath.Join(dir, "balloon-poll.png")
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		found := false
-		img := shot(t, c, path)
-		// Search the band to the right of the sprite.
-		for y := spriteY; y < spriteY+160 && !found; y++ {
-			for x := spriteX + 160; x < min(spriteX+560, img.Bounds().Max.X); x++ {
-				r, g, b, _ := img.At(x, y).RGBA()
-				// Dark navy panel: low red/green, slightly higher blue.
-				if r>>8 < 60 && g>>8 < 60 && b>>8 > 40 && b>>8 < 90 {
-					found = true
-					break
-				}
-			}
-		}
+		found := balloonInShot(shot(t, c, path), spriteX, spriteY)
 		if found == want {
 			return
 		}

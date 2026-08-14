@@ -1,6 +1,7 @@
 package wlclient
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/rajveermalviya/go-wayland/wayland/client"
@@ -73,6 +74,10 @@ func (a *App) CreateSprite(sp *sprite.Sprite, x, y int32) (*SpriteSurface, error
 // any goroutine while the dispatch loop runs.
 func (a *App) CreateSpriteOpts(sp *sprite.Sprite, x, y int32, opts SurfaceOptions) (*SpriteSurface, error) {
 	w, h := sp.Size()
+	// Logged because surface churn is a bug with a look: content that
+	// animates by recreating its surface flickers, and counting these is
+	// how a test tells the difference.
+	a.logEvent("surface create %dx%d at (%d,%d)", w, h, x, y)
 	s := &SpriteSurface{X: x, Y: y, W: int32(w), H: int32(h), app: a, opts: opts, src: sp}
 
 	a.mu.Lock()
@@ -253,4 +258,39 @@ func (s *SpriteSurface) Destroy() error {
 		s.shmData = nil
 	}
 	return nil
+}
+
+// ErrSizeChanged says a redraw cannot happen in place because the new
+// content is a different size; the caller must recreate the surface.
+var ErrSizeChanged = errors.New("sprite size differs from the surface")
+
+// Redraw replaces a surface's pixels in place, for content that changes
+// without changing size: a blinking caret, a line of text as it is typed.
+// Destroying and recreating a layer surface per frame is what makes a
+// balloon flicker, so anything animating should come through here.
+//
+// The pixels are written into the buffer the compositor already has rather
+// than into a fresh one. For a small text panel that is worth the sliver of
+// a frame in which the compositor could read a half-written buffer; the
+// principled fix, if it ever shows, is a second buffer swapped on
+// wl_buffer.release.
+func (s *SpriteSurface) Redraw(sp *sprite.Sprite) error {
+	s.app.mu.Lock()
+	defer s.app.mu.Unlock()
+	if s.destroyed {
+		return nil
+	}
+	w, h := sp.Size()
+	if int32(w) != s.W || int32(h) != s.H || s.shmData == nil || s.buffer == nil {
+		return ErrSizeChanged
+	}
+	sp.WriteBGRA(s.shmData)
+	s.src = sp
+	if err := s.wlSurface.Attach(s.buffer, 0, 0); err != nil {
+		return err
+	}
+	if err := s.wlSurface.Damage(0, 0, int32(w), int32(h)); err != nil {
+		return err
+	}
+	return s.wlSurface.Commit()
 }
