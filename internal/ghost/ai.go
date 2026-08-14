@@ -47,7 +47,7 @@ const historyKey = "_haunt/chat_history"
 // self-contained: persona prompt plus the given text, with neither the
 // conversation nor the journal in context, so the same question tends to
 // get the same answer no matter what has been said around it.
-func (g *Ghost) execChat(in proto.Intent) {
+func (g *Ghost) execChat(in proto.Intent, userDriven bool) {
 	text, tag, silent := in.Text, in.Tag, in.Silent
 	if !g.capabilityActive("llm") {
 		g.publishAIError("llm capability not granted", tag)
@@ -101,7 +101,7 @@ func (g *Ghost) execChat(in proto.Intent) {
 		return
 	}
 	if silent {
-		g.publish(proto.Event{Type: proto.EventAIReply, Text: full, Tag: tag})
+		g.publishAIResult(proto.Event{Type: proto.EventAIReply, Text: full, Tag: tag}, userDriven)
 		return
 	}
 	g.showBalloon(full)
@@ -123,14 +123,14 @@ func (g *Ghost) execChat(in proto.Intent) {
 	// later where two bare lines would be ambiguous about who said what.
 	g.remember("exchange", "The user said: "+text+"\nYou answered: "+full)
 
-	g.publish(proto.Event{Type: proto.EventAIReply, Text: full, Tag: tag})
+	g.publishAIResult(proto.Event{Type: proto.EventAIReply, Text: full, Tag: tag}, userDriven)
 }
 
 // execImagine handles an imagine intent: generate (or reuse from cache) an
 // image and show it as a balloon. A fresh request skips the cache lookup and
 // lands under its own key, so "draw that again" yields a new picture instead
 // of the one already on disk.
-func (g *Ghost) execImagine(in proto.Intent) {
+func (g *Ghost) execImagine(in proto.Intent, userDriven bool) {
 	prompt, tag := in.Text, in.Tag
 	if !g.capabilityActive("imagine") {
 		g.publishAIError("imagine capability not granted", tag)
@@ -171,7 +171,18 @@ func (g *Ghost) execImagine(in proto.Intent) {
 		return
 	}
 	g.showImageBalloon(img)
-	g.publish(proto.Event{Type: proto.EventAIImage, Name: cachePath, Tag: tag})
+	g.publishAIResult(proto.Event{Type: proto.EventAIImage, Name: cachePath, Tag: tag}, userDriven)
+}
+
+// publishAIResult delivers an AI result, extending the response window when
+// a person is waiting on it. That is what keeps a chained request — the
+// prompt rewrite that becomes an imagine — free of the curiosity budget
+// however long the model took to answer.
+func (g *Ghost) publishAIResult(e proto.Event, userDriven bool) {
+	if userDriven {
+		g.markPrompted()
+	}
+	g.publish(e)
 }
 
 func (g *Ghost) publishAIError(msg, tag string) {

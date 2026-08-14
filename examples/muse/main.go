@@ -59,6 +59,14 @@ func main() {
 			if e.Name == "hush" {
 				emit.HideSay()
 			}
+		case "idle":
+			// Initiative: nobody asked. The driver decides whether Muse may
+			// actually spend one of its unprompted actions on this — the
+			// brain just tries. The stage direction goes through Chat (not
+			// Ask) so the reply reaches the balloon; recall gives it
+			// something to be about.
+			emit.Chat("(Nobody has spoken to you in a while. Say one short thing " +
+				"to them, unprompted — draw on what you remember about them.)")
 		case "message":
 			text := strings.TrimSpace(e.Text)
 			if text == "draw again" || text == "again" {

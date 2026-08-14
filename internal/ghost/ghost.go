@@ -83,6 +83,13 @@ type Ghost struct {
 	aiSvc    *ai.Service
 	cacheDir string
 	aiMu     sync.Mutex // one AI request at a time per ghost
+
+	// Initiative accounting (see curiosity.go).
+	curiosity       *curiosity
+	initMu          sync.Mutex
+	promptedUntil   time.Time
+	initiativeUntil time.Time
+
 	// autoGranted tracks which dev-mode grants have been logged, so the
 	// notice appears once per capability rather than once per check.
 	autoGranted sync.Map
@@ -177,6 +184,14 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		return err
 	}
 
+	// Initiative allowance. Persisted, so restarting the ghost is not a way
+	// to refill it.
+	actionsPerDay, err := loadCuriosityConfig()
+	if err != nil {
+		return err
+	}
+	g.curiosity = newCuriosity(actionsPerDay, g.store, opts.Log)
+
 	// AI services (backends are user-configured; absent config just means
 	// the capabilities error out when used).
 	aiCfg, err := ai.LoadConfig()
@@ -236,7 +251,10 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	// Requires the "message" capability: declared in the manifest and
 	// granted by the user (dev runs auto-grant declared capabilities).
 	if g.capabilityActive("message") {
-		ctl, err := control.Listen(m.Ghost.Name, g.bus.Publish, opts.Log)
+		// Through g.publishExternal, not the bus directly: `haunt say` is a
+		// person addressing the ghost, and the reply must not be charged to
+		// the ghost's own initiative.
+		ctl, err := control.Listen(m.Ghost.Name, g.publishExternal, opts.Log)
 		if err != nil {
 			return err
 		}
@@ -361,9 +379,28 @@ func (g *Ghost) capabilityActive(cap string) bool {
 }
 
 func (g *Ghost) publish(e proto.Event) {
-	if err := g.bus.Publish(e); err != nil {
+	if err := g.publishExternal(e); err != nil {
 		g.opts.Log(fmt.Sprintf("haunt: publish %s: %v", e.Type, err))
 	}
+}
+
+// publishExternal is publish for callers that want the error — notably the
+// control socket, which reports failures back to `haunt say`. Every event
+// enters the bus through here, so causality is recorded in one place.
+func (g *Ghost) publishExternal(e proto.Event) error {
+	// Causality for the curiosity budget: the user acting opens the window
+	// in which whatever the ghost does next is a response rather than an
+	// interruption. The bit stays driver-side — brains never see it and so
+	// cannot claim to have been provoked.
+	switch {
+	case e.Type == proto.EventBoot:
+		g.markPromptedFor(bootWindow)
+	case promptedEvent(e):
+		g.markPrompted()
+	case e.Type == proto.EventIdle:
+		g.endResponding()
+	}
+	return g.bus.Publish(e)
 }
 
 // execIntent runs on the brain's intent-reader goroutine. Wayland calls are
@@ -372,6 +409,11 @@ func (g *Ghost) publish(e proto.Event) {
 func (g *Ghost) execIntent(in proto.Intent) {
 	switch in.Type {
 	case proto.IntentSay:
+		// Speaking up unasked is the interruption the budget exists to
+		// ration, whether the words came from a model or a table.
+		if !g.allowInitiative("say") {
+			return
+		}
 		g.showBalloon(in.Text)
 	case proto.IntentHideSay:
 		g.hideBalloon()
@@ -400,18 +442,31 @@ func (g *Ghost) execIntent(in proto.Intent) {
 	case proto.IntentLog:
 		g.opts.Log("ghost: " + in.Text)
 	case proto.IntentChat:
+		// Gate before the goroutine: the answer to "was this provoked?"
+		// belongs to the moment the intent arrived, not to whenever a
+		// backend gets around to it.
+		if !g.allowInitiative("chat") {
+			return
+		}
+		// Whether a person is waiting travels with the request, so a slow
+		// backend cannot turn a reply into an interruption on arrival.
+		userDriven := g.respondingToUser()
 		// Own goroutine: a slow backend must not block other intents.
 		// aiMu keeps one request in flight per ghost.
 		go func() {
 			g.aiMu.Lock()
 			defer g.aiMu.Unlock()
-			g.execChat(in)
+			g.execChat(in, userDriven)
 		}()
 	case proto.IntentImagine:
+		if !g.allowInitiative("imagine") {
+			return
+		}
+		userDriven := g.respondingToUser()
 		go func() {
 			g.aiMu.Lock()
 			defer g.aiMu.Unlock()
-			g.execImagine(in)
+			g.execImagine(in, userDriven)
 		}()
 	case proto.IntentNote:
 		g.execNote(in.Text)
