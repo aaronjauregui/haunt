@@ -8,6 +8,7 @@ require golang.org/x/sys v0.47.0
 
 require (
 	github.com/BurntSushi/toml v1.6.0
+	github.com/robfig/cron/v3 v3.0.1
 	github.com/tetratelabs/wazero v1.12.0
 	golang.org/x/image v0.45.0
 	modernc.org/sqlite v1.56.0

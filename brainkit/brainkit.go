@@ -72,6 +72,12 @@ func (em *Emitter) Remember(key, value string) {
 // Log writes a debug message via the driver.
 func (em *Emitter) Log(text string) { em.emit(Intent{Type: proto.IntentLog, Text: text}) }
 
+// Tell sends text to another running ghost (requires the tell capability).
+// The receiving ghost sees a message event with From set to this ghost.
+func (em *Emitter) Tell(ghostName, text string) {
+	em.emit(Intent{Type: proto.IntentTell, Name: ghostName, Text: text})
+}
+
 // Run reads events from stdin until EOF, dispatching each to b. Call it from
 // main; it returns when the driver closes the event stream.
 func Run(b Brain) {

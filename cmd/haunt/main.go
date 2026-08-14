@@ -46,6 +46,10 @@ func main() {
 		err = cmdRm(os.Args[2:])
 	case "switch":
 		err = cmdSwitch(os.Args[2:])
+	case "shush":
+		err = cmdShush(os.Args[2:])
+	case "unshush":
+		err = cmdUnshush(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -64,7 +68,8 @@ func usage() {
   haunt keygen
   haunt pack [-o FILE] <ghost-dir>
   haunt install [-yes] <file.haunt>
-  haunt ls | rm <name> | switch <name>`)
+  haunt ls | rm <name> | switch <name>
+  haunt shush [duration] | unshush`)
 }
 
 func cmdRun(args []string) error {

@@ -12,11 +12,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/robfig/cron/v3"
+
 	"github.com/aaronjauregui/haunt/internal/balloon"
 	"github.com/aaronjauregui/haunt/internal/brain"
 	"github.com/aaronjauregui/haunt/internal/bus"
 	"github.com/aaronjauregui/haunt/internal/control"
 	"github.com/aaronjauregui/haunt/internal/proto"
+	"github.com/aaronjauregui/haunt/internal/quiet"
 	"github.com/aaronjauregui/haunt/internal/sprite"
 	"github.com/aaronjauregui/haunt/internal/store"
 	"github.com/aaronjauregui/haunt/internal/wlclient"
@@ -68,8 +71,9 @@ type Ghost struct {
 	bln   *wlclient.SpriteSurface
 
 	bus   *bus.Bus
-	brain *brain.Host
+	brain brain.Runner
 	store Store
+	quiet *quiet.Checker
 
 	timersMu sync.Mutex
 	timers   map[string]*time.Timer
@@ -156,13 +160,28 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		g.bus.SetRecorder(g.recordF)
 	}
 
-	// Brain.
-	wasmBytes, err := os.ReadFile(filepath.Join(dir, m.Brain.Wasm))
-	if err != nil {
+	// Quiet hours (config windows + manual shush).
+	if g.quiet, err = quiet.Load(); err != nil {
 		return err
 	}
-	if g.brain, err = brain.Start(ctx, wasmBytes, g.execIntent, brain.Options{}); err != nil {
-		return err
+
+	// Brain: sandboxed WASM by default; a native process only when the
+	// manifest declares (and the user granted) the native-brain capability.
+	if len(m.Brain.Command) > 0 {
+		if !g.capabilityActive("native-brain") {
+			return fmt.Errorf("ghost %q wants a native brain but the native-brain capability is not granted", m.Ghost.Name)
+		}
+		if g.brain, err = brain.StartProcess(dir, m.Brain.Command, g.execIntent, brain.Options{}); err != nil {
+			return err
+		}
+	} else {
+		wasmBytes, err := os.ReadFile(filepath.Join(dir, m.Brain.Wasm))
+		if err != nil {
+			return err
+		}
+		if g.brain, err = brain.Start(ctx, wasmBytes, g.execIntent, brain.Options{}); err != nil {
+			return err
+		}
 	}
 
 	// Input -> bus.
@@ -198,6 +217,21 @@ func Run(ctx context.Context, dir string, opts Options) error {
 			return err
 		}
 		defer ctl.Close()
+	}
+
+	// Scheduled triggers from the manifest.
+	if len(m.Triggers) > 0 {
+		sched := cron.New()
+		for _, tr := range m.Triggers {
+			name := tr.Name
+			if _, err := sched.AddFunc(tr.Cron, func() {
+				g.publish(proto.Event{Type: proto.EventCron, Name: name})
+			}); err != nil {
+				return fmt.Errorf("trigger %q: %w", name, err)
+			}
+		}
+		sched.Start()
+		defer sched.Stop()
 	}
 
 	// Boot with the persisted KV snapshot.
@@ -311,6 +345,23 @@ func (g *Ghost) execIntent(in proto.Intent) {
 		}
 	case proto.IntentLog:
 		g.opts.Log("ghost: " + in.Text)
+	case proto.IntentTell:
+		if !g.capabilityActive("tell") {
+			g.opts.Log(fmt.Sprintf("haunt: tell intent dropped: capability not granted"))
+			return
+		}
+		if in.Name == g.manifest.Ghost.Name {
+			g.opts.Log("haunt: tell intent dropped: ghost addressed itself")
+			return
+		}
+		err := control.Send(in.Name, proto.Event{
+			Type: proto.EventMessage,
+			Text: in.Text,
+			From: g.manifest.Ghost.Name,
+		})
+		if err != nil {
+			g.opts.Log(fmt.Sprintf("haunt: tell %s: %v", in.Name, err))
+		}
 	}
 }
 
@@ -339,8 +390,13 @@ func (g *Ghost) balloonPos() (int32, int32) {
 	return x + w + 12, y
 }
 
-// showBalloon renders text and places it beside the sprite.
+// showBalloon renders text and places it beside the sprite. During quiet
+// hours it drops the balloon; the driver enforces this, not the ghost.
 func (g *Ghost) showBalloon(text string) {
+	if muted, why := g.quiet.Active(); muted {
+		g.opts.Log(fmt.Sprintf("haunt: balloon suppressed (%s)", why))
+		return
+	}
 	g.hideBalloon()
 	sp := g.blnRend.Render(text)
 	x, y := g.balloonPos()

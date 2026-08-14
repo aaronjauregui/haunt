@@ -32,6 +32,11 @@ const (
 
 	// External.
 	EventMessage EventType = "message" // inbound text (chat, CLI, socket)
+
+	// System.
+	EventCron   EventType = "cron"   // a manifest-scheduled trigger fired
+	EventIdle   EventType = "idle"   // user went idle
+	EventActive EventType = "active" // user came back
 )
 
 // Event is one occurrence delivered to a brain.
@@ -49,6 +54,8 @@ type Event struct {
 	Name string `json:"name,omitempty"`
 	// Text carries message payloads for EventMessage.
 	Text string `json:"text,omitempty"`
+	// From identifies the sending ghost for cross-ghost messages.
+	From string `json:"from,omitempty"`
 	// KV is the ghost's persisted state, included only with EventBoot so
 	// brains start with their memory in hand.
 	KV map[string]string `json:"kv,omitempty"`
@@ -65,6 +72,7 @@ const (
 	IntentCancelTimer IntentType = "cancel_timer"
 	IntentKVSet       IntentType = "kv_set" // persist a value
 	IntentLog         IntentType = "log"    // debug output
+	IntentTell        IntentType = "tell"   // message another ghost
 )
 
 // Intent is one request emitted by a brain. The driver validates and
@@ -120,6 +128,13 @@ func (i *Intent) Validate() error {
 	case IntentKVSet:
 		if i.Name == "" {
 			return fmt.Errorf("kv_set intent with empty key")
+		}
+	case IntentTell:
+		if i.Name == "" {
+			return fmt.Errorf("tell intent with empty target ghost")
+		}
+		if i.Text == "" {
+			return fmt.Errorf("tell intent with empty text")
 		}
 	case IntentHideSay, IntentMove, IntentLog:
 	default:
