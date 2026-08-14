@@ -21,6 +21,7 @@ demo:
 
 # The AI ghost: chats via your configured LLM and draws via your image
 # backend ([ai.llm]/[ai.image] in ~/.config/haunt/config.toml).
+# IDLE_MS=10000 shortens the wait before it speaks unprompted.
 demo-ai:
 	GHOST=muse ./scripts/demo.sh
 

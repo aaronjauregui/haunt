@@ -4,11 +4,18 @@
 #
 # WLR_BACKENDS defaults to "wayland" (nested window); override with
 # WLR_BACKENDS=headless for a smoke test without any visible window.
+#
+# IDLE_MS sets how long the nested compositor must see no input before the
+# ghost is told the user has gone idle — which is when it may speak first.
+# The driver's own default is two minutes; IDLE_MS=10000 makes initiative
+# watchable without waiting around. Note the idleness is the *nested*
+# compositor's: moving the pointer across that window resets it.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
 backend="${WLR_BACKENDS:-wayland}"
+idle_ms="${IDLE_MS:-}"
 workdir="$(mktemp -d /tmp/haunt-demo-XXXXXX)"
 # Kill child processes (not the whole group: that would kill this script
 # before the rm runs), then remove the workdir.
@@ -79,6 +86,11 @@ echo ">> from another terminal, talk to it with:  go run ./cmd/haunt say \"hello
 if [ "$ghost" = muse ]; then
     echo ">> muse extras:  say \"draw a whale\"  |  say \"draw again\"  |  say \"remember I like tea\"  |  haunt journal -state ~/.local/share/haunt/ghosts/muse"
 fi
-WAYLAND_DISPLAY="$display" "$workdir/haunt" run -x 200 -y 150 "$workdir/$ghost" &
+run_args=(run -x 200 -y 150)
+if [ -n "$idle_ms" ]; then
+    echo ">> idle threshold: ${idle_ms}ms (leave the window alone to see it speak first)"
+    run_args+=(-idle-ms "$idle_ms")
+fi
+WAYLAND_DISPLAY="$display" "$workdir/haunt" "${run_args[@]}" "$workdir/$ghost" &
 
 wait "$sway_pid"
