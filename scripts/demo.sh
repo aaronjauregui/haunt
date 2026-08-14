@@ -22,8 +22,18 @@ cat > "$workdir/sway.cfg" <<'EOF'
 output * bg #24283b solid_color
 EOF
 
-echo ">> building haunt-poc"
-go build -o "$workdir/haunt-poc" ./cmd/haunt-poc
+echo ">> building haunt and the whisper example ghost"
+go build -o "$workdir/haunt" ./cmd/haunt
+mkdir -p "$workdir/whisper"
+GOOS=wasip1 GOARCH=wasm go build -o "$workdir/whisper/brain.wasm" ./examples/whisper
+cat > "$workdir/whisper/ghost.toml" <<'EOF'
+[ghost]
+name = "whisper"
+version = "0.1.0"
+
+[brain]
+wasm = "brain.wasm"
+EOF
 
 echo ">> starting nested sway (backend: $backend)"
 WLR_BACKENDS="$backend" WLR_LIBINPUT_NO_DEVICES=1 SWAYSOCK="$workdir/sway.sock" \
@@ -39,7 +49,7 @@ for _ in $(seq 1 100); do
 done
 [ -n "$display" ] || { echo "sway never reported a display"; tail "$workdir/sway.log"; exit 1; }
 
-echo ">> nested sway is up on $display; spawning ghost (drag it with the mouse)"
-WAYLAND_DISPLAY="$display" "$workdir/haunt-poc" -x 200 -y 150 &
+echo ">> nested sway is up on $display; spawning whisper (click it, drag it)"
+WAYLAND_DISPLAY="$display" "$workdir/haunt" run -x 200 -y 150 "$workdir/whisper" &
 
 wait "$sway_pid"
