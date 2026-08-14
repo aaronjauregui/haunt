@@ -34,13 +34,23 @@ type LLMConfig struct {
 	APIKeyEnv string `toml:"api_key_env"`
 }
 
-// ImageConfig points at an OpenAI-compatible image generation endpoint.
+// ImageConfig points at an image generation backend.
 type ImageConfig struct {
-	BaseURL   string `toml:"base_url"`
+	// Backend selects the protocol: "openai" (default; any OpenAI-compatible
+	// /images/generations endpoint) or "comfyui" (workflow-graph API).
+	Backend string `toml:"backend"`
+	BaseURL string `toml:"base_url"`
+	// Model is the model name (openai) or checkpoint filename (comfyui).
 	Model     string `toml:"model"`
 	APIKeyEnv string `toml:"api_key_env"`
 	// Size like "512x512"; backend-defined default when empty.
 	Size string `toml:"size"`
+
+	// ComfyUI tuning; sensible defaults when zero.
+	Steps    int     `toml:"steps"`
+	CFG      float64 `toml:"cfg"`
+	Sampler  string  `toml:"sampler"`
+	Negative string  `toml:"negative"`
 }
 
 // BudgetConfig caps how fast ghosts may burn backend calls. Zero values get
@@ -141,7 +151,9 @@ func (s *Service) Chat(ctx context.Context, msgs []Message, onDelta func(string)
 // ImageCacheKey identifies the image backend configuration for
 // content-addressed caching: same key + prompt = reusable result.
 func (s *Service) ImageCacheKey() string {
-	return s.cfg.Image.BaseURL + "|" + s.cfg.Image.Model + "|" + s.cfg.Image.Size
+	i := &s.cfg.Image
+	return fmt.Sprintf("%s|%s|%s|%s|%d|%g|%s|%s",
+		i.Backend, i.BaseURL, i.Model, i.Size, i.Steps, i.CFG, i.Sampler, i.Negative)
 }
 
 // GenerateImage produces PNG bytes for a prompt.
@@ -152,5 +164,12 @@ func (s *Service) GenerateImage(ctx context.Context, prompt string) ([]byte, err
 	if err := s.imageBudget.spend(); err != nil {
 		return nil, fmt.Errorf("image budget: %w", err)
 	}
-	return generateImage(ctx, &s.cfg.Image, prompt)
+	switch s.cfg.Image.Backend {
+	case "", "openai":
+		return generateImage(ctx, &s.cfg.Image, prompt)
+	case "comfyui":
+		return comfyGenerate(ctx, &s.cfg.Image, prompt)
+	default:
+		return nil, fmt.Errorf("unknown image backend %q (openai or comfyui)", s.cfg.Image.Backend)
+	}
 }
