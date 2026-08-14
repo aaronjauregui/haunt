@@ -1,4 +1,6 @@
 github.com/rajveermalviya/go-wayland/wayland v0.0.0-20230130181619-0ad78d1310b2 h1:tRhbehjSCwQSZL7A2AoZlKrDYhZzaPIAcpnhfaUc0Tw=
 github.com/rajveermalviya/go-wayland/wayland v0.0.0-20230130181619-0ad78d1310b2/go.mod h1:PXhW/GoWcMBeiZ39ZdgoMs/xduJEEUE+kxUBB2Kwd+M=
-golang.org/x/sys v0.0.0-20211117180635-dee7805ff2e1 h1:kwrAHlwJ0DUBZwQ238v+Uod/3eZ8B2K5rYsUHBQvzmI=
-golang.org/x/sys v0.0.0-20211117180635-dee7805ff2e1/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+github.com/tetratelabs/wazero v1.12.0 h1:DuWcpNu/FzgEXgGBDp8J1Spc+CWOvvtvVyjKlaZopYU=
+github.com/tetratelabs/wazero v1.12.0/go.mod h1:LvKtzl2RqO4gyF27BiXU+nKAjcV8f38U+kP/q2vgxh0=
+golang.org/x/sys v0.44.0 h1:ildZl3J4uzeKP07r2F++Op7E9B29JRUy+a27EibtBTQ=
+golang.org/x/sys v0.44.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
