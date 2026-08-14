@@ -30,6 +30,7 @@ cat > "$workdir/whisper/ghost.toml" <<'EOF'
 [ghost]
 name = "whisper"
 version = "0.1.0"
+capabilities = ["message"]
 
 [brain]
 wasm = "brain.wasm"

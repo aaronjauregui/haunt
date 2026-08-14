@@ -28,6 +28,8 @@ func cmdNew(args []string) error {
 name = %q
 version = "0.1.0"
 author = ""
+# Capabilities the ghost asks the user to grant:
+capabilities = ["message"]
 
 [shell]
 # sprite = "shell.png"   # PNG with transparency; omit for the built-in blob

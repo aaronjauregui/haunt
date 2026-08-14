@@ -14,6 +14,7 @@ import (
 	"syscall"
 
 	"github.com/aaronjauregui/haunt/internal/ghost"
+	"github.com/aaronjauregui/haunt/internal/library"
 )
 
 func main() {
@@ -33,6 +34,18 @@ func main() {
 		err = cmdDev(os.Args[2:])
 	case "say":
 		err = cmdSay(os.Args[2:])
+	case "keygen":
+		err = cmdKeygen(os.Args[2:])
+	case "pack":
+		err = cmdPack(os.Args[2:])
+	case "install":
+		err = cmdInstall(os.Args[2:])
+	case "ls":
+		err = cmdLs(os.Args[2:])
+	case "rm":
+		err = cmdRm(os.Args[2:])
+	case "switch":
+		err = cmdSwitch(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -44,10 +57,14 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage:
-  haunt run [-x N] [-y N] [-record FILE] [-state DIR] <ghost-dir>
+  haunt run [-x N] [-y N] [-record FILE] [-state DIR] [ghost-dir|name]
   haunt dev [-x N] [-y N] [-state DIR] <ghost-dir>
   haunt say [-ghost NAME] <text>
-  haunt new <name>`)
+  haunt new <name>
+  haunt keygen
+  haunt pack [-o FILE] <ghost-dir>
+  haunt install [-yes] <file.haunt>
+  haunt ls | rm <name> | switch <name>`)
 }
 
 func cmdRun(args []string) error {
@@ -57,19 +74,41 @@ func cmdRun(args []string) error {
 	record := fs.String("record", "", "record the event session to FILE (JSONL)")
 	state := fs.String("state", "", "override state directory")
 	fs.Parse(args)
-	if fs.NArg() != 1 {
-		return fmt.Errorf("run: exactly one ghost directory expected")
+	if fs.NArg() > 1 {
+		return fmt.Errorf("run: at most one ghost directory or name expected")
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	return ghost.Run(ctx, fs.Arg(0), ghost.Options{
+	opts := ghost.Options{
 		X: *x, Y: *y,
 		RecordTo: *record,
 		StateDir: *state,
 		Log:      func(s string) { fmt.Fprintln(os.Stderr, s) },
 		// Machine-readable readiness marker for scripts and tests.
 		OnReady: func() { fmt.Println("READY") },
-	})
+	}
+
+	// The target is a directory (dev mode: declared capabilities granted),
+	// or an installed ghost name / the current ghost (grants apply).
+	target := fs.Arg(0)
+	dir := target
+	if info, err := os.Stat(target); target == "" || err != nil || !info.IsDir() {
+		name := target
+		if name == "" {
+			if name, err = library.Current(); err != nil || name == "" {
+				return fmt.Errorf("no ghost selected; haunt install one or pass a directory")
+			}
+		}
+		if dir, err = library.PkgDir(name); err != nil {
+			return err
+		}
+		grants, err := library.LoadGrants(name)
+		if err != nil {
+			return err
+		}
+		opts.Granted = grants.Granted
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return ghost.Run(ctx, dir, opts)
 }

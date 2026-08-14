@@ -17,10 +17,19 @@ type Manifest struct {
 	Brain BrainSection `toml:"brain"`
 }
 
+// KnownCapabilities are the capabilities a manifest may request. Unknown
+// names are rejected at load so typos fail early and old drivers refuse
+// packages built for newer ones.
+var KnownCapabilities = map[string]string{
+	"message": "receive text messages from outside (haunt say, scripts)",
+}
+
 type GhostSection struct {
 	Name    string `toml:"name"`
 	Version string `toml:"version"`
 	Author  string `toml:"author"`
+	// Capabilities the ghost requests; each needs a user grant to activate.
+	Capabilities []string `toml:"capabilities"`
 }
 
 type ShellSection struct {
@@ -50,6 +59,11 @@ func LoadManifest(dir string) (*Manifest, error) {
 	}
 	if m.Brain.Wasm == "" {
 		return nil, fmt.Errorf("%s: brain.wasm is required", path)
+	}
+	for _, c := range m.Ghost.Capabilities {
+		if _, ok := KnownCapabilities[c]; !ok {
+			return nil, fmt.Errorf("%s: unknown capability %q", path, c)
+		}
 	}
 	for _, rel := range []string{m.Brain.Wasm, m.Shell.Sprite} {
 		if rel == "" {

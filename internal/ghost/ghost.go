@@ -49,6 +49,10 @@ type Options struct {
 	Log func(string)
 	// OnReady is called once the ghost is on screen and booted.
 	OnReady func()
+	// Granted reports whether the user granted a capability the manifest
+	// declares. Nil means dev mode: everything declared is granted, with a
+	// log line. Capabilities not in the manifest are never active.
+	Granted func(cap string) bool
 }
 
 // Ghost is a running instance.
@@ -186,11 +190,15 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	}()
 
 	// Control socket: external programs push events in (haunt say, hooks).
-	ctl, err := control.Listen(m.Ghost.Name, g.bus.Publish, opts.Log)
-	if err != nil {
-		return err
+	// Requires the "message" capability: declared in the manifest and
+	// granted by the user (dev runs auto-grant declared capabilities).
+	if g.capabilityActive("message") {
+		ctl, err := control.Listen(m.Ghost.Name, g.bus.Publish, opts.Log)
+		if err != nil {
+			return err
+		}
+		defer ctl.Close()
 	}
-	defer ctl.Close()
 
 	// Boot with the persisted KV snapshot.
 	kv, err := g.store.All()
@@ -246,6 +254,26 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		runErr = fmt.Errorf("brain: %w", err)
 	}
 	return runErr
+}
+
+// capabilityActive reports whether a capability is both declared by the
+// manifest and granted by the user.
+func (g *Ghost) capabilityActive(cap string) bool {
+	declared := false
+	for _, c := range g.manifest.Ghost.Capabilities {
+		if c == cap {
+			declared = true
+			break
+		}
+	}
+	if !declared {
+		return false
+	}
+	if g.opts.Granted == nil {
+		g.opts.Log(fmt.Sprintf("haunt: dev mode, auto-granting capability %q", cap))
+		return true
+	}
+	return g.opts.Granted(cap)
 }
 
 func (g *Ghost) publish(e proto.Event) {
