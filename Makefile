@@ -1,6 +1,6 @@
 GO ?= go
 
-.PHONY: build test vet fmt demo demo-headless clean
+.PHONY: build test vet fmt demo demo-ai demo-headless clean
 
 build:
 	$(GO) build ./...
@@ -14,10 +14,15 @@ vet:
 fmt:
 	gofmt -l -w .
 
-# Opens a nested sway window in your current session with the PoC ghost
-# inside it. Close the window (or Ctrl-C) to stop.
+# Opens a nested sway window in your current session with the whisper
+# ghost inside it. Close the window (or Ctrl-C) to stop.
 demo:
 	./scripts/demo.sh
+
+# The AI ghost: chats via your configured LLM and draws via your image
+# backend ([ai.llm]/[ai.image] in ~/.config/haunt/config.toml).
+demo-ai:
+	GHOST=muse ./scripts/demo.sh
 
 # Same, but headless: no visible window, used to smoke-test the demo plumbing.
 demo-headless:

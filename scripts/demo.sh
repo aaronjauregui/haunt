@@ -22,11 +22,16 @@ cat > "$workdir/sway.cfg" <<'EOF'
 output * bg #24283b solid_color
 EOF
 
-echo ">> building haunt and the whisper example ghost"
+# GHOST=whisper (default) or muse. Muse chats via your configured LLM
+# ([ai.llm] in ~/.config/haunt/config.toml) and draws via [ai.image].
+ghost="${GHOST:-whisper}"
+echo ">> building haunt and the $ghost example ghost"
 go build -o "$workdir/haunt" ./cmd/haunt
-mkdir -p "$workdir/whisper"
-GOOS=wasip1 GOARCH=wasm go build -o "$workdir/whisper/brain.wasm" ./examples/whisper
-cat > "$workdir/whisper/ghost.toml" <<'EOF'
+mkdir -p "$workdir/$ghost"
+GOOS=wasip1 GOARCH=wasm go build -o "$workdir/$ghost/brain.wasm" "./examples/$ghost"
+case "$ghost" in
+whisper)
+    cat > "$workdir/whisper/ghost.toml" <<'EOF'
 [ghost]
 name = "whisper"
 version = "0.1.0"
@@ -35,6 +40,25 @@ capabilities = ["message"]
 [brain]
 wasm = "brain.wasm"
 EOF
+    ;;
+muse)
+    cat > "$workdir/muse/ghost.toml" <<'EOF'
+[ghost]
+name = "muse"
+version = "0.1.0"
+capabilities = ["message", "llm", "imagine"]
+
+[persona]
+system = "You are Muse, a wry little desktop spirit haunting the user's screen. Reply in one or two short sentences, with dry wit. You may be shown your own private journal; let it color your mood and callbacks."
+
+[brain]
+wasm = "brain.wasm"
+EOF
+    ;;
+*)
+    echo "unknown GHOST=$ghost (use whisper or muse)"; exit 1
+    ;;
+esac
 
 echo ">> starting nested sway (backend: $backend)"
 WLR_BACKENDS="$backend" WLR_LIBINPUT_NO_DEVICES=1 SWAYSOCK="$workdir/sway.sock" \
@@ -50,8 +74,11 @@ for _ in $(seq 1 100); do
 done
 [ -n "$display" ] || { echo "sway never reported a display"; tail "$workdir/sway.log"; exit 1; }
 
-echo ">> nested sway is up on $display; spawning whisper (click it, drag it)"
+echo ">> nested sway is up on $display; spawning $ghost (click it, drag it)"
 echo ">> from another terminal, talk to it with:  go run ./cmd/haunt say \"hello\""
-WAYLAND_DISPLAY="$display" "$workdir/haunt" run -x 200 -y 150 "$workdir/whisper" &
+if [ "$ghost" = muse ]; then
+    echo ">> muse extras:  say \"draw a whale\"  |  say \"remember I like tea\"  |  haunt journal -state ~/.local/share/haunt/ghosts/muse"
+fi
+WAYLAND_DISPLAY="$display" "$workdir/haunt" run -x 200 -y 150 "$workdir/$ghost" &
 
 wait "$sway_pid"
