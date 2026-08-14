@@ -26,6 +26,9 @@ const rewriteInstruction = `Rewrite this picture request as a prompt for an imag
 
 Request: `
 
+// promptKeyPrefix namespaces the remembered rewrites in the ghost's store.
+const promptKeyPrefix = "prompt/"
+
 var (
 	// lastRequest is the user's own words, kept as the fallback prompt if
 	// the rewrite fails.
@@ -33,12 +36,23 @@ var (
 	// lastPrompt is the rewritten prompt actually painted, replayed by
 	// "draw again".
 	lastPrompt string
+	// prompts maps a request to the prompt it was rewritten into. The
+	// rewrite is a sampled LLM answer and so differs every time it runs;
+	// remembering it is what lets asking twice for the same picture hit
+	// the driver's generation cache. It persists via the store, so the
+	// cache survives restarts too.
+	prompts = map[string]string{}
 )
 
 func main() {
 	brainkit.Run(brainkit.Func(func(e brainkit.Event, emit *brainkit.Emitter) {
 		switch e.Type {
 		case "boot":
+			for k, v := range e.KV {
+				if request, ok := strings.CutPrefix(k, promptKeyPrefix); ok {
+					prompts[request] = v
+				}
+			}
 			emit.Say("Muse here. Talk to me with `haunt say`, or say `draw <something>`.")
 			emit.SetTimer("hush", 6000)
 		case "timer":
@@ -59,6 +73,15 @@ func main() {
 			}
 			if request, ok := strings.CutPrefix(text, "draw "); ok {
 				lastRequest = request
+				// Reuse the rewrite from last time, so the same request
+				// paints the same picture from cache instead of paying for
+				// a fresh rewrite and a fresh generation.
+				if prompt, seen := prompts[request]; seen {
+					lastPrompt = prompt
+					emit.Say("Painting…")
+					emit.Imagine(prompt)
+					return
+				}
 				emit.Say("Composing…")
 				emit.Ask(rewriteTag, rewriteInstruction+request)
 				return
@@ -73,6 +96,8 @@ func main() {
 		case "ai_reply":
 			if e.Tag == rewriteTag {
 				lastPrompt = cleanPrompt(e.Text, lastRequest)
+				prompts[lastRequest] = lastPrompt
+				emit.Remember(promptKeyPrefix+lastRequest, lastPrompt)
 				emit.Say("Painting…")
 				emit.Imagine(lastPrompt)
 				return

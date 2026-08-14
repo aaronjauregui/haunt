@@ -43,7 +43,10 @@ const historyKey = "_haunt/chat_history"
 //
 // A silent chat is a brain-internal call — no balloon, no history — used to
 // chain the LLM into other work (rewriting a request into an image prompt,
-// say) without the user seeing the scaffolding.
+// say) without the user seeing the scaffolding. Silent calls are also
+// self-contained: persona prompt plus the given text, with neither the
+// conversation nor the journal in context, so the same question tends to
+// get the same answer no matter what has been said around it.
 func (g *Ghost) execChat(in proto.Intent) {
 	text, tag, silent := in.Text, in.Tag, in.Silent
 	if !g.capabilityActive("llm") {
@@ -55,7 +58,10 @@ func (g *Ghost) execChat(in proto.Intent) {
 		return
 	}
 
-	history := g.loadHistory()
+	var history []ai.Message
+	if !silent {
+		history = g.loadHistory()
+	}
 	msgs := make([]ai.Message, 0, len(history)+2)
 	system := g.manifest.Persona.System
 	if system == "" {
@@ -63,7 +69,10 @@ func (g *Ghost) execChat(in proto.Intent) {
 	}
 	// The journal makes the persona self-modifying: notes the ghost wrote
 	// about past interactions ride along with every request.
-	msgs = append(msgs, ai.Message{Role: "system", Content: system + g.notesContext()})
+	if !silent {
+		system += g.notesContext()
+	}
+	msgs = append(msgs, ai.Message{Role: "system", Content: system})
 	msgs = append(msgs, history...)
 	msgs = append(msgs, ai.Message{Role: "user", Content: text})
 

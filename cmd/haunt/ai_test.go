@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -27,6 +28,7 @@ import (
 // was handed so tests can check what the brain actually asked for.
 func fakeAIBackend(t *testing.T, prompts *imagePrompts) *httptest.Server {
 	t.Helper()
+	var rewrites atomic.Int64
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
@@ -43,8 +45,19 @@ func fakeAIBackend(t *testing.T, prompts *imagePrompts) *httptest.Server {
 		last := req.Messages[len(req.Messages)-1].Content
 		reply := "indeed, you said: " + last
 		if request, ok := cutAfter(last, "Request: "); ok {
-			// A silent prompt-rewrite request: answer in tag style.
+			// A silent prompt-rewrite request: answer in tag style. Real
+			// models sample a different rewrite every time, so vary this
+			// one too — a brain that re-asks instead of reusing what it
+			// already rewrote would miss the generation cache.
 			reply = "tags: " + request
+			if n := rewrites.Add(1); n > 1 {
+				reply = fmt.Sprintf("%s (take %d)", reply, n)
+			}
+			// Silent calls are self-contained: no history, no journal.
+			if len(req.Messages) != 2 || strings.Contains(req.Messages[0].Content, "likes sunsets") {
+				http.Error(w, "silent chat carried conversation context", 400)
+				return
+			}
 		} else {
 			// Silent exchanges must stay out of conversation history.
 			for _, m := range req.Messages[:len(req.Messages)-1] {
@@ -219,6 +232,19 @@ wasm = "brain.wasm"
 		t.Errorf("image prompts after reroll = %q", got)
 	}
 
+	// Asking again for the same thing is free: the brain reuses the prompt
+	// it already rewrote, so the driver serves the first image from cache —
+	// no rewrite call, no generation call, no new file.
+	say("draw a sunset")
+	waitRecordCount(t, record, `"type":"ai_image"`, 3)
+	if got := prompts.all(); len(got) != 2 {
+		t.Errorf("repeat request re-generated; image prompts = %q", got)
+	}
+	cache, err = filepath.Glob(filepath.Join(dir, "state", "cache", "*.png"))
+	if err != nil || len(cache) != 2 {
+		t.Errorf("cache files after repeat = %v, %v", cache, err)
+	}
+
 	// Self-notes: a remembered fact reaches the next chat's system prompt
 	// (the fake backend prefixes replies with [noted] when it sees it).
 	say("remember the user likes sunsets")
@@ -244,6 +270,23 @@ wasm = "brain.wasm"
 	if err := cmd.Wait(); err != nil {
 		t.Errorf("ghost exited uncleanly: %v", err)
 	}
+}
+
+// waitRecordCount polls until the recording holds want occurrences of s.
+func waitRecordCount(t *testing.T, path, s string, want int) {
+	t.Helper()
+	for i := 0; i < 100; i++ {
+		data, _ := os.ReadFile(path)
+		if n := strings.Count(string(data), s); n >= want {
+			if n > want {
+				t.Fatalf("recording has %d occurrences of %q, want %d", n, s, want)
+			}
+			return
+		}
+		wait100ms()
+	}
+	data, _ := os.ReadFile(path)
+	t.Fatalf("recording never held %d occurrences of %q; have:\n%s", want, s, data)
 }
 
 // waitFileCount polls until glob matches want files.
