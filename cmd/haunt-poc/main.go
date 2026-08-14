@@ -52,6 +52,9 @@ func run(spritePath string, x, y int32, size int) error {
 		return err
 	}
 	defer surf.Destroy()
+	if err := surf.WaitMapped(); err != nil {
+		return err
+	}
 
 	if err := app.Roundtrip(); err != nil {
 		return err

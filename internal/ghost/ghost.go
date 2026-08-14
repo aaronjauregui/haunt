@@ -1,0 +1,287 @@
+// Package ghost runs one ghost: it loads the manifest, shell, and brain,
+// connects renderer input to the event bus, delivers events to the brain,
+// and executes the brain's intents against the screen and the store.
+package ghost
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+
+	"github.com/aaronjauregui/haunt/internal/balloon"
+	"github.com/aaronjauregui/haunt/internal/brain"
+	"github.com/aaronjauregui/haunt/internal/bus"
+	"github.com/aaronjauregui/haunt/internal/proto"
+	"github.com/aaronjauregui/haunt/internal/sprite"
+	"github.com/aaronjauregui/haunt/internal/store"
+	"github.com/aaronjauregui/haunt/internal/wlclient"
+)
+
+// Options configures a ghost run.
+type Options struct {
+	// StateDir overrides where state.db lives; defaults to
+	// $XDG_DATA_HOME/haunt/ghosts/<name>.
+	StateDir string
+	// RecordTo, if non-empty, records the event session to this file.
+	RecordTo string
+	// X, Y is the sprite's starting position.
+	X, Y int
+	// Log receives driver/brain log lines; defaults to stderr.
+	Log func(string)
+	// OnReady is called once the ghost is on screen and booted.
+	OnReady func()
+}
+
+// Ghost is a running instance.
+type Ghost struct {
+	manifest *Manifest
+	opts     Options
+
+	app     *wlclient.App
+	surface *wlclient.SpriteSurface
+	blnRend *balloon.Renderer
+	bln     *wlclient.SpriteSurface
+
+	bus   *bus.Bus
+	brain *brain.Host
+	store *store.Store
+
+	timersMu sync.Mutex
+	timers   map[string]*time.Timer
+
+	recordF *os.File
+	done    chan struct{}
+}
+
+// Run loads and starts the ghost in dir, blocking until ctx is cancelled or
+// the session fails. The Wayland connection must be usable (WAYLAND_DISPLAY).
+func Run(ctx context.Context, dir string, opts Options) error {
+	if opts.Log == nil {
+		opts.Log = func(s string) { fmt.Fprintln(os.Stderr, s) }
+	}
+	m, err := LoadManifest(dir)
+	if err != nil {
+		return err
+	}
+	g := &Ghost{
+		manifest: m,
+		opts:     opts,
+		timers:   map[string]*time.Timer{},
+		done:     make(chan struct{}),
+	}
+	defer close(g.done)
+
+	// State.
+	stateDir := opts.StateDir
+	if stateDir == "" {
+		base := os.Getenv("XDG_DATA_HOME")
+		if base == "" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return err
+			}
+			base = filepath.Join(home, ".local", "share")
+		}
+		stateDir = filepath.Join(base, "haunt", "ghosts", m.Ghost.Name)
+	}
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		return err
+	}
+	if g.store, err = store.Open(filepath.Join(stateDir, "state.db")); err != nil {
+		return err
+	}
+	defer g.store.Close()
+
+	// Shell.
+	var sp *sprite.Sprite
+	if m.Shell.Sprite != "" {
+		if sp, err = sprite.Load(filepath.Join(dir, m.Shell.Sprite)); err != nil {
+			return err
+		}
+	} else {
+		sp = sprite.Builtin(160)
+	}
+
+	// Renderer.
+	if g.app, err = wlclient.Connect(); err != nil {
+		return err
+	}
+	defer g.app.Close()
+	if g.surface, err = g.app.CreateSprite(sp, int32(opts.X), int32(opts.Y)); err != nil {
+		return err
+	}
+	if err = g.surface.WaitMapped(); err != nil {
+		return err
+	}
+	if g.blnRend, err = balloon.NewRenderer(balloon.DefaultTheme()); err != nil {
+		return err
+	}
+
+	// Bus, optionally recording.
+	g.bus = bus.New(64)
+	if opts.RecordTo != "" {
+		if g.recordF, err = os.Create(opts.RecordTo); err != nil {
+			return err
+		}
+		defer g.recordF.Close()
+		g.bus.SetRecorder(g.recordF)
+	}
+
+	// Brain.
+	wasmBytes, err := os.ReadFile(filepath.Join(dir, m.Brain.Wasm))
+	if err != nil {
+		return err
+	}
+	if g.brain, err = brain.Start(ctx, wasmBytes, g.execIntent, brain.Options{}); err != nil {
+		return err
+	}
+
+	// Input -> bus.
+	g.surface.OnClick = func(x, y int) {
+		g.publish(proto.Event{Type: proto.EventClick, X: x, Y: y})
+	}
+	g.surface.OnDragEnd = func(x, y int) {
+		g.publish(proto.Event{Type: proto.EventDragEnd, X: x, Y: y})
+	}
+
+	// Bus -> brain.
+	deliveryDone := make(chan struct{})
+	go func() {
+		defer close(deliveryDone)
+		for e := range g.bus.Events() {
+			if err := g.brain.Deliver(e); err != nil {
+				opts.Log(fmt.Sprintf("haunt: brain delivery failed: %v", err))
+				return
+			}
+		}
+	}()
+
+	// Boot with the persisted KV snapshot.
+	kv, err := g.store.All()
+	if err != nil {
+		return err
+	}
+	g.publish(proto.Event{Type: proto.EventBoot, KV: kv})
+	if opts.OnReady != nil {
+		opts.OnReady()
+	}
+
+	// Wayland event loop until cancelled.
+	dispatchErr := make(chan error, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				dispatchErr <- fmt.Errorf("dispatch panic: %v", r)
+			}
+		}()
+		for {
+			if err := g.app.Dispatch(); err != nil {
+				dispatchErr <- err
+				return
+			}
+		}
+	}()
+
+	var runErr error
+	select {
+	case <-ctx.Done():
+	case err := <-dispatchErr:
+		runErr = fmt.Errorf("wayland session: %w", err)
+	}
+
+	// Orderly shutdown: tell the brain, stop timers, drain deliveries, then
+	// close the brain so the shutdown event is not lost to a closed pipe.
+	g.publish(proto.Event{Type: proto.EventShutdown})
+	g.timersMu.Lock()
+	for _, t := range g.timers {
+		t.Stop()
+	}
+	g.timersMu.Unlock()
+	g.bus.Close()
+	<-deliveryDone
+	if err := g.brain.Close(); err != nil && runErr == nil {
+		runErr = fmt.Errorf("brain: %w", err)
+	}
+	return runErr
+}
+
+func (g *Ghost) publish(e proto.Event) {
+	if err := g.bus.Publish(e); err != nil {
+		g.opts.Log(fmt.Sprintf("haunt: publish %s: %v", e.Type, err))
+	}
+}
+
+// execIntent runs on the brain's intent-reader goroutine. Wayland calls are
+// safe here: go-wayland requests are locked writes to the socket, and the
+// dispatch loop only reads events.
+func (g *Ghost) execIntent(in proto.Intent) {
+	switch in.Type {
+	case proto.IntentSay:
+		g.showBalloon(in.Text)
+	case proto.IntentHideSay:
+		g.hideBalloon()
+	case proto.IntentMove:
+		if err := g.surface.MoveTo(int32(in.X), int32(in.Y)); err != nil {
+			g.opts.Log(fmt.Sprintf("haunt: move failed: %v", err))
+		}
+	case proto.IntentSetTimer:
+		g.setTimer(in.Name, time.Duration(in.DelayMS)*time.Millisecond)
+	case proto.IntentCancelTimer:
+		g.timersMu.Lock()
+		if t, ok := g.timers[in.Name]; ok {
+			t.Stop()
+			delete(g.timers, in.Name)
+		}
+		g.timersMu.Unlock()
+	case proto.IntentKVSet:
+		if err := g.store.Set(in.Name, in.Value); err != nil {
+			g.opts.Log(fmt.Sprintf("haunt: kv_set %s: %v", in.Name, err))
+		}
+	case proto.IntentLog:
+		g.opts.Log("ghost: " + in.Text)
+	}
+}
+
+func (g *Ghost) setTimer(name string, d time.Duration) {
+	g.timersMu.Lock()
+	defer g.timersMu.Unlock()
+	if t, ok := g.timers[name]; ok {
+		t.Stop()
+	}
+	g.timers[name] = time.AfterFunc(d, func() {
+		g.timersMu.Lock()
+		delete(g.timers, name)
+		g.timersMu.Unlock()
+		select {
+		case <-g.done:
+		default:
+			g.publish(proto.Event{Type: proto.EventTimer, Name: name})
+		}
+	})
+}
+
+// showBalloon renders text and places it beside the sprite (right side,
+// falling back near the top-left of the sprite when space is unknown).
+func (g *Ghost) showBalloon(text string) {
+	g.hideBalloon()
+	sp := g.blnRend.Render(text)
+	// Position: to the right of the sprite, vertically near its top.
+	x := g.surface.X + g.surface.W + 12
+	y := g.surface.Y
+	bln, err := g.app.CreateSpriteOpts(sp, x, y, wlclient.SurfaceOptions{PassThrough: true})
+	if err != nil {
+		g.opts.Log(fmt.Sprintf("haunt: balloon failed: %v", err))
+		return
+	}
+	g.bln = bln
+}
+
+func (g *Ghost) hideBalloon() {
+	if g.bln != nil {
+		g.bln.Destroy()
+		g.bln = nil
+	}
+}

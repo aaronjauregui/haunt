@@ -7,6 +7,7 @@ require github.com/rajveermalviya/go-wayland/wayland v0.0.0-20230130181619-0ad78
 require golang.org/x/sys v0.47.0
 
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/tetratelabs/wazero v1.12.0
 	golang.org/x/image v0.45.0
 	modernc.org/sqlite v1.56.0

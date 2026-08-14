@@ -28,10 +28,10 @@ type Host struct {
 	runtime wazero.Runtime
 	cancel  context.CancelFunc
 
-	stdinW  io.WriteCloser
-	encMu   sync.Mutex
-	enc     *json.Encoder
-	done    chan error
+	stdinW   io.WriteCloser
+	encMu    sync.Mutex
+	enc      *json.Encoder
+	done     chan error
 	onIntent IntentHandler
 
 	// InvalidIntent, if set, is called with the raw line and error for

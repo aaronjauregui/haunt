@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
 
 	"github.com/rajveermalviya/go-wayland/wayland/client"
 
@@ -33,7 +34,15 @@ func debugf(format string, args ...any) {
 }
 
 // App is a connected Wayland client with the globals Haunt needs.
+//
+// Threading model: the go-wayland library does no locking, so a.mu
+// serializes all request writes and shared state. Exactly one goroutine may
+// call Dispatch (the dispatch loop); event handlers run on it and take mu
+// before issuing requests. Public surface methods lock mu and are safe from
+// any goroutine.
 type App struct {
+	mu sync.Mutex
+
 	display    *client.Display
 	registry   *client.Registry
 	compositor *client.Compositor
@@ -161,6 +170,8 @@ func (a *App) initPointer(p *client.Pointer) {
 		if e.Surface == nil {
 			return
 		}
+		a.mu.Lock()
+		defer a.mu.Unlock()
 		if s, ok := a.surfaces[e.Surface.ID()]; ok {
 			a.logEvent("enter surface=%d local=(%.0f,%.0f)", e.Surface.ID(), e.SurfaceX, e.SurfaceY)
 			a.pointerFocus = s
@@ -168,12 +179,16 @@ func (a *App) initPointer(p *client.Pointer) {
 		}
 	})
 	p.SetLeaveHandler(func(e client.PointerLeaveEvent) {
+		a.mu.Lock()
+		defer a.mu.Unlock()
 		if a.pointerFocus != nil {
 			a.pointerFocus.dragging = false
 			a.pointerFocus = nil
 		}
 	})
 	p.SetMotionHandler(func(e client.PointerMotionEvent) {
+		a.mu.Lock()
+		defer a.mu.Unlock()
 		s := a.pointerFocus
 		if s == nil {
 			return
@@ -191,8 +206,13 @@ func (a *App) initPointer(p *client.Pointer) {
 		}
 	})
 	p.SetButtonHandler(func(e client.PointerButtonEvent) {
+		// Callbacks are collected under the lock but invoked outside it, so
+		// they may safely call locked surface methods.
+		var fire func()
+		a.mu.Lock()
 		s := a.pointerFocus
 		if s == nil || e.Button != btnLeft {
+			a.mu.Unlock()
 			return
 		}
 		const statePressed = 1
@@ -202,7 +222,24 @@ func (a *App) initPointer(p *client.Pointer) {
 			s.grabX, s.grabY = s.pointerX, s.pointerY
 			s.dragOriginX, s.dragOriginY = s.X, s.Y
 		} else {
+			wasDragging := s.dragging
 			s.dragging = false
+			moved := s.X != s.dragOriginX || s.Y != s.dragOriginY
+			switch {
+			case wasDragging && moved && s.OnDragEnd != nil:
+				x, y := int(s.X), int(s.Y)
+				cb := s.OnDragEnd
+				fire = func() { cb(x, y) }
+			case wasDragging && !moved && s.OnClick != nil:
+				// A press+release without movement is a click.
+				x, y := int(s.pointerX), int(s.pointerY)
+				cb := s.OnClick
+				fire = func() { cb(x, y) }
+			}
+		}
+		a.mu.Unlock()
+		if fire != nil {
+			fire()
 		}
 	})
 }

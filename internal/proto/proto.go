@@ -20,10 +20,10 @@ const (
 	EventShutdown EventType = "shutdown" // driver is stopping the ghost
 
 	// Interaction, sprite-local coordinates.
-	EventClick     EventType = "click"      // press+release on an opaque pixel
+	EventClick     EventType = "click" // press+release on an opaque pixel
 	EventDragStart EventType = "drag_start"
-	EventDragEnd   EventType = "drag_end"   // includes final position
-	EventHover     EventType = "hover"      // pointer entered opaque area
+	EventDragEnd   EventType = "drag_end" // includes final position
+	EventHover     EventType = "hover"    // pointer entered opaque area
 	EventUnhover   EventType = "unhover"
 
 	// Time.
@@ -58,13 +58,13 @@ type Event struct {
 type IntentType string
 
 const (
-	IntentSay        IntentType = "say"         // show balloon text
-	IntentHideSay    IntentType = "hide_say"    // dismiss the balloon
-	IntentMove       IntentType = "move"        // reposition the sprite
-	IntentSetTimer   IntentType = "set_timer"   // fire EventTimer after delay
+	IntentSay         IntentType = "say"       // show balloon text
+	IntentHideSay     IntentType = "hide_say"  // dismiss the balloon
+	IntentMove        IntentType = "move"      // reposition the sprite
+	IntentSetTimer    IntentType = "set_timer" // fire EventTimer after delay
 	IntentCancelTimer IntentType = "cancel_timer"
-	IntentKVSet      IntentType = "kv_set"      // persist a value
-	IntentLog        IntentType = "log"         // debug output
+	IntentKVSet       IntentType = "kv_set" // persist a value
+	IntentLog         IntentType = "log"    // debug output
 )
 
 // Intent is one request emitted by a brain. The driver validates and
