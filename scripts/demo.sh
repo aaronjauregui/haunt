@@ -77,7 +77,7 @@ done
 echo ">> nested sway is up on $display; spawning $ghost (click it, drag it)"
 echo ">> from another terminal, talk to it with:  go run ./cmd/haunt say \"hello\""
 if [ "$ghost" = muse ]; then
-    echo ">> muse extras:  say \"draw a whale\"  |  say \"remember I like tea\"  |  haunt journal -state ~/.local/share/haunt/ghosts/muse"
+    echo ">> muse extras:  say \"draw a whale\"  |  say \"draw again\"  |  say \"remember I like tea\"  |  haunt journal -state ~/.local/share/haunt/ghosts/muse"
 fi
 WAYLAND_DISPLAY="$display" "$workdir/haunt" run -x 200 -y 150 "$workdir/$ghost" &
 

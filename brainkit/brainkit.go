@@ -85,10 +85,26 @@ func (em *Emitter) Chat(text string) {
 	em.emit(Intent{Type: proto.IntentChat, Text: text})
 }
 
+// Ask is Chat without the balloon: the reply never reaches the user and is
+// kept out of conversation history, arriving only as an ai_reply event whose
+// Tag is the tag given here. Use it to put the LLM to work inside the brain —
+// rewriting a scribbled request into a real image prompt, classifying an
+// utterance — and act on the answer yourself.
+func (em *Emitter) Ask(tag, text string) {
+	em.emit(Intent{Type: proto.IntentChat, Text: text, Tag: tag, Silent: true})
+}
+
 // Imagine generates an image (requires the imagine capability), shown as an
-// image balloon and reported by an ai_image event.
+// image balloon and reported by an ai_image event. Identical prompts are
+// served from the generation cache.
 func (em *Emitter) Imagine(prompt string) {
 	em.emit(Intent{Type: proto.IntentImagine, Text: prompt})
+}
+
+// ImagineFresh is Imagine that ignores the cache, so a repeated prompt
+// produces a new image — the "draw that again" gesture.
+func (em *Emitter) ImagineFresh(prompt string) {
+	em.emit(Intent{Type: proto.IntentImagine, Text: prompt, Fresh: true})
 }
 
 // Note writes a private journal entry. Recent notes are injected into LLM

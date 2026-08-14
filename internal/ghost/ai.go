@@ -3,6 +3,7 @@ package ghost
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -39,13 +40,18 @@ const historyKey = "_haunt/chat_history"
 // execChat handles a chat intent: persona + history + the new utterance go
 // to the LLM; the reply streams into the balloon and lands as an ai_reply
 // event. Runs on its own goroutine so a slow backend never blocks intents.
-func (g *Ghost) execChat(text string) {
+//
+// A silent chat is a brain-internal call — no balloon, no history — used to
+// chain the LLM into other work (rewriting a request into an image prompt,
+// say) without the user seeing the scaffolding.
+func (g *Ghost) execChat(in proto.Intent) {
+	text, tag, silent := in.Text, in.Tag, in.Silent
 	if !g.capabilityActive("llm") {
-		g.publishAIError("llm capability not granted")
+		g.publishAIError("llm capability not granted", tag)
 		return
 	}
 	if g.aiSvc == nil || !g.aiSvc.LLMEnabled() {
-		g.publishAIError("no LLM backend configured in the haunt config")
+		g.publishAIError("no LLM backend configured in the haunt config", tag)
 		return
 	}
 
@@ -64,16 +70,24 @@ func (g *Ghost) execChat(text string) {
 	// Stream into the balloon, re-rendering at a gentle pace.
 	var acc string
 	last := time.Now()
-	full, err := g.aiSvc.Chat(context.Background(), msgs, func(delta string) {
+	onDelta := func(delta string) {
 		acc += delta
 		if time.Since(last) >= 120*time.Millisecond {
 			last = time.Now()
 			g.showBalloon(acc)
 		}
-	})
+	}
+	if silent {
+		onDelta = func(string) {}
+	}
+	full, err := g.aiSvc.Chat(context.Background(), msgs, onDelta)
 	if err != nil {
 		g.opts.Log(fmt.Sprintf("haunt: chat: %v", err))
-		g.publishAIError(err.Error())
+		g.publishAIError(err.Error(), tag)
+		return
+	}
+	if silent {
+		g.publish(proto.Event{Type: proto.EventAIReply, Text: full, Tag: tag})
 		return
 	}
 	g.showBalloon(full)
@@ -90,29 +104,41 @@ func (g *Ghost) execChat(text string) {
 	}
 	g.saveHistory(history)
 
-	g.publish(proto.Event{Type: proto.EventAIReply, Text: full})
+	g.publish(proto.Event{Type: proto.EventAIReply, Text: full, Tag: tag})
 }
 
 // execImagine handles an imagine intent: generate (or reuse from cache) an
-// image and show it as a balloon.
-func (g *Ghost) execImagine(prompt string) {
+// image and show it as a balloon. A fresh request skips the cache lookup and
+// lands under its own key, so "draw that again" yields a new picture instead
+// of the one already on disk.
+func (g *Ghost) execImagine(in proto.Intent) {
+	prompt, tag := in.Text, in.Tag
 	if !g.capabilityActive("imagine") {
-		g.publishAIError("imagine capability not granted")
+		g.publishAIError("imagine capability not granted", tag)
 		return
 	}
 	if g.aiSvc == nil || !g.aiSvc.ImageEnabled() {
-		g.publishAIError("no image backend configured in the haunt config")
+		g.publishAIError("no image backend configured in the haunt config", tag)
 		return
 	}
 
 	// Content-addressed cache: same backend/model/prompt = same file.
-	key := sha256.Sum256([]byte(g.aiSvc.ImageCacheKey() + "\x00" + prompt))
+	salt := ""
+	if in.Fresh {
+		var nonce [8]byte
+		if _, err := rand.Read(nonce[:]); err != nil {
+			g.publishAIError("reroll: "+err.Error(), tag)
+			return
+		}
+		salt = "\x00" + hex.EncodeToString(nonce[:])
+	}
+	key := sha256.Sum256([]byte(g.aiSvc.ImageCacheKey() + "\x00" + prompt + salt))
 	cachePath := filepath.Join(g.cacheDir, hex.EncodeToString(key[:8])+".png")
 	data, err := os.ReadFile(cachePath)
 	if err != nil {
 		if data, err = g.aiSvc.GenerateImage(context.Background(), prompt); err != nil {
 			g.opts.Log(fmt.Sprintf("haunt: imagine: %v", err))
-			g.publishAIError(err.Error())
+			g.publishAIError(err.Error(), tag)
 			return
 		}
 		if err := os.MkdirAll(g.cacheDir, 0o755); err == nil {
@@ -122,15 +148,15 @@ func (g *Ghost) execImagine(prompt string) {
 
 	img, err := png.Decode(bytesReader(data))
 	if err != nil {
-		g.publishAIError("image backend returned invalid PNG: " + err.Error())
+		g.publishAIError("image backend returned invalid PNG: "+err.Error(), tag)
 		return
 	}
 	g.showImageBalloon(img)
-	g.publish(proto.Event{Type: proto.EventAIImage, Name: cachePath})
+	g.publish(proto.Event{Type: proto.EventAIImage, Name: cachePath, Tag: tag})
 }
 
-func (g *Ghost) publishAIError(msg string) {
-	g.publish(proto.Event{Type: proto.EventAIError, Text: msg})
+func (g *Ghost) publishAIError(msg, tag string) {
+	g.publish(proto.Event{Type: proto.EventAIError, Text: msg, Tag: tag})
 }
 
 func (g *Ghost) loadHistory() []ai.Message {

@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -22,8 +23,9 @@ import (
 )
 
 // fakeAIBackend serves both chat completions (streaming echo) and image
-// generations (a solid orange PNG).
-func fakeAIBackend(t *testing.T) *httptest.Server {
+// generations (a solid orange PNG). It records the prompts the image endpoint
+// was handed so tests can check what the brain actually asked for.
+func fakeAIBackend(t *testing.T, prompts *imagePrompts) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
@@ -40,6 +42,18 @@ func fakeAIBackend(t *testing.T) *httptest.Server {
 		}
 		last := req.Messages[len(req.Messages)-1].Content
 		reply := "indeed, you said: " + last
+		if request, ok := cutAfter(last, "Request: "); ok {
+			// A silent prompt-rewrite request: answer in tag style.
+			reply = "tags: " + request
+		} else {
+			// Silent exchanges must stay out of conversation history.
+			for _, m := range req.Messages[:len(req.Messages)-1] {
+				if strings.Contains(m.Content, "Request: ") {
+					http.Error(w, "silent chat leaked into history", 400)
+					return
+				}
+			}
+		}
 		// Journal injection is visible server-side: notes ride the system
 		// prompt.
 		if strings.Contains(req.Messages[0].Content, "likes sunsets") {
@@ -57,6 +71,11 @@ func fakeAIBackend(t *testing.T) *httptest.Server {
 		fmt.Fprint(w, "data: [DONE]\n\n")
 	})
 	mux.HandleFunc("/v1/images/generations", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Prompt string `json:"prompt"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		prompts.add(req.Prompt)
 		img := image.NewNRGBA(image.Rect(0, 0, 64, 64))
 		for i := range img.Pix {
 			img.Pix[i] = 255
@@ -75,11 +94,36 @@ func fakeAIBackend(t *testing.T) *httptest.Server {
 	return httptest.NewServer(mux)
 }
 
+// imagePrompts collects the prompts the fake image backend received.
+type imagePrompts struct {
+	mu   sync.Mutex
+	seen []string
+}
+
+func (p *imagePrompts) add(prompt string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.seen = append(p.seen, prompt)
+}
+
+func (p *imagePrompts) all() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.seen...)
+}
+
+// cutAfter returns what follows the first occurrence of sep.
+func cutAfter(s, sep string) (string, bool) {
+	_, after, ok := strings.Cut(s, sep)
+	return after, ok
+}
+
 // TestAIGhostEndToEnd: muse chats through a fake LLM (persona verified
 // server-side), streams into a balloon, and paints images on request.
 func TestAIGhostEndToEnd(t *testing.T) {
 	c := testenv.StartT(t)
-	backend := fakeAIBackend(t)
+	prompts := &imagePrompts{}
+	backend := fakeAIBackend(t, prompts)
 	defer backend.Close()
 
 	dir := t.TempDir()
@@ -97,7 +141,7 @@ base_url = %q
 model = "fake"
 
 [ai.budget]
-llm_requests_per_hour = 2
+llm_requests_per_hour = 3
 image_requests_per_hour = 2
 `, backend.URL+"/v1", backend.URL+"/v1")
 	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(config), 0o644); err != nil {
@@ -152,14 +196,27 @@ wasm = "brain.wasm"
 	waitRecordContains(t, record, "indeed, you said: hello muse")
 	waitBalloon(t, c, dir, 100, 100, true)
 
-	// Imagine: image balloon appears (orange panel right of sprite) and the
-	// cache file lands on disk.
+	// Imagine: the request is rewritten by a silent LLM call first (the fake
+	// backend answers rewrite requests in tag style), then painted. The image
+	// balloon appears (orange panel right of sprite) and the cache file lands
+	// on disk.
 	say("draw a sunset")
 	waitRecordContains(t, record, `"type":"ai_image"`)
 	waitOrange(t, c, dir, 100, 100)
 	cache, err := filepath.Glob(filepath.Join(dir, "state", "cache", "*.png"))
 	if err != nil || len(cache) != 1 {
 		t.Errorf("cache files = %v, %v", cache, err)
+	}
+	if got := prompts.all(); len(got) != 1 || got[0] != "tags: a sunset" {
+		t.Errorf("image prompts = %q, want the rewritten [tags: a sunset]", got)
+	}
+
+	// Reroll: "draw again" replays the same prompt but skips the cache, so
+	// the backend is asked a second time and a second file appears.
+	say("draw again")
+	waitFileCount(t, filepath.Join(dir, "state", "cache", "*.png"), 2)
+	if got := prompts.all(); len(got) != 2 || got[1] != "tags: a sunset" {
+		t.Errorf("image prompts after reroll = %q", got)
 	}
 
 	// Self-notes: a remembered fact reaches the next chat's system prompt
@@ -181,12 +238,25 @@ wasm = "brain.wasm"
 	}
 	say("third message")
 	waitRecordContains(t, record, `"type":"ai_error"`)
-	waitRecordContains(t, record, "limit of 2 requests/hour")
+	waitRecordContains(t, record, "limit of 3 requests/hour")
 
 	cmd.Process.Signal(syscall.SIGTERM)
 	if err := cmd.Wait(); err != nil {
 		t.Errorf("ghost exited uncleanly: %v", err)
 	}
+}
+
+// waitFileCount polls until glob matches want files.
+func waitFileCount(t *testing.T, glob string, want int) {
+	t.Helper()
+	for i := 0; i < 100; i++ {
+		if m, err := filepath.Glob(glob); err == nil && len(m) == want {
+			return
+		}
+		wait100ms()
+	}
+	m, _ := filepath.Glob(glob)
+	t.Fatalf("%s: %d files, want %d", glob, len(m), want)
 }
 
 // waitOrange polls for the generated image's orange pixels beside the sprite.

@@ -61,6 +61,9 @@ type Event struct {
 	Text string `json:"text,omitempty"`
 	// From identifies the sending ghost for cross-ghost messages.
 	From string `json:"from,omitempty"`
+	// Tag echoes the tag of the intent this event answers, so a brain that
+	// has several AI requests in flight can tell their results apart.
+	Tag string `json:"tag,omitempty"`
 	// KV is the ghost's persisted state, included only with EventBoot so
 	// brains start with their memory in hand.
 	KV map[string]string `json:"kv,omitempty"`
@@ -99,6 +102,16 @@ type Intent struct {
 	DelayMS int `json:"delay_ms,omitempty"`
 	// Value is the payload for IntentKVSet.
 	Value string `json:"value,omitempty"`
+	// Tag labels an AI request; the resulting ai_reply/ai_image/ai_error
+	// event carries it back.
+	Tag string `json:"tag,omitempty"`
+	// Silent suppresses the balloon for IntentChat and keeps the exchange
+	// out of conversation history — for brain-internal LLM calls such as
+	// rewriting a user request into an image prompt.
+	Silent bool `json:"silent,omitempty"`
+	// Fresh skips the generation cache for IntentImagine, so asking again
+	// for the same prompt produces a different image.
+	Fresh bool `json:"fresh,omitempty"`
 }
 
 // EncodeEvents marshals events one-per-line (JSONL) for recordings.

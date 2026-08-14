@@ -393,13 +393,13 @@ func (g *Ghost) execIntent(in proto.Intent) {
 		go func() {
 			g.aiMu.Lock()
 			defer g.aiMu.Unlock()
-			g.execChat(in.Text)
+			g.execChat(in)
 		}()
 	case proto.IntentImagine:
 		go func() {
 			g.aiMu.Lock()
 			defer g.aiMu.Unlock()
-			g.execImagine(in.Text)
+			g.execImagine(in)
 		}()
 	case proto.IntentNote:
 		g.execNote(in.Text)
