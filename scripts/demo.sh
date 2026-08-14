@@ -51,6 +51,7 @@ done
 [ -n "$display" ] || { echo "sway never reported a display"; tail "$workdir/sway.log"; exit 1; }
 
 echo ">> nested sway is up on $display; spawning whisper (click it, drag it)"
+echo ">> from another terminal, talk to it with:  go run ./cmd/haunt say \"hello\""
 WAYLAND_DISPLAY="$display" "$workdir/haunt" run -x 200 -y 150 "$workdir/whisper" &
 
 wait "$sway_pid"
