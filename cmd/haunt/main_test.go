@@ -134,6 +134,13 @@ wasm = "brain.wasm"
 	// Balloon content changes ("Boo." is much narrower than the greeting);
 	// just assert a balloon is still present after the round trip.
 	waitBalloon(t, c, dir, posX, posY, true)
+
+	// Drag the sprite: the balloon must follow to the new position.
+	const dragX, dragY = 150, 120
+	if err := ptr.Drag(posX+80, posY+80, posX+80+dragX, posY+80+dragY); err != nil {
+		t.Fatal(err)
+	}
+	waitBalloon(t, c, dir, posX+dragX, posY+dragY, true)
 	stop(cmd)
 
 	// State survived on disk.

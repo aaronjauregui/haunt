@@ -187,10 +187,11 @@ func (a *App) initPointer(p *client.Pointer) {
 		}
 	})
 	p.SetMotionHandler(func(e client.PointerMotionEvent) {
+		var fire func()
 		a.mu.Lock()
-		defer a.mu.Unlock()
 		s := a.pointerFocus
 		if s == nil {
+			a.mu.Unlock()
 			return
 		}
 		a.logEvent("motion local=(%.0f,%.0f) dragging=%v pos=(%d,%d)", e.SurfaceX, e.SurfaceY, s.dragging, s.X, s.Y)
@@ -203,6 +204,15 @@ func (a *App) initPointer(p *client.Pointer) {
 			s.Y = s.dragOriginY + int32(e.SurfaceY-s.grabY)
 			s.layerSurface.SetMargin(s.Y, 0, 0, s.X)
 			s.wlSurface.Commit()
+			if s.OnMove != nil {
+				x, y := int(s.X), int(s.Y)
+				cb := s.OnMove
+				fire = func() { cb(x, y) }
+			}
+		}
+		a.mu.Unlock()
+		if fire != nil {
+			fire()
 		}
 	})
 	p.SetButtonHandler(func(e client.PointerButtonEvent) {

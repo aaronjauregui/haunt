@@ -18,9 +18,12 @@ type SpriteSurface struct {
 
 	// OnClick fires on press+release without movement, with surface-local
 	// coordinates. OnDragEnd fires when a drag settles, with the new
-	// position. Both are called from the dispatch goroutine.
+	// position. OnMove fires for every position change during a drag so
+	// attached surfaces (balloons) can follow. All are called from the
+	// dispatch goroutine, outside the app lock.
 	OnClick   func(x, y int)
 	OnDragEnd func(x, y int)
+	OnMove    func(x, y int)
 
 	app          *App
 	wlSurface    *client.Surface
@@ -184,6 +187,14 @@ func (s *SpriteSurface) setInputRegion(sp *sprite.Sprite) error {
 		return err
 	}
 	return region.Destroy()
+}
+
+// Geometry returns the surface's current position and size. Safe from any
+// goroutine.
+func (s *SpriteSurface) Geometry() (x, y, w, h int32) {
+	s.app.mu.Lock()
+	defer s.app.mu.Unlock()
+	return s.X, s.Y, s.W, s.H
 }
 
 // MoveTo repositions the sprite via its layer-surface margins. Safe from any

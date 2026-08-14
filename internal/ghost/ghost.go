@@ -20,8 +20,22 @@ import (
 	"github.com/aaronjauregui/haunt/internal/wlclient"
 )
 
+// Store is the persistence contract a ghost run needs. The default is the
+// SQLite implementation in internal/store; alternatives (in-memory for
+// tests, encrypted, remote-synced) plug in via Options.Store.
+type Store interface {
+	// Set persists key=value, replacing any existing value.
+	Set(key, value string) error
+	// All returns the complete KV map, handed to brains at boot.
+	All() (map[string]string, error)
+	// Close flushes and releases the backend.
+	Close() error
+}
+
 // Options configures a ghost run.
 type Options struct {
+	// Store overrides the persistence backend. Nil uses SQLite in StateDir.
+	Store Store
 	// StateDir overrides where state.db lives; defaults to
 	// $XDG_DATA_HOME/haunt/ghosts/<name>.
 	StateDir string
@@ -43,11 +57,13 @@ type Ghost struct {
 	app     *wlclient.App
 	surface *wlclient.SpriteSurface
 	blnRend *balloon.Renderer
-	bln     *wlclient.SpriteSurface
+
+	blnMu sync.Mutex
+	bln   *wlclient.SpriteSurface
 
 	bus   *bus.Bus
 	brain *brain.Host
-	store *store.Store
+	store Store
 
 	timersMu sync.Mutex
 	timers   map[string]*time.Timer
@@ -74,24 +90,28 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	}
 	defer close(g.done)
 
-	// State.
-	stateDir := opts.StateDir
-	if stateDir == "" {
-		base := os.Getenv("XDG_DATA_HOME")
-		if base == "" {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return err
+	// State: the injected backend, or SQLite in the state directory.
+	if opts.Store != nil {
+		g.store = opts.Store
+	} else {
+		stateDir := opts.StateDir
+		if stateDir == "" {
+			base := os.Getenv("XDG_DATA_HOME")
+			if base == "" {
+				home, err := os.UserHomeDir()
+				if err != nil {
+					return err
+				}
+				base = filepath.Join(home, ".local", "share")
 			}
-			base = filepath.Join(home, ".local", "share")
+			stateDir = filepath.Join(base, "haunt", "ghosts", m.Ghost.Name)
 		}
-		stateDir = filepath.Join(base, "haunt", "ghosts", m.Ghost.Name)
-	}
-	if err := os.MkdirAll(stateDir, 0o755); err != nil {
-		return err
-	}
-	if g.store, err = store.Open(filepath.Join(stateDir, "state.db")); err != nil {
-		return err
+		if err := os.MkdirAll(stateDir, 0o755); err != nil {
+			return err
+		}
+		if g.store, err = store.Open(filepath.Join(stateDir, "state.db")); err != nil {
+			return err
+		}
 	}
 	defer g.store.Close()
 
@@ -145,6 +165,10 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	}
 	g.surface.OnDragEnd = func(x, y int) {
 		g.publish(proto.Event{Type: proto.EventDragEnd, X: x, Y: y})
+	}
+	// The balloon belongs to the ghost: it follows the sprite while dragged.
+	g.surface.OnMove = func(x, y int) {
+		g.placeBalloon()
 	}
 
 	// Bus -> brain.
@@ -227,6 +251,7 @@ func (g *Ghost) execIntent(in proto.Intent) {
 		if err := g.surface.MoveTo(int32(in.X), int32(in.Y)); err != nil {
 			g.opts.Log(fmt.Sprintf("haunt: move failed: %v", err))
 		}
+		g.placeBalloon()
 	case proto.IntentSetTimer:
 		g.setTimer(in.Name, time.Duration(in.DelayMS)*time.Millisecond)
 	case proto.IntentCancelTimer:
@@ -263,25 +288,48 @@ func (g *Ghost) setTimer(name string, d time.Duration) {
 	})
 }
 
-// showBalloon renders text and places it beside the sprite (right side,
-// falling back near the top-left of the sprite when space is unknown).
+// balloonPos computes the balloon anchor: to the right of the sprite,
+// vertically near its top.
+func (g *Ghost) balloonPos() (int32, int32) {
+	x, y, w, _ := g.surface.Geometry()
+	return x + w + 12, y
+}
+
+// showBalloon renders text and places it beside the sprite.
 func (g *Ghost) showBalloon(text string) {
 	g.hideBalloon()
 	sp := g.blnRend.Render(text)
-	// Position: to the right of the sprite, vertically near its top.
-	x := g.surface.X + g.surface.W + 12
-	y := g.surface.Y
+	x, y := g.balloonPos()
 	bln, err := g.app.CreateSpriteOpts(sp, x, y, wlclient.SurfaceOptions{PassThrough: true})
 	if err != nil {
 		g.opts.Log(fmt.Sprintf("haunt: balloon failed: %v", err))
 		return
 	}
+	g.blnMu.Lock()
 	g.bln = bln
+	g.blnMu.Unlock()
+}
+
+// placeBalloon re-anchors the balloon to the sprite's current position.
+func (g *Ghost) placeBalloon() {
+	g.blnMu.Lock()
+	bln := g.bln
+	g.blnMu.Unlock()
+	if bln == nil {
+		return
+	}
+	x, y := g.balloonPos()
+	if err := bln.MoveTo(x, y); err != nil {
+		g.opts.Log(fmt.Sprintf("haunt: balloon follow failed: %v", err))
+	}
 }
 
 func (g *Ghost) hideBalloon() {
-	if g.bln != nil {
-		g.bln.Destroy()
-		g.bln = nil
+	g.blnMu.Lock()
+	bln := g.bln
+	g.bln = nil
+	g.blnMu.Unlock()
+	if bln != nil {
+		bln.Destroy()
 	}
 }
