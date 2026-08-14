@@ -81,7 +81,7 @@ for _ in $(seq 1 100); do
 done
 [ -n "$display" ] || { echo "sway never reported a display"; tail "$workdir/sway.log"; exit 1; }
 
-echo ">> nested sway is up on $display; spawning $ghost (click it, drag it)"
+echo ">> nested sway is up on $display; spawning $ghost (click it, drag it, right-click to type at it)"
 echo ">> from another terminal, talk to it with:  go run ./cmd/haunt say \"hello\""
 if [ "$ghost" = muse ]; then
     echo ">> muse extras:  say \"draw a whale\"  |  say \"draw again\"  |  say \"remember I like tea\"  |  haunt journal -state ~/.local/share/haunt/ghosts/muse"

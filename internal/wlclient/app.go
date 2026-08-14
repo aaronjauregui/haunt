@@ -25,7 +25,11 @@ const (
 	KeyboardInteractivityNone = 0
 )
 
-const btnLeft = 0x110 // BTN_LEFT from linux/input-event-codes.h
+// BTN_LEFT/BTN_RIGHT from linux/input-event-codes.h.
+const (
+	btnLeft  = 0x110
+	btnRight = 0x111
+)
 
 // debugf logs pointer/protocol events when HAUNT_DEBUG is set.
 func debugf(format string, args ...any) {
@@ -50,12 +54,15 @@ type App struct {
 	shm        *client.Shm
 	seat       *client.Seat
 	pointer    *client.Pointer
+	keyboard   *client.Keyboard
 	layerShell *layershell.LayerShell
 	idleMgr    *ext_idle_notify.IdleNotifier
 
-	// pointerFocus tracks which sprite surface the pointer is over.
-	surfaces     map[uint32]*SpriteSurface
-	pointerFocus *SpriteSurface
+	// pointerFocus tracks which sprite surface the pointer is over;
+	// keyboardFocus which one the compositor is sending keys to.
+	surfaces      map[uint32]*SpriteSurface
+	pointerFocus  *SpriteSurface
+	keyboardFocus *SpriteSurface
 
 	// EventLog, when set, receives a line per input event. Used by the PoC
 	// to expose protocol activity to tests.
@@ -118,7 +125,7 @@ func Connect() (*App, error) {
 
 	if a.seat != nil {
 		a.seat.SetCapabilitiesHandler(func(e client.SeatCapabilitiesEvent) {
-			const capPointer = 1
+			const capPointer, capKeyboard = 1, 2
 			if e.Capabilities&capPointer != 0 && a.pointer == nil {
 				p, err := a.seat.GetPointer()
 				if err != nil {
@@ -126,6 +133,14 @@ func Connect() (*App, error) {
 				}
 				a.pointer = p
 				a.initPointer(p)
+			}
+			if e.Capabilities&capKeyboard != 0 && a.keyboard == nil {
+				k, err := a.seat.GetKeyboard()
+				if err != nil {
+					return
+				}
+				a.keyboard = k
+				a.initKeyboard(k)
 			}
 		})
 		if err := a.Roundtrip(); err != nil {
@@ -244,7 +259,22 @@ func (a *App) initPointer(p *client.Pointer) {
 		var fire func()
 		a.mu.Lock()
 		s := a.pointerFocus
-		if s == nil || e.Button != btnLeft {
+		if s == nil {
+			a.mu.Unlock()
+			return
+		}
+		// Right-click is the "talk to me" gesture, kept separate from the
+		// left button so a ghost's own click reactions are undisturbed.
+		if e.Button == btnRight {
+			onRight := s.OnRightClick
+			a.mu.Unlock()
+			const statePressed = 1
+			if e.State == statePressed && onRight != nil {
+				onRight()
+			}
+			return
+		}
+		if e.Button != btnLeft {
 			a.mu.Unlock()
 			return
 		}
@@ -275,4 +305,64 @@ func (a *App) initPointer(p *client.Pointer) {
 			fire()
 		}
 	})
+}
+
+// initKeyboard routes key events to whichever surface holds keyboard focus.
+// The keymap the compositor sends is deliberately ignored: interpreting xkb
+// means libxkbcommon and therefore cgo, so scancodes go to the caller raw
+// and internal/textinput maps them (US layout only — see its doc comment).
+//
+// Handlers run on the dispatch goroutine and are invoked outside a.mu, like
+// the pointer ones, so a callback may issue requests without deadlocking.
+func (a *App) initKeyboard(k *client.Keyboard) {
+	k.SetEnterHandler(func(e client.KeyboardEnterEvent) {
+		a.mu.Lock()
+		s := a.surfaces[e.Surface.ID()]
+		a.keyboardFocus = s
+		a.mu.Unlock()
+		a.logEvent("keyboard enter surface=%d", e.Surface.ID())
+		if s != nil && s.OnKeyboardFocus != nil {
+			s.OnKeyboardFocus(true)
+		}
+	})
+	k.SetLeaveHandler(func(e client.KeyboardLeaveEvent) {
+		a.mu.Lock()
+		s := a.keyboardFocus
+		a.keyboardFocus = nil
+		a.mu.Unlock()
+		a.logEvent("keyboard leave surface=%d", e.Surface.ID())
+		if s != nil && s.OnKeyboardFocus != nil {
+			s.OnKeyboardFocus(false)
+		}
+	})
+	k.SetKeyHandler(func(e client.KeyboardKeyEvent) {
+		a.mu.Lock()
+		s := a.keyboardFocus
+		a.mu.Unlock()
+		const statePressed = 1
+		a.logEvent("key %d state=%d", e.Key, e.State)
+		if s != nil && s.OnKey != nil {
+			s.OnKey(e.Key, e.State == statePressed)
+		}
+	})
+}
+
+// TakeKeyboard asks the compositor to send keys to s, or to stop. Keyboard
+// interactivity is on-demand: the ghost holds focus only while an input
+// line is open, so it never swallows the keystrokes of whatever you were
+// actually working in.
+func (a *App) TakeKeyboard(s *SpriteSurface, want bool) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if s.destroyed {
+		return nil
+	}
+	mode := uint32(layershell.LayerSurfaceKeyboardInteractivityNone)
+	if want {
+		mode = uint32(layershell.LayerSurfaceKeyboardInteractivityOnDemand)
+	}
+	if err := s.layerSurface.SetKeyboardInteractivity(mode); err != nil {
+		return err
+	}
+	return s.wlSurface.Commit()
 }

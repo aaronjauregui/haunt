@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/color"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/gofont/goregular"
@@ -96,6 +97,38 @@ func (r *Renderer) Render(text string) *sprite.Sprite {
 		d.DrawString(l)
 		y += lineHeight
 	}
+	return &sprite.Sprite{Img: img}
+}
+
+// RenderInput paints the line the user is typing, with a caret. It keeps a
+// fixed width so the panel does not jitter with every keystroke, and shows
+// the tail of a long line rather than the head — what you are typing now is
+// what you want to see.
+func (r *Renderer) RenderInput(text string, caretOn bool) *sprite.Sprite {
+	t := r.theme
+	metrics := r.face.Metrics()
+	lineHeight := (metrics.Ascent + metrics.Descent).Ceil() + 2
+
+	line := "> " + text
+	inner := t.MaxWidth - 2*t.Padding
+	// Drop leading runes until the tail fits, so the caret stays visible.
+	for font.MeasureString(r.face, line+"|").Ceil() > inner && len(line) > 3 {
+		_, size := utf8.DecodeRuneInString(line[2:])
+		line = "> " + line[2+size:]
+	}
+	if caretOn {
+		line += "|"
+	}
+
+	img := image.NewNRGBA(image.Rect(0, 0, t.MaxWidth, lineHeight+2*t.Padding))
+	paintPanel(img, t)
+	d := &font.Drawer{
+		Dst:  img,
+		Src:  image.NewUniform(t.Text),
+		Face: r.face,
+		Dot:  fixed.P(t.Padding, t.Padding+metrics.Ascent.Ceil()),
+	}
+	d.DrawString(line)
 	return &sprite.Sprite{Img: img}
 }
 

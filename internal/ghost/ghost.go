@@ -84,6 +84,10 @@ type Ghost struct {
 	cacheDir string
 	aiMu     sync.Mutex // one AI request at a time per ghost
 
+	// Typed input (see input.go).
+	inputMu sync.Mutex
+	input   inputState
+
 	// Initiative accounting (see curiosity.go).
 	curiosity       *curiosity
 	initMu          sync.Mutex
@@ -225,7 +229,24 @@ func Run(ctx context.Context, dir string, opts Options) error {
 
 	// Input -> bus.
 	g.surface.OnClick = func(x, y int) {
+		// Poking the ghost puts away whatever was half-typed, the way
+		// clicking off an input box does anywhere else — and does it first,
+		// so the brain's reaction is not suppressed as "user is typing".
+		g.closeInput()
 		g.publish(proto.Event{Type: proto.EventClick, X: x, Y: y})
+	}
+	// Right-click opens a line to type at the ghost. A separate gesture
+	// from the left click, which belongs to the brain: a scripted ghost's
+	// quip on being poked must not be traded away for an input box.
+	g.surface.OnRightClick = g.openInput
+	g.surface.OnKey = g.onKey
+	g.surface.OnKeyboardFocus = func(focused bool) {
+		if !focused {
+			// The compositor gave the keyboard to something else: the
+			// user's attention has moved on, so the half-typed line goes
+			// with it.
+			g.closeInput()
+		}
 	}
 	g.surface.OnDragEnd = func(x, y int) {
 		g.publish(proto.Event{Type: proto.EventDragEnd, X: x, Y: y})
@@ -522,8 +543,19 @@ func (g *Ghost) showBalloon(text string) {
 		g.opts.Log(fmt.Sprintf("haunt: balloon suppressed (%s)", why))
 		return
 	}
+	// Never paint over a line the user is in the middle of typing.
+	if g.inputOpen() {
+		g.opts.Log("haunt: balloon suppressed (user is typing)")
+		return
+	}
+	g.showBalloonSprite(g.blnRend.Render(text))
+}
+
+// showBalloonSprite puts a rendered panel on screen beside the ghost. It
+// asks no questions about quiet hours or input state — callers decide that,
+// because the input line itself must appear regardless of both.
+func (g *Ghost) showBalloonSprite(sp *sprite.Sprite) {
 	g.hideBalloon()
-	sp := g.blnRend.Render(text)
 	x, y := g.balloonPos()
 	bln, err := g.app.CreateSpriteOpts(sp, x, y, wlclient.SurfaceOptions{PassThrough: true})
 	if err != nil {
@@ -541,17 +573,11 @@ func (g *Ghost) showImageBalloon(img image.Image) {
 		g.opts.Log(fmt.Sprintf("haunt: image balloon suppressed (%s)", why))
 		return
 	}
-	g.hideBalloon()
-	sp := g.blnRend.RenderImage(img)
-	x, y := g.balloonPos()
-	bln, err := g.app.CreateSpriteOpts(sp, x, y, wlclient.SurfaceOptions{PassThrough: true})
-	if err != nil {
-		g.opts.Log(fmt.Sprintf("haunt: image balloon failed: %v", err))
+	if g.inputOpen() {
+		g.opts.Log("haunt: image balloon suppressed (user is typing)")
 		return
 	}
-	g.blnMu.Lock()
-	g.bln = bln
-	g.blnMu.Unlock()
+	g.showBalloonSprite(g.blnRend.RenderImage(img))
 }
 
 // placeBalloon re-anchors the balloon to the sprite's current position.

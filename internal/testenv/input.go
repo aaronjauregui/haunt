@@ -22,6 +22,7 @@ type Pointer struct {
 
 const (
 	btnLeft       = 0x110
+	btnRight      = 0x111
 	statePressed  = 1
 	stateReleased = 0
 )
@@ -110,6 +111,24 @@ func (p *Pointer) Press() error {
 // Release releases the left mouse button.
 func (p *Pointer) Release() error {
 	if err := p.ptr.Button(p.tick(), btnLeft, stateReleased); err != nil {
+		return err
+	}
+	if err := p.ptr.Frame(); err != nil {
+		return err
+	}
+	return p.roundtrip()
+}
+
+// RightClick presses and releases the right mouse button where the pointer
+// is: the gesture that opens a line to type at the ghost.
+func (p *Pointer) RightClick() error {
+	if err := p.ptr.Button(p.tick(), btnRight, statePressed); err != nil {
+		return err
+	}
+	if err := p.ptr.Frame(); err != nil {
+		return err
+	}
+	if err := p.ptr.Button(p.tick(), btnRight, stateReleased); err != nil {
 		return err
 	}
 	if err := p.ptr.Frame(); err != nil {

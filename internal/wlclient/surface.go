@@ -25,6 +25,17 @@ type SpriteSurface struct {
 	OnDragEnd func(x, y int)
 	OnMove    func(x, y int)
 
+	// OnRightClick fires on a right button press over an opaque pixel: the
+	// gesture for addressing the ghost directly.
+	OnRightClick func()
+
+	// OnKey receives raw Linux scancodes while this surface holds keyboard
+	// focus (see App.TakeKeyboard); down distinguishes press from release.
+	// OnKeyboardFocus reports gaining and losing that focus — losing it is
+	// how an input line learns the user's attention went elsewhere.
+	OnKey           func(code uint32, down bool)
+	OnKeyboardFocus func(focused bool)
+
 	app          *App
 	wlSurface    *client.Surface
 	layerSurface *layershell.LayerSurface
