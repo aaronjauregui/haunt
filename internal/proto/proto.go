@@ -89,6 +89,7 @@ const (
 	IntentImagine       IntentType = "imagine"        // generate an image of Text
 	IntentNote          IntentType = "note"           // journal a self-note; recent notes join LLM context
 	IntentSetExpression IntentType = "set_expression" // wear a declared pose
+	IntentPlayClip      IntentType = "play_clip"      // run a declared animation
 )
 
 // Intent is one request emitted by a brain. The driver validates and
@@ -184,6 +185,10 @@ func (i *Intent) Validate() error {
 	case IntentSetExpression:
 		if i.Name == "" {
 			return fmt.Errorf("set_expression intent with empty pose")
+		}
+	case IntentPlayClip:
+		if i.Name == "" {
+			return fmt.Errorf("play_clip intent with empty clip name")
 		}
 	case IntentHideSay, IntentMove, IntentLog:
 	default:

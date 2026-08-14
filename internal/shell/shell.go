@@ -70,6 +70,8 @@ type Manifest struct {
 	// Default names the pose worn at boot; empty uses every layer's own
 	// default.
 	Default string `toml:"default_pose"`
+	// Clips are the shell's animations.
+	Clips []Clip `toml:"clip"`
 }
 
 // loaded is a layer with its art decoded.
@@ -87,7 +89,11 @@ type Shell struct {
 	layers  []*loaded
 	poses   map[string]map[string]string
 	pose    string
-	current map[string]string // layer name -> variant
+	current map[string]string // layer name -> variant, from the pose
+	// overrides is what a running clip is showing right now, on top of the
+	// pose.
+	overrides map[string]string
+	clips     []Clip
 
 	// cache holds composited poses. A ghost that is not changing
 	// expression composites nothing.
@@ -161,6 +167,10 @@ func Load(dir string, m Manifest) (*Shell, error) {
 				return nil, fmt.Errorf("pose %q selects unknown variant %q of layer %q", pose, variant, layer)
 			}
 		}
+	}
+
+	if err := s.loadClips(m.Clips); err != nil {
+		return nil, err
 	}
 
 	sort.SliceStable(s.layers, func(i, j int) bool {
@@ -300,11 +310,66 @@ func (s *Shell) SetPose(name string) bool {
 	return true
 }
 
+// loadClips validates animations against the layers they drive.
+func (s *Shell) loadClips(clips []Clip) error {
+	seen := map[string]bool{}
+	for _, c := range clips {
+		if c.Name == "" {
+			return fmt.Errorf("shell clip has no name")
+		}
+		if seen[c.Name] {
+			return fmt.Errorf("shell clip %q declared twice", c.Name)
+		}
+		seen[c.Name] = true
+		switch c.Trigger {
+		case TriggerAlways, TriggerSometimes, TriggerRarely, TriggerRunOnce, TriggerManual, "":
+		default:
+			return fmt.Errorf("shell clip %q has unknown trigger %q", c.Name, c.Trigger)
+		}
+		if len(c.Keys) == 0 {
+			return fmt.Errorf("shell clip %q has no keys", c.Name)
+		}
+		last := -1
+		for i, k := range c.Keys {
+			if k.At < 0 {
+				return fmt.Errorf("shell clip %q key %d is at a negative time", c.Name, i)
+			}
+			if k.At < last {
+				return fmt.Errorf("shell clip %q keys are out of time order", c.Name)
+			}
+			last = k.At
+			for layer, variant := range k.Set {
+				ld := s.layer(layer)
+				if ld == nil {
+					return fmt.Errorf("shell clip %q drives unknown layer %q", c.Name, layer)
+				}
+				if _, ok := ld.variants[variant]; !ok {
+					return fmt.Errorf("shell clip %q selects unknown variant %q of layer %q", c.Name, variant, layer)
+				}
+			}
+		}
+		if c.Trigger == "" {
+			c.Trigger = TriggerManual
+		}
+		s.clips = append(s.clips, c)
+	}
+	return nil
+}
+
+// selection is the variant showing on each layer: the pose, with any
+// running clip's frame on top.
+func (s *Shell) selection(name string) string {
+	if v, ok := s.overrides[name]; ok {
+		return v
+	}
+	return s.current[name]
+}
+
 // key identifies the current variant selection for caching.
 func (s *Shell) key() string {
 	parts := make([]string, 0, len(s.layers))
 	for _, l := range s.layers {
-		parts = append(parts, l.Name+"="+s.current[l.Name])
+		parts = append(parts, l.Name+"="+s.selection(l.Name))
 	}
 	return strings.Join(parts, ",")
 }
@@ -318,7 +383,7 @@ func (s *Shell) Sprite() *sprite.Sprite {
 	}
 	img := image.NewNRGBA(image.Rect(0, 0, s.w, s.h))
 	for _, l := range s.layers {
-		art := l.variants[s.current[l.Name]]
+		art := l.variants[s.selection(l.Name)]
 		if art == nil {
 			continue
 		}
@@ -341,7 +406,7 @@ func (s *Shell) RegionAt(x, y int) string {
 		if l.Region == "" {
 			continue
 		}
-		art := l.variants[s.current[l.Name]]
+		art := l.variants[s.selection(l.Name)]
 		if art == nil {
 			continue
 		}
@@ -354,4 +419,97 @@ func (s *Shell) RegionAt(x, y int) string {
 		}
 	}
 	return ""
+}
+
+// Clip is an animation: a sequence of keyframes that swap layer variants on
+// a clock. This is SERIKO's pattern animation, in the vocabulary the rest of
+// the format already uses — a blink is two keyframes 90ms apart selecting
+// the closed and open eyes.
+//
+// Keyframes carry only `set` for now. Eased transforms (`move`) belong on
+// the same keyframe when they land, which is why a keyframe is a struct
+// rather than a bare variant selection.
+type Clip struct {
+	Name string `toml:"name"`
+	// Trigger says who starts it:
+	//   always    — restart as soon as it ends
+	//   sometimes — at random intervals of a few seconds
+	//   rarely    — at random intervals of a minute or so
+	//   runonce   — once, at boot
+	//   manual    — only when the brain asks
+	Trigger string `toml:"trigger"`
+	// Keys are the frames, in time order from the clip's start.
+	Keys []Key `toml:"keys"`
+}
+
+// Key is one frame of a clip.
+type Key struct {
+	// At is milliseconds from the start of the clip.
+	At int `toml:"at"`
+	// Set chooses a variant per layer, exactly as a pose does. Layers not
+	// mentioned keep whatever the pose selected, so a blink can leave the
+	// mouth alone.
+	Set map[string]string `toml:"set"`
+}
+
+// Trigger values.
+const (
+	TriggerAlways    = "always"
+	TriggerSometimes = "sometimes"
+	TriggerRarely    = "rarely"
+	TriggerRunOnce   = "runonce"
+	TriggerManual    = "manual"
+)
+
+// Clips lists the shell's animations.
+func (s *Shell) Clips() []Clip { return s.clips }
+
+// Clip finds an animation by name.
+func (s *Shell) Clip(name string) (Clip, bool) {
+	for _, c := range s.clips {
+		if c.Name == name {
+			return c, true
+		}
+	}
+	return Clip{}, false
+}
+
+// SetOverrides layers a clip's current frame over the pose. Overrides are
+// transient: the pose is what the ghost looks like, a clip is what it is
+// doing at this instant.
+func (s *Shell) SetOverrides(set map[string]string) {
+	s.overrides = set
+}
+
+// Duration is how long a clip runs, which is the time of its last keyframe.
+func (c Clip) Duration() int {
+	if len(c.Keys) == 0 {
+		return 0
+	}
+	return c.Keys[len(c.Keys)-1].At
+}
+
+// Frame returns the variant selections in force at elapsed milliseconds,
+// and how long until the next keyframe. done reports that the clip has
+// finished, at which point the caller loops or clears it.
+//
+// This is deliberately a pure function of elapsed time: the driver schedules
+// a wake-up per keyframe rather than running a frame loop, so a blink costs
+// two timers rather than thirty repaints a second.
+func (c Clip) Frame(elapsed int) (set map[string]string, nextIn int, done bool) {
+	if len(c.Keys) == 0 {
+		return nil, 0, true
+	}
+	set = map[string]string{}
+	for _, k := range c.Keys {
+		if k.At > elapsed {
+			return set, k.At - elapsed, false
+		}
+		// Keyframes accumulate: a later key that mentions only the mouth
+		// leaves an earlier key's eyes in place.
+		for layer, variant := range k.Set {
+			set[layer] = variant
+		}
+	}
+	return set, 0, true
 }

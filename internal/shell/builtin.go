@@ -89,6 +89,16 @@ func Builtin(size int) *Shell {
 		},
 		current: map[string]string{},
 		cache:   map[string]*sprite.Sprite{},
+		clips: []Clip{{
+			// A blink: shut, then open again a moment later. Two keyframes
+			// and two timers, which is the whole cost of looking alive.
+			Name:    "blink",
+			Trigger: TriggerSometimes,
+			Keys: []Key{
+				{At: 0, Set: map[string]string{"eyes": "closed"}},
+				{At: 110, Set: map[string]string{"eyes": "open"}},
+			},
+		}},
 	}
 	blank := image.NewNRGBA(image.Rect(0, 0, size, size))
 	s.layers = []*loaded{

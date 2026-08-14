@@ -71,8 +71,14 @@ type Ghost struct {
 
 	app     *wlclient.App
 	surface *wlclient.SpriteSurface
-	shell   *shell.Shell
-	blnRend *balloon.Renderer
+
+	// shellMu guards the shell: pose changes come from the intent loop,
+	// clip frames from animation timers.
+	shellMu       sync.Mutex
+	shell         *shell.Shell
+	anim          *animator
+	reducedMotion bool
+	blnRend       *balloon.Renderer
 
 	blnMu sync.Mutex
 	bln   *wlclient.SpriteSurface
@@ -188,6 +194,12 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	if g.quiet, err = quiet.Load(); err != nil {
 		return err
 	}
+
+	anim, err := loadAnimationConfig()
+	if err != nil {
+		return err
+	}
+	g.reducedMotion = anim.ReducedMotion
 
 	// Initiative allowance. Persisted, so restarting the ghost is not a way
 	// to refill it.
@@ -324,6 +336,10 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	if opts.OnReady != nil {
 		opts.OnReady()
 	}
+
+	// Idle animation: blinking and the like, on the shell's own schedule.
+	g.startAnimation()
+	defer g.stopAnimation()
 
 	// Repair the memory index if the embedding model changed since it was
 	// written. In the background: it is a long job on a large index, and
@@ -495,6 +511,8 @@ func (g *Ghost) execIntent(in proto.Intent) {
 		}()
 	case proto.IntentSetExpression:
 		g.setExpression(in.Name)
+	case proto.IntentPlayClip:
+		g.playClip(in.Name)
 	case proto.IntentNote:
 		g.execNote(in.Text)
 	case proto.IntentTell:
@@ -617,18 +635,23 @@ func (g *Ghost) setExpression(pose string) {
 	if g.shell == nil {
 		return
 	}
+	g.shellMu.Lock()
 	if g.shell.Pose() == pose {
+		g.shellMu.Unlock()
 		return
 	}
 	if !g.shell.SetPose(pose) {
+		g.shellMu.Unlock()
 		g.opts.Log(fmt.Sprintf("haunt: expression %q is not one of this shell's poses %v",
 			pose, g.shell.Poses()))
 		return
 	}
+	sp := g.shell.Sprite()
+	g.shellMu.Unlock()
+
 	if g.surface == nil {
 		return // no compositor: tests drive the shell without one
 	}
-	sp := g.shell.Sprite()
 	// Poses composite onto one canvas, so the surface can be repainted in
 	// place — no flicker, and no re-derived input region.
 	if err := g.surface.Redraw(sp); err != nil {

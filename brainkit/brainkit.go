@@ -127,6 +127,13 @@ func (em *Emitter) SetExpression(pose string) {
 	em.emit(Intent{Type: proto.IntentSetExpression, Name: pose})
 }
 
+// PlayClip runs one of the shell's declared animations. Clips the shell
+// does not have are ignored, so a brain may ask for a flourish a simpler
+// shell cannot perform.
+func (em *Emitter) PlayClip(name string) {
+	em.emit(Intent{Type: proto.IntentPlayClip, Name: name})
+}
+
 // Note writes a private journal entry. Recent notes are injected into LLM
 // context on every Chat, so what the ghost chooses to remember shapes its
 // future behavior. The user can read the journal with `haunt journal`.

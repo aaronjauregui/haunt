@@ -282,3 +282,141 @@ func contains(s, sub string) bool {
 	}
 	return false
 }
+
+// TestClipFrame: a clip is a pure function of elapsed time, which is what
+// lets the driver schedule one wake-up per keyframe instead of running a
+// frame loop.
+func TestClipFrame(t *testing.T) {
+	blink := Clip{Name: "blink", Keys: []Key{
+		{At: 0, Set: map[string]string{"eyes": "closed"}},
+		{At: 100, Set: map[string]string{"eyes": "open"}},
+		{At: 300, Set: map[string]string{"mouth": "smile"}},
+	}}
+
+	for _, tc := range []struct {
+		elapsed    int
+		wantEyes   string
+		wantMouth  string
+		wantNextIn int
+		wantDone   bool
+	}{
+		{0, "closed", "", 100, false},
+		{50, "closed", "", 50, false},
+		{100, "open", "", 200, false},
+		{299, "open", "", 1, false},
+		// Keyframes accumulate: the smile arrives without reopening the
+		// question of the eyes.
+		{300, "open", "smile", 0, true},
+		{5000, "open", "smile", 0, true},
+	} {
+		set, nextIn, done := blink.Frame(tc.elapsed)
+		if set["eyes"] != tc.wantEyes || set["mouth"] != tc.wantMouth {
+			t.Errorf("at %dms: set = %v, want eyes=%q mouth=%q", tc.elapsed, set, tc.wantEyes, tc.wantMouth)
+		}
+		if nextIn != tc.wantNextIn || done != tc.wantDone {
+			t.Errorf("at %dms: nextIn = %d done = %v, want %d/%v", tc.elapsed, nextIn, done, tc.wantNextIn, tc.wantDone)
+		}
+	}
+
+	if got := blink.Duration(); got != 300 {
+		t.Errorf("duration = %d, want 300", got)
+	}
+	if _, _, done := (Clip{}).Frame(0); !done {
+		t.Error("an empty clip is not done")
+	}
+}
+
+// TestOverridesLayerOverThePose: a clip changes what is showing without
+// changing what the ghost *is* — clear the override and the pose is intact.
+func TestOverridesLayerOverThePose(t *testing.T) {
+	s, _ := testShell(t)
+	s.SetPose("asleep") // eyes closed (blue)
+	if got := at(t, s, 8, 8); got != blue {
+		t.Fatalf("pose did not apply: %v", got)
+	}
+
+	s.SetOverrides(map[string]string{"eyes": "open"})
+	if got := at(t, s, 8, 8); got != green {
+		t.Errorf("override not showing: %v", got)
+	}
+	if s.Pose() != "asleep" {
+		t.Errorf("the override changed the pose to %q", s.Pose())
+	}
+
+	s.SetOverrides(nil)
+	if got := at(t, s, 8, 8); got != blue {
+		t.Errorf("clearing the override did not restore the pose: %v", got)
+	}
+}
+
+// TestClipValidation: an animation that names something the shell does not
+// have is a mistake worth catching at load.
+func TestClipValidation(t *testing.T) {
+	dir := t.TempDir()
+	writePNG(t, dir, "a.png", 10, 10, red)
+	base := []Layer{{Name: "eyes", Variants: map[string]string{"open": "a.png"}, Default: "open"}}
+
+	for _, tc := range []struct {
+		name string
+		clip Clip
+		want string
+	}{
+		{"no name", Clip{Keys: []Key{{At: 0}}}, "no name"},
+		{"no keys", Clip{Name: "x"}, "no keys"},
+		{"bad trigger", Clip{Name: "x", Trigger: "occasionally", Keys: []Key{{At: 0}}}, "unknown trigger"},
+		{"negative time", Clip{Name: "x", Keys: []Key{{At: -5}}}, "negative time"},
+		{"out of order", Clip{Name: "x", Keys: []Key{{At: 100}, {At: 50}}}, "out of time order"},
+		{"unknown layer", Clip{Name: "x", Keys: []Key{
+			{At: 0, Set: map[string]string{"tail": "open"}},
+		}}, "unknown layer"},
+		{"unknown variant", Clip{Name: "x", Keys: []Key{
+			{At: 0, Set: map[string]string{"eyes": "winking"}},
+		}}, "unknown variant"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(dir, Manifest{Layers: base, Clips: []Clip{tc.clip}})
+			if err == nil || !contains(err.Error(), tc.want) {
+				t.Errorf("err = %v, want one mentioning %q", err, tc.want)
+			}
+		})
+	}
+
+	// Duplicate names are caught too.
+	c := Clip{Name: "x", Keys: []Key{{At: 0, Set: map[string]string{"eyes": "open"}}}}
+	if _, err := Load(dir, Manifest{Layers: base, Clips: []Clip{c, c}}); err == nil ||
+		!contains(err.Error(), "declared twice") {
+		t.Errorf("err = %v, want one about a duplicate", err)
+	}
+
+	// A clip with no trigger is manual: it runs when asked, not on its own.
+	s, err := Load(dir, Manifest{Layers: base, Clips: []Clip{c}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := s.Clip("x")
+	if !ok {
+		t.Fatal("clip not found")
+	}
+	if got.Trigger != TriggerManual {
+		t.Errorf("trigger = %q, want %q", got.Trigger, TriggerManual)
+	}
+}
+
+// TestBuiltinBlinks: the placeholder ghost animates, so a ghost with no art
+// still looks alive and the demo exercises the real path.
+func TestBuiltinBlinks(t *testing.T) {
+	s := Builtin(64)
+	clip, ok := s.Clip("blink")
+	if !ok {
+		t.Fatal("the builtin does not blink")
+	}
+	if clip.Trigger != TriggerSometimes {
+		t.Errorf("trigger = %q, want %q", clip.Trigger, TriggerSometimes)
+	}
+	open := s.Sprite()
+	set, _, _ := clip.Frame(0)
+	s.SetOverrides(set)
+	if s.Sprite() == open {
+		t.Error("the blink's first frame looks identical to open eyes")
+	}
+}

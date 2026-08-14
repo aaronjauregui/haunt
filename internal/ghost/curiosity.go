@@ -53,6 +53,36 @@ const (
 	curiosityKey = internalKeyPrefix + "curiosity"
 )
 
+// AnimationConfig is the [animation] portion of the user config.
+type AnimationConfig struct {
+	// ReducedMotion stops idle animation — blinking, breathing, anything on
+	// an automatic trigger. Clips a brain asks for still play: those are the
+	// ghost saying something, and a companion that ignores its own brain is
+	// broken rather than considerate.
+	ReducedMotion bool `toml:"reduced_motion"`
+}
+
+// loadAnimationConfig reads [animation] from the user config file.
+func loadAnimationConfig() (AnimationConfig, error) {
+	path, err := quiet.ConfigPath()
+	if err != nil {
+		return AnimationConfig{}, err
+	}
+	var root struct {
+		Animation AnimationConfig `toml:"animation"`
+	}
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return AnimationConfig{}, err
+	}
+	if err == nil {
+		if err := toml.Unmarshal(data, &root); err != nil {
+			return AnimationConfig{}, fmt.Errorf("parsing %s: %w", path, err)
+		}
+	}
+	return root.Animation, nil
+}
+
 // CuriosityConfig is the [curiosity] portion of the user config. It is the
 // user's dial, not the ghost's: a ghost declares no allowance and cannot
 // raise one.
