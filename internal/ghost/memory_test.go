@@ -1,10 +1,16 @@
 package ghost
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
+	"sync/atomic"
 	"testing"
+
+	"github.com/aaronjauregui/haunt/internal/ai"
 )
 
 func TestVectorRoundTrip(t *testing.T) {
@@ -180,5 +186,113 @@ func TestRecallContextEmpty(t *testing.T) {
 	g := &Ghost{}
 	if got := g.recallContext(nil); got != "" {
 		t.Errorf("recallContext(nil) = %q, want empty", got)
+	}
+}
+
+// fakeEmbedServer embeds text as a length-derived vector, tagged so the
+// test can tell one "model" from another.
+func fakeEmbedServer(t *testing.T, dims int, calls *int32) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Input string `json:"input"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		atomic.AddInt32(calls, 1)
+		vec := make([]float32, dims)
+		for i := range vec {
+			vec[i] = float32(len(req.Input) + i)
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{{"embedding": vec}},
+		})
+	}))
+}
+
+// testGhost wires the minimum a Ghost needs for memory: a store, an AI
+// service, a granted llm capability.
+func testGhost(t *testing.T, store Store, embedURL, model string) *Ghost {
+	t.Helper()
+	cfg := &ai.Config{Embed: ai.EmbedConfig{BaseURL: embedURL, Model: model}}
+	return &Ghost{
+		store:    store,
+		aiSvc:    ai.NewService(cfg, func(string) {}),
+		opts:     Options{Log: func(string) {}},
+		manifest: &Manifest{Ghost: GhostSection{Capabilities: []string{"llm"}}},
+	}
+}
+
+// TestReembedOnModelChange: changing the embedding model must not quietly
+// cost the ghost its memories. Vectors from the old model are rebuilt from
+// the stored text, and until they are, they sit out rather than scoring
+// nonsense.
+func TestReembedOnModelChange(t *testing.T) {
+	var calls int32
+	srv := fakeEmbedServer(t, 8, &calls)
+	defer srv.Close()
+
+	// An index written by an earlier model, plus one pre-dating model
+	// tagging at all.
+	s := &memStore{m: map[string]string{}}
+	for i, m := range []memory{
+		{Kind: "note", Text: "the user likes oolong", Vec: encodeVec([]float32{1, 2, 3}), Model: "old-model"},
+		{Kind: "exchange", Text: "the compiler is angry", Vec: encodeVec([]float32{3, 2, 1}), Model: "old-model"},
+		{Kind: "note", Text: "written before models were recorded", Vec: encodeVec([]float32{9, 9, 9})},
+	} {
+		entry, _ := json.Marshal(m)
+		s.m[memKeyPrefix+strconv.Itoa(i)] = string(entry)
+	}
+	g := testGhost(t, s, srv.URL, "new-model")
+
+	// Before repair, stale entries are invisible to recall — no scoring of
+	// vectors whose meaning belongs to another model.
+	if got := g.recall("tell me about tea", nil); len(got) != 0 {
+		t.Errorf("stale entries were recalled: %v", got)
+	}
+
+	g.reembedStale(context.Background())
+
+	mems := g.loadMemories()
+	if len(mems) != 3 {
+		t.Fatalf("loaded %d memories, want 3", len(mems))
+	}
+	for _, m := range mems {
+		if m.Model != "new-model" {
+			t.Errorf("memory %q still tagged %q", m.Text, m.Model)
+		}
+		if len(decodeVec(m.Vec)) != 8 {
+			t.Errorf("memory %q kept a %d-dimension vector", m.Text, len(decodeVec(m.Vec)))
+		}
+	}
+	// Three re-embeddings, plus the one recall query above.
+	if n := atomic.LoadInt32(&calls); n != 4 {
+		t.Errorf("embed calls = %d, want 4", n)
+	}
+
+	// A second boot has nothing to do.
+	g.reembedStale(context.Background())
+	if n := atomic.LoadInt32(&calls); n != 4 {
+		t.Errorf("re-embedding repeated itself: %d calls", n)
+	}
+}
+
+// TestReembedStopsOnBackendFailure: an unreachable backend leaves entries
+// stale for the next boot rather than destroying them.
+func TestReembedStopsOnBackendFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "nope", 500)
+	}))
+	defer srv.Close()
+
+	s := &memStore{m: map[string]string{}}
+	entry, _ := json.Marshal(memory{Kind: "note", Text: "keep me", Vec: encodeVec([]float32{1}), Model: "old"})
+	s.m[memKeyPrefix+"0"] = string(entry)
+
+	g := testGhost(t, s, srv.URL, "new-model")
+	g.reembedStale(context.Background())
+
+	mems := g.loadMemories()
+	if len(mems) != 1 || mems[0].Text != "keep me" || mems[0].Model != "old" {
+		t.Errorf("failed re-embedding damaged the index: %+v", mems)
 	}
 }

@@ -68,6 +68,17 @@ type memory struct {
 	// Vec is base64 little-endian float32s: a third the size of the JSON
 	// array and still one line in the store.
 	Vec string `json:"v"`
+	// Model is the embedding model that produced Vec. Vectors from
+	// different models are not comparable, so this is what lets a model
+	// change be noticed and repaired instead of silently emptying the
+	// ghost's memory. Empty means an index written before this was
+	// recorded, which is treated as stale.
+	Model string `json:"m,omitempty"`
+
+	// key is the store slot this came from, so an entry can be rewritten
+	// in place. Not persisted — it is the name of the thing, not part of
+	// it.
+	key string `json:"-"`
 }
 
 // encodeVec packs an embedding for storage.
@@ -136,7 +147,13 @@ func (g *Ghost) remember(kind, text string) {
 		g.opts.Log(fmt.Sprintf("haunt: memory: embedding failed: %v", err))
 		return
 	}
-	entry, err := json.Marshal(memory{Time: time.Now(), Kind: kind, Text: text, Vec: encodeVec(vec)})
+	entry, err := json.Marshal(memory{
+		Time:  time.Now(),
+		Kind:  kind,
+		Text:  text,
+		Vec:   encodeVec(vec),
+		Model: g.aiSvc.EmbedModel(),
+	})
 	if err != nil {
 		return
 	}
@@ -181,9 +198,72 @@ func (g *Ghost) loadMemories() []memory {
 		if json.Unmarshal([]byte(v), &m) != nil {
 			continue
 		}
+		m.key = k
 		out = append(out, m)
 	}
 	return out
+}
+
+// reembedStale rebuilds vectors written by a different embedding model.
+// Vectors from two models are not comparable — same dimensions or not —
+// so without this, changing models silently empties the ghost's memory
+// until 500 new entries have pushed the old ones out of the ring. The
+// source text is stored alongside every vector precisely so this is
+// possible.
+//
+// Runs in the background after boot, one entry at a time under aiMu, so it
+// interleaves with conversation rather than blocking it. Failures leave the
+// entry stale for the next run to retry.
+func (g *Ghost) reembedStale(ctx context.Context) {
+	if !g.memoryEnabled() {
+		return
+	}
+	model := g.aiSvc.EmbedModel()
+	var stale []memory
+	for _, m := range g.loadMemories() {
+		if m.Model != model && m.Text != "" {
+			stale = append(stale, m)
+		}
+	}
+	if len(stale) == 0 {
+		return
+	}
+	g.opts.Log(fmt.Sprintf("haunt: memory: re-embedding %d entries for model %q", len(stale), model))
+
+	done := 0
+	for _, m := range stale {
+		if ctx.Err() != nil {
+			break
+		}
+		if !g.reembedOne(ctx, m, model) {
+			break // backend trouble; the rest keep for next boot
+		}
+		done++
+	}
+	g.opts.Log(fmt.Sprintf("haunt: memory: re-embedded %d/%d entries", done, len(stale)))
+}
+
+// reembedOne rewrites a single entry's vector, reporting whether to
+// continue. aiMu is taken per entry so a long migration yields to chat.
+func (g *Ghost) reembedOne(ctx context.Context, m memory, model string) bool {
+	g.aiMu.Lock()
+	defer g.aiMu.Unlock()
+
+	vec, err := g.aiSvc.Embed(ctx, m.Text)
+	if err != nil {
+		g.opts.Log(fmt.Sprintf("haunt: memory: re-embedding stopped: %v", err))
+		return false
+	}
+	m.Vec, m.Model = encodeVec(vec), model
+	entry, err := json.Marshal(m)
+	if err != nil {
+		return true // skip this one, keep going
+	}
+	if err := g.store.Set(m.key, string(entry)); err != nil {
+		g.opts.Log(fmt.Sprintf("haunt: memory: rewriting %s: %v", m.key, err))
+		return false
+	}
+	return true
 }
 
 // recall returns the memories most similar to text, most relevant first.
@@ -203,9 +283,13 @@ func (g *Ghost) recall(text string, skip map[string]bool) []memory {
 		return nil
 	}
 
+	model := g.aiSvc.EmbedModel()
 	ranked := make([]scored, 0, len(mems))
 	for _, m := range mems {
-		if skip[m.Text] {
+		// Entries from another model are not comparable and would score
+		// plausible nonsense when the dimensions happen to match. They sit
+		// out until reembedStale has rebuilt them.
+		if skip[m.Text] || m.Model != model {
 			continue
 		}
 		ranked = append(ranked, scored{m, cosine(vec, decodeVec(m.Vec))})

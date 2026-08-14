@@ -285,6 +285,11 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		opts.OnReady()
 	}
 
+	// Repair the memory index if the embedding model changed since it was
+	// written. In the background: it is a long job on a large index, and
+	// the ghost should be talking meanwhile.
+	go g.reembedStale(ctx)
+
 	// Wayland event loop until cancelled.
 	dispatchErr := make(chan error, 1)
 	go func() {
