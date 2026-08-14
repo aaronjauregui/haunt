@@ -33,6 +33,7 @@ type SpriteSurface struct {
 	src          *sprite.Sprite
 
 	configured bool
+	destroyed  bool
 	mapFailed  error
 	opts       SurfaceOptions
 
@@ -75,9 +76,15 @@ func (a *App) CreateSpriteOpts(sp *sprite.Sprite, x, y int32, opts SurfaceOption
 	}
 
 	s.layerSurface.SetConfigureHandler(func(e layershell.LayerSurfaceConfigureEvent) {
-		// Runs on the dispatch goroutine.
+		// Runs on the dispatch goroutine. The surface may have been
+		// destroyed between the event's dispatch lookup and this handler
+		// acquiring the lock; acking a destroyed object is a protocol
+		// error, so re-check under the lock.
 		a.mu.Lock()
 		defer a.mu.Unlock()
+		if s.destroyed {
+			return
+		}
 		s.layerSurface.AckConfigure(e.Serial)
 		if s.configured {
 			return
@@ -202,6 +209,9 @@ func (s *SpriteSurface) Geometry() (x, y, w, h int32) {
 func (s *SpriteSurface) MoveTo(x, y int32) error {
 	s.app.mu.Lock()
 	defer s.app.mu.Unlock()
+	if s.destroyed {
+		return nil
+	}
 	s.X, s.Y = x, y
 	if err := s.layerSurface.SetMargin(y, 0, 0, x); err != nil {
 		return err
@@ -214,6 +224,10 @@ func (s *SpriteSurface) MoveTo(x, y int32) error {
 func (s *SpriteSurface) Destroy() error {
 	s.app.mu.Lock()
 	defer s.app.mu.Unlock()
+	if s.destroyed {
+		return nil
+	}
+	s.destroyed = true
 	delete(s.app.surfaces, s.wlSurface.ID())
 	if s.app.pointerFocus == s {
 		s.app.pointerFocus = nil
