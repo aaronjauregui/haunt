@@ -89,7 +89,8 @@ func (g *Ghost) execChat(in proto.Intent) {
 	if silent {
 		onDelta = func(string) {}
 	}
-	full, err := g.aiSvc.Chat(context.Background(), msgs, onDelta)
+	full, err := g.aiSvc.Chat(context.Background(), msgs, onDelta,
+		ai.Options{Silent: silent, Tag: tag})
 	if err != nil {
 		g.opts.Log(fmt.Sprintf("haunt: chat: %v", err))
 		g.publishAIError(err.Error(), tag)

@@ -13,27 +13,34 @@ import (
 	"time"
 )
 
+// comfyDefaultSize is the per-axis fallback when no size is configured.
+const comfyDefaultSize = 512
+
+// comfyDefaults resolves the sampler settings the workflow will actually
+// use, so the prompt trace can report them rather than guess.
+func comfyDefaults(cfg *ImageConfig) (steps int, cfgScale float64, sampler, negative string) {
+	steps, cfgScale, sampler, negative = cfg.Steps, cfg.CFG, cfg.Sampler, cfg.Negative
+	if steps <= 0 {
+		steps = 12
+	}
+	if cfgScale <= 0 {
+		cfgScale = 5.5
+	}
+	if sampler == "" {
+		sampler = "euler"
+	}
+	if negative == "" {
+		negative = "blurry, text, watermark, low quality"
+	}
+	return steps, cfgScale, sampler, negative
+}
+
 // comfyGenerate drives a ComfyUI server through its workflow-graph API:
 // submit a minimal txt2img graph to /prompt, poll /history until the run
 // completes, and fetch the result via /view.
 func comfyGenerate(ctx context.Context, cfg *ImageConfig, prompt string) ([]byte, error) {
-	width, height := parseSize(cfg.Size, 512)
-	steps := cfg.Steps
-	if steps <= 0 {
-		steps = 12
-	}
-	cfgScale := cfg.CFG
-	if cfgScale <= 0 {
-		cfgScale = 5.5
-	}
-	negative := cfg.Negative
-	if negative == "" {
-		negative = "blurry, text, watermark, low quality"
-	}
-	sampler := cfg.Sampler
-	if sampler == "" {
-		sampler = "euler"
-	}
+	width, height := parseSize(cfg.Size, comfyDefaultSize)
+	steps, cfgScale, sampler, negative := comfyDefaults(cfg)
 
 	graph := map[string]any{
 		"1": node("CheckpointLoaderSimple", map[string]any{"ckpt_name": cfg.Model}),

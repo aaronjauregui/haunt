@@ -76,7 +76,7 @@ func TestComfyGenerate(t *testing.T) {
 			Model:   "test.safetensors",
 		},
 		Budget: BudgetConfig{LLMRequestsPerHour: 1, ImageRequestsPerHour: 5},
-	})
+	}, nil)
 	got, err := s.GenerateImage(context.Background(), "a ghost")
 	if err != nil {
 		t.Fatal(err)
@@ -90,7 +90,7 @@ func TestUnknownBackendRejected(t *testing.T) {
 	s := NewService(&Config{
 		Image:  ImageConfig{Backend: "banana", BaseURL: "http://x"},
 		Budget: BudgetConfig{LLMRequestsPerHour: 1, ImageRequestsPerHour: 1},
-	})
+	}, nil)
 	if _, err := s.GenerateImage(context.Background(), "x"); err == nil {
 		t.Fatal("unknown backend should error")
 	}

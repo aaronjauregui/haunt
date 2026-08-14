@@ -180,7 +180,7 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	if err != nil {
 		return err
 	}
-	g.aiSvc = ai.NewService(aiCfg)
+	g.aiSvc = ai.NewService(aiCfg, opts.Log)
 	g.cacheDir = filepath.Join(opts.StateDir, "cache")
 	if opts.StateDir == "" {
 		g.cacheDir = filepath.Join(os.TempDir(), "haunt-cache-"+m.Ghost.Name)

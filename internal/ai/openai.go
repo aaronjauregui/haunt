@@ -17,12 +17,18 @@ var httpClient = &http.Client{Timeout: 5 * time.Minute}
 
 // chatCompletion calls an OpenAI-compatible /chat/completions endpoint with
 // streaming, invoking onDelta per content fragment.
-func chatCompletion(ctx context.Context, cfg *LLMConfig, msgs []Message, onDelta func(string)) (string, error) {
-	reqBody, err := json.Marshal(map[string]any{
+func chatCompletion(ctx context.Context, cfg *LLMConfig, msgs []Message, onDelta func(string), opts Options) (string, error) {
+	body := map[string]any{
 		"model":    cfg.Model,
 		"messages": msgs,
 		"stream":   true,
-	})
+	}
+	// Left out entirely when unconfigured, so the backend's own default
+	// applies rather than one invented here.
+	if temp, ok := cfg.temperature(opts.Silent); ok {
+		body["temperature"] = temp
+	}
+	reqBody, err := json.Marshal(body)
 	if err != nil {
 		return "", err
 	}
