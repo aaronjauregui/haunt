@@ -80,6 +80,7 @@ const (
 	IntentTell        IntentType = "tell"    // message another ghost
 	IntentChat        IntentType = "chat"    // LLM reply to Text, streamed to the balloon
 	IntentImagine     IntentType = "imagine" // generate an image of Text
+	IntentNote        IntentType = "note"    // journal a self-note; recent notes join LLM context
 )
 
 // Intent is one request emitted by a brain. The driver validates and
@@ -150,6 +151,10 @@ func (i *Intent) Validate() error {
 	case IntentImagine:
 		if i.Text == "" {
 			return fmt.Errorf("imagine intent with empty prompt")
+		}
+	case IntentNote:
+		if i.Text == "" {
+			return fmt.Errorf("note intent with empty text")
 		}
 	case IntentHideSay, IntentMove, IntentLog:
 	default:

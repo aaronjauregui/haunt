@@ -39,9 +39,15 @@ func fakeAIBackend(t *testing.T) *httptest.Server {
 			return
 		}
 		last := req.Messages[len(req.Messages)-1].Content
+		reply := "indeed, you said: " + last
+		// Journal injection is visible server-side: notes ride the system
+		// prompt.
+		if strings.Contains(req.Messages[0].Content, "likes sunsets") {
+			reply = "[noted] " + reply
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		fl := w.(http.Flusher)
-		for _, word := range strings.Fields("indeed, you said: " + last) {
+		for _, word := range strings.Fields(reply) {
 			b, _ := json.Marshal(map[string]any{"choices": []map[string]any{
 				{"delta": map[string]string{"content": word + " "}},
 			}})
@@ -156,9 +162,23 @@ wasm = "brain.wasm"
 		t.Errorf("cache files = %v, %v", cache, err)
 	}
 
-	// Budget: llm limit is 2; this second chat uses it up, the third fails.
+	// Self-notes: a remembered fact reaches the next chat's system prompt
+	// (the fake backend prefixes replies with [noted] when it sees it).
+	say("remember the user likes sunsets")
+	waitRecordContains(t, record, `"type":"message"`)
 	say("second message")
-	waitRecordContains(t, record, "indeed, you said: second message")
+	waitRecordContains(t, record, "[noted] indeed, you said: second message")
+
+	// The journal CLI reads the notes back.
+	jr := exec.Command(bin, "journal", "-state", filepath.Join(dir, "state"))
+	jr.Env = env
+	out, err := jr.CombinedOutput()
+	if err != nil {
+		t.Fatalf("journal: %v: %s", err, out)
+	}
+	if !strings.Contains(string(out), "the user likes sunsets") {
+		t.Errorf("journal output = %s", out)
+	}
 	say("third message")
 	waitRecordContains(t, record, `"type":"ai_error"`)
 	waitRecordContains(t, record, "limit of 2 requests/hour")

@@ -55,7 +55,9 @@ func (g *Ghost) execChat(text string) {
 	if system == "" {
 		system = "You are " + g.manifest.Ghost.Name + ", a small desktop companion. Reply in one or two short sentences."
 	}
-	msgs = append(msgs, ai.Message{Role: "system", Content: system})
+	// The journal makes the persona self-modifying: notes the ghost wrote
+	// about past interactions ride along with every request.
+	msgs = append(msgs, ai.Message{Role: "system", Content: system + g.notesContext()})
 	msgs = append(msgs, history...)
 	msgs = append(msgs, ai.Message{Role: "user", Content: text})
 

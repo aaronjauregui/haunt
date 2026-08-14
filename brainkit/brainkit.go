@@ -91,6 +91,13 @@ func (em *Emitter) Imagine(prompt string) {
 	em.emit(Intent{Type: proto.IntentImagine, Text: prompt})
 }
 
+// Note writes a private journal entry. Recent notes are injected into LLM
+// context on every Chat, so what the ghost chooses to remember shapes its
+// future behavior. The user can read the journal with `haunt journal`.
+func (em *Emitter) Note(text string) {
+	em.emit(Intent{Type: proto.IntentNote, Text: text})
+}
+
 // Run reads events from stdin until EOF, dispatching each to b. Call it from
 // main; it returns when the driver closes the event stream.
 func Run(b Brain) {

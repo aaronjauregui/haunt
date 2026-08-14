@@ -401,6 +401,8 @@ func (g *Ghost) execIntent(in proto.Intent) {
 			defer g.aiMu.Unlock()
 			g.execImagine(in.Text)
 		}()
+	case proto.IntentNote:
+		g.execNote(in.Text)
 	case proto.IntentTell:
 		if !g.capabilityActive("tell") {
 			g.opts.Log(fmt.Sprintf("haunt: tell intent dropped: capability not granted"))

@@ -25,6 +25,12 @@ func main() {
 				emit.Imagine(prompt)
 				return
 			}
+			if fact, ok := strings.CutPrefix(e.Text, "remember "); ok {
+				emit.Note(fact)
+				emit.Say("Noted, I'll keep that in mind.")
+				emit.SetTimer("hush", 5000)
+				return
+			}
 			emit.Chat(e.Text)
 		case "ai_reply":
 			// The driver already streamed it to the balloon; linger a while.
