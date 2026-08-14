@@ -10,7 +10,13 @@ cd "$(dirname "$0")/.."
 
 backend="${WLR_BACKENDS:-wayland}"
 workdir="$(mktemp -d /tmp/haunt-demo-XXXXXX)"
-trap 'kill 0 2>/dev/null; rm -rf "$workdir"' EXIT
+# Kill child processes (not the whole group: that would kill this script
+# before the rm runs), then remove the workdir.
+cleanup() {
+    kill $(jobs -p) 2>/dev/null || true
+    rm -rf "$workdir"
+}
+trap cleanup EXIT TERM INT
 
 cat > "$workdir/sway.cfg" <<'EOF'
 output * bg #24283b solid_color
