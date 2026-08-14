@@ -78,6 +78,7 @@ func cmdRun(args []string) error {
 	y := fs.Int("y", 100, "initial sprite y position")
 	record := fs.String("record", "", "record the event session to FILE (JSONL)")
 	state := fs.String("state", "", "override state directory")
+	idleMS := fs.Uint("idle-ms", 0, "idle threshold in milliseconds (default 2 minutes)")
 	fs.Parse(args)
 	if fs.NArg() > 1 {
 		return fmt.Errorf("run: at most one ghost directory or name expected")
@@ -85,9 +86,10 @@ func cmdRun(args []string) error {
 
 	opts := ghost.Options{
 		X: *x, Y: *y,
-		RecordTo: *record,
-		StateDir: *state,
-		Log:      func(s string) { fmt.Fprintln(os.Stderr, s) },
+		RecordTo:      *record,
+		StateDir:      *state,
+		IdleTimeoutMS: uint32(*idleMS),
+		Log:           func(s string) { fmt.Fprintln(os.Stderr, s) },
 		// Machine-readable readiness marker for scripts and tests.
 		OnReady: func() { fmt.Println("READY") },
 	}

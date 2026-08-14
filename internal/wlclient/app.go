@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/rajveermalviya/go-wayland/wayland/client"
+	ext_idle_notify "github.com/rajveermalviya/go-wayland/wayland/staging/ext-idle-notify-v1"
 
 	"github.com/aaronjauregui/haunt/internal/wayland/layershell"
 )
@@ -50,6 +51,7 @@ type App struct {
 	seat       *client.Seat
 	pointer    *client.Pointer
 	layerShell *layershell.LayerShell
+	idleMgr    *ext_idle_notify.IdleNotifier
 
 	// pointerFocus tracks which sprite surface the pointer is over.
 	surfaces     map[uint32]*SpriteSurface
@@ -98,6 +100,9 @@ func Connect() (*App, error) {
 		case "zwlr_layer_shell_v1":
 			a.layerShell = layershell.NewLayerShell(ctx)
 			registry.Bind(e.Name, e.Interface, minu(e.Version, 4), a.layerShell)
+		case "ext_idle_notifier_v1":
+			a.idleMgr = ext_idle_notify.NewIdleNotifier(ctx)
+			registry.Bind(e.Name, e.Interface, 1, a.idleMgr)
 		}
 	})
 
@@ -163,6 +168,24 @@ func (a *App) Dispatch() error {
 // Close tears down the connection.
 func (a *App) Close() error {
 	return a.display.Context().Close()
+}
+
+// WatchIdle asks the compositor for idle notifications after the given
+// timeout of user inactivity. Callbacks run on the dispatch goroutine.
+// Returns false when the compositor does not offer ext-idle-notify.
+func (a *App) WatchIdle(timeoutMS uint32, onIdle, onResume func()) (bool, error) {
+	if a.idleMgr == nil || a.seat == nil {
+		return false, nil
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	n, err := a.idleMgr.GetIdleNotification(timeoutMS, a.seat)
+	if err != nil {
+		return false, err
+	}
+	n.SetIdledHandler(func(ext_idle_notify.IdleNotificationIdledEvent) { onIdle() })
+	n.SetResumedHandler(func(ext_idle_notify.IdleNotificationResumedEvent) { onResume() })
+	return true, nil
 }
 
 func (a *App) initPointer(p *client.Pointer) {

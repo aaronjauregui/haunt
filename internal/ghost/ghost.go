@@ -56,6 +56,9 @@ type Options struct {
 	// declares. Nil means dev mode: everything declared is granted, with a
 	// log line. Capabilities not in the manifest are never active.
 	Granted func(cap string) bool
+	// IdleTimeoutMS overrides the inactivity threshold for idle events
+	// (default 2 minutes).
+	IdleTimeoutMS uint32
 }
 
 // Ghost is a running instance.
@@ -217,6 +220,23 @@ func Run(ctx context.Context, dir string, opts Options) error {
 			return err
 		}
 		defer ctl.Close()
+	}
+
+	// Idle awareness: after inactivity brains hear idle, and active when
+	// the user returns. Compositor support is optional.
+	idleTimeoutMS := opts.IdleTimeoutMS
+	if idleTimeoutMS == 0 {
+		idleTimeoutMS = 2 * 60 * 1000
+	}
+	supported, err := g.app.WatchIdle(idleTimeoutMS,
+		func() { g.publish(proto.Event{Type: proto.EventIdle}) },
+		func() { g.publish(proto.Event{Type: proto.EventActive}) },
+	)
+	if err != nil {
+		return err
+	}
+	if !supported {
+		opts.Log("haunt: compositor lacks ext-idle-notify; idle events disabled")
 	}
 
 	// Scheduled triggers from the manifest.
