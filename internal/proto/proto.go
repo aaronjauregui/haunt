@@ -109,6 +109,13 @@ type Intent struct {
 	// out of conversation history — for brain-internal LLM calls such as
 	// rewriting a user request into an image prompt.
 	Silent bool `json:"silent,omitempty"`
+	// SelfPrompt marks IntentChat text as a stage direction the ghost gave
+	// itself rather than something the user said. The model still receives
+	// it — that is how the ghost is steered — but history and memory record
+	// only the reply, and record it as unprompted. Without this, a ghost
+	// that speaks first slowly fills its own memory with utterances it
+	// attributes to a user who never made them.
+	SelfPrompt bool `json:"self_prompt,omitempty"`
 	// Fresh skips the generation cache for IntentImagine, so asking again
 	// for the same prompt produces a different image.
 	Fresh bool `json:"fresh,omitempty"`

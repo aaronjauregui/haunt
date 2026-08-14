@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -24,8 +25,11 @@ func TestInitiative(t *testing.T) {
 	c := testenv.StartT(t)
 
 	var chats int32
+	prompts := &systemPrompts{} // reused here to capture whole requests
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&chats, 1)
+		body, _ := io.ReadAll(r.Body)
+		prompts.add(string(body))
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Still there?\"}}]}\n\ndata: [DONE]\n\n")
 	}))
@@ -117,6 +121,18 @@ wasm = "brain.wasm"
 		t.Fatalf("say: %v: %s", err, out)
 	}
 	waitRecordCount(t, record, `"type":"ai_reply"`, 2)
+
+	// What the ghost said unbidden is remembered as its own remark. The
+	// stage direction that produced it was never said by anyone, and must
+	// not turn up in history attributed to the user — a ghost that speaks
+	// first would otherwise slowly invent a conversation partner.
+	last := prompts.last()
+	if strings.Contains(last, "Nobody has spoken") {
+		t.Errorf("a self-prompt was recorded as the user's words:\n%s", last)
+	}
+	if !strings.Contains(last, "Still there?") {
+		t.Errorf("the ghost's unprompted remark was not kept in history:\n%s", last)
+	}
 
 	// And the spend survives a restart: stopping and starting the ghost is
 	// not a way to refill the allowance.

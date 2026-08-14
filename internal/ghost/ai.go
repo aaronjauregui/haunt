@@ -110,9 +110,16 @@ func (g *Ghost) execChat(in proto.Intent, userDriven bool) {
 	if turns <= 0 {
 		turns = 12
 	}
-	history = append(history,
-		ai.Message{Role: "user", Content: text},
-		ai.Message{Role: "assistant", Content: full})
+	// A self-prompt is the ghost's own stage direction: the model saw it,
+	// but the record must not claim the user said it. Only the reply is
+	// kept, and kept as what it was — the ghost speaking first.
+	if in.SelfPrompt {
+		history = append(history, ai.Message{Role: "assistant", Content: full})
+	} else {
+		history = append(history,
+			ai.Message{Role: "user", Content: text},
+			ai.Message{Role: "assistant", Content: full})
+	}
 	if max := turns * 2; len(history) > max {
 		history = history[len(history)-max:]
 	}
@@ -121,7 +128,11 @@ func (g *Ghost) execChat(in proto.Intent, userDriven bool) {
 	// The exchange leaves the history window eventually; this is what
 	// outlives it. Labelled, because recall pastes it into a prompt months
 	// later where two bare lines would be ambiguous about who said what.
-	g.remember("exchange", "The user said: "+text+"\nYou answered: "+full)
+	if in.SelfPrompt {
+		g.remember("exchange", "Unprompted, you said: "+full)
+	} else {
+		g.remember("exchange", "The user said: "+text+"\nYou answered: "+full)
+	}
 
 	g.publishAIResult(proto.Event{Type: proto.EventAIReply, Text: full, Tag: tag}, userDriven)
 }

@@ -94,6 +94,19 @@ func (em *Emitter) Ask(tag, text string) {
 	em.emit(Intent{Type: proto.IntentChat, Text: text, Tag: tag, Silent: true})
 }
 
+// Initiate speaks first. direction is a stage direction for the model —
+// "nobody has spoken in a while; say something short, drawing on what you
+// remember" — not a line the user typed, and the driver records only the
+// reply, as the ghost's own remark. Use this rather than Chat for anything
+// the ghost says unbidden, or its memory fills with words it credits to a
+// user who never said them.
+//
+// Unprompted actions come out of the ghost's daily curiosity allowance;
+// the driver may refuse silently.
+func (em *Emitter) Initiate(direction string) {
+	em.emit(Intent{Type: proto.IntentChat, Text: direction, SelfPrompt: true})
+}
+
 // Imagine generates an image (requires the imagine capability), shown as an
 // image balloon and reported by an ai_image event. Identical prompts are
 // served from the generation cache.
