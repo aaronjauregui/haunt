@@ -165,6 +165,15 @@ func (g *Ghost) execImagine(in proto.Intent, userDriven bool) {
 		g.publishAIError("no image backend configured in the haunt config", tag)
 		return
 	}
+	// A local diffusion run takes the whole GPU for seconds at a time,
+	// which is a visible stutter in whatever is fullscreen. The refusal is
+	// reported rather than silent: the user asked for a picture, so they
+	// should hear why there isn't one.
+	if g.desktop != nil && g.desktop.Fullscreen() {
+		g.opts.Log("haunt: imagine refused: something is fullscreen")
+		g.publishAIError("not while something is fullscreen — it would stutter", tag)
+		return
+	}
 
 	// Content-addressed cache: same backend/model/prompt = same file.
 	salt := ""

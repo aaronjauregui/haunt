@@ -8,6 +8,9 @@ import (
 	"github.com/rajveermalviya/go-wayland/wayland/client"
 	"golang.org/x/sys/unix"
 
+	"github.com/rajveermalviya/go-wayland/wayland/stable/viewporter"
+	fractionalscale "github.com/rajveermalviya/go-wayland/wayland/staging/fraction-sclae-v1"
+
 	"github.com/aaronjauregui/haunt/internal/sprite"
 	"github.com/aaronjauregui/haunt/internal/wayland/layershell"
 )
@@ -31,6 +34,11 @@ type SpriteSurface struct {
 	// gesture for addressing the ghost directly.
 	OnRightClick func()
 
+	// OnScaleChanged reports the compositor's preferred scale for this
+	// surface (1.0, 1.5, 2.0…), so the caller can redraw its art at that
+	// resolution. Fires on the dispatch goroutine, outside the app lock.
+	OnScaleChanged func(scale float64)
+
 	// OnKey receives raw Linux scancodes while this surface holds keyboard
 	// focus (see App.TakeKeyboard); down distinguishes press from release.
 	// OnKeyboardFocus reports gaining and losing that focus — losing it is
@@ -41,9 +49,14 @@ type SpriteSurface struct {
 	app          *App
 	wlSurface    *client.Surface
 	layerSurface *layershell.LayerSurface
-	buffer       *client.Buffer
-	shmData      []byte
-	src          *sprite.Sprite
+	viewport     *viewporter.Viewport
+	fracScale    *fractionalscale.FractionalScale
+	// scale is the compositor's preferred scale as 120ths, the unit the
+	// fractional-scale protocol uses: 120 is 1x, 180 is 1.5x, 240 is 2x.
+	scale   int32
+	buffer  *client.Buffer
+	shmData []byte
+	src     *sprite.Sprite
 
 	configured bool
 	destroyed  bool
@@ -65,6 +78,10 @@ type SurfaceOptions struct {
 	// choose, which is the right default for a first run and the wrong one
 	// for a ghost that was somewhere specific yesterday.
 	Output string
+	// LogicalW, LogicalH are the size the buffer stands for, when it was
+	// drawn at a HiDPI scale and is therefore bigger than that. Zero means
+	// the buffer is already logical size.
+	LogicalW, LogicalH int32
 }
 
 // CreateSprite maps sp as an overlay at position (x, y). Mapping completes
@@ -83,7 +100,11 @@ func (a *App) CreateSpriteOpts(sp *sprite.Sprite, x, y int32, opts SurfaceOption
 	// animates by recreating its surface flickers, and counting these is
 	// how a test tells the difference.
 	a.logEvent("surface create %dx%d at (%d,%d)", w, h, x, y)
-	s := &SpriteSurface{X: x, Y: y, W: int32(w), H: int32(h), app: a, opts: opts, src: sp}
+	logicalW, logicalH := int32(w), int32(h)
+	if opts.LogicalW > 0 && opts.LogicalH > 0 {
+		logicalW, logicalH = opts.LogicalW, opts.LogicalH
+	}
+	s := &SpriteSurface{X: x, Y: y, W: logicalW, H: logicalH, app: a, opts: opts, src: sp}
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -92,6 +113,33 @@ func (a *App) CreateSpriteOpts(sp *sprite.Sprite, x, y int32, opts SurfaceOption
 	if s.wlSurface, err = a.compositor.CreateSurface(); err != nil {
 		return nil, err
 	}
+	// HiDPI: ask the compositor what scale it wants this surface drawn at,
+	// and put a viewport on it. Without this the ghost is rendered at
+	// logical size and the compositor stretches it — a 160px sprite on a
+	// 200% screen is either half the size it should be or twice as blurry.
+	// With it, the buffer is drawn at the real device resolution and the
+	// viewport declares the logical size it stands for, which is also how
+	// non-integer scales like 1.25 are expressed at all.
+	if a.fracScale != nil {
+		if fs, err := a.fracScale.GetFractionalScale(s.wlSurface); err == nil {
+			s.fracScale = fs
+			fs.SetPreferredScaleHandler(func(e fractionalscale.FractionalScalePreferredScaleEvent) {
+				a.mu.Lock()
+				changed := int32(e.Scale) != s.scale
+				s.scale = int32(e.Scale)
+				a.mu.Unlock()
+				if changed && s.OnScaleChanged != nil {
+					s.OnScaleChanged(float64(e.Scale) / 120)
+				}
+			})
+		}
+	}
+	if a.viewporter != nil {
+		if vp, err := a.viewporter.GetViewport(s.wlSurface); err == nil {
+			s.viewport = vp
+		}
+	}
+
 	// Layer-shell coordinates are relative to the output the surface is
 	// on, so pinning the output is what makes a remembered position mean
 	// the same thing tomorrow.
@@ -135,7 +183,9 @@ func (a *App) CreateSpriteOpts(sp *sprite.Sprite, x, y int32, opts SurfaceOption
 		s.configured = false
 	})
 
-	s.layerSurface.SetSize(uint32(w), uint32(h))
+	// The layer surface is sized in logical pixels; the buffer may be
+	// larger when drawn for a HiDPI screen.
+	s.layerSurface.SetSize(uint32(s.W), uint32(s.H))
 	s.layerSurface.SetAnchor(AnchorTop | AnchorLeft)
 	s.layerSurface.SetMargin(y, 0, 0, x)
 	s.layerSurface.SetKeyboardInteractivity(KeyboardInteractivityNone)
@@ -206,6 +256,11 @@ func (s *SpriteSurface) attach(sp *sprite.Sprite) error {
 	s.buffer = buf
 
 	if err := s.wlSurface.Attach(buf, 0, 0); err != nil {
+		return err
+	}
+	// The buffer may be bigger than the logical size when the surface is
+	// drawn for a HiDPI screen; the viewport says what it stands for.
+	if err := s.setViewport(w, h); err != nil {
 		return err
 	}
 	return s.wlSurface.Damage(0, 0, int32(w), int32(h))
@@ -324,4 +379,28 @@ func (s *SpriteSurface) RedrawRect(sp *sprite.Sprite, r image.Rectangle) error {
 		return err
 	}
 	return s.wlSurface.Commit()
+}
+
+// Scale is the compositor's preferred scale for this surface (1.0 when it
+// has not said, or when the protocol is missing).
+func (s *SpriteSurface) Scale() float64 {
+	s.app.mu.Lock()
+	defer s.app.mu.Unlock()
+	if s.scale <= 0 {
+		return 1
+	}
+	return float64(s.scale) / 120
+}
+
+// setViewport declares the logical size a buffer stands for. Callers hold
+// the app lock.
+func (s *SpriteSurface) setViewport(bufW, bufH int) error {
+	if s.viewport == nil {
+		return nil
+	}
+	w, h := int32(bufW), int32(bufH)
+	if s.W > 0 && s.H > 0 {
+		w, h = s.W, s.H
+	}
+	return s.viewport.SetDestination(w, h)
 }

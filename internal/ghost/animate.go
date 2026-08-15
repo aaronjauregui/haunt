@@ -183,6 +183,19 @@ func (g *Ghost) advanceClip(name string) {
 	if !done {
 		return
 	}
+	// Idle animation stops while something is fullscreen: a companion
+	// twitching in the corner of a film is exactly the distraction this
+	// rule exists to prevent. Talk clips are unaffected — if the ghost is
+	// speaking at all, its mouth should move.
+	idle := trigger == shell.TriggerAlways || trigger == shell.TriggerSometimes ||
+		trigger == shell.TriggerRarely
+	if idle && g.desktop != nil && g.desktop.Fullscreen() {
+		g.anim.mu.Lock()
+		g.anim.pending[name] = time.AfterFunc(15*time.Second, func() { g.playClip(name) })
+		g.anim.mu.Unlock()
+		return
+	}
+
 	// The clip finished: loop it, or line up its next outing.
 	switch trigger {
 	case shell.TriggerTalk:

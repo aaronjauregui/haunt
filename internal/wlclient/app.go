@@ -11,7 +11,9 @@ import (
 	"sync"
 
 	"github.com/rajveermalviya/go-wayland/wayland/client"
+	"github.com/rajveermalviya/go-wayland/wayland/stable/viewporter"
 	ext_idle_notify "github.com/rajveermalviya/go-wayland/wayland/staging/ext-idle-notify-v1"
+	fractionalscale "github.com/rajveermalviya/go-wayland/wayland/staging/fraction-sclae-v1"
 
 	"github.com/aaronjauregui/haunt/internal/wayland/layershell"
 )
@@ -58,6 +60,8 @@ type App struct {
 	keyboard   *client.Keyboard
 	layerShell *layershell.LayerShell
 	idleMgr    *ext_idle_notify.IdleNotifier
+	viewporter *viewporter.Viewporter
+	fracScale  *fractionalscale.FractionalScaleManager
 
 	// outputs are the screens, keyed by their registry name so hotplug can
 	// remove them. A desktop companion lives on one of several monitors and
@@ -123,6 +127,12 @@ func Connect() (*App, error) {
 			registry.Bind(e.Name, e.Interface, minu(e.Version, 4), a.layerShell)
 		case "wl_output":
 			a.bindOutput(ctx, registry, e.Name, e.Version)
+		case "wp_viewporter":
+			a.viewporter = viewporter.NewViewporter(ctx)
+			registry.Bind(e.Name, e.Interface, 1, a.viewporter)
+		case "wp_fractional_scale_manager_v1":
+			a.fracScale = fractionalscale.NewFractionalScaleManager(ctx)
+			registry.Bind(e.Name, e.Interface, 1, a.fracScale)
 		case "ext_idle_notifier_v1":
 			a.idleMgr = ext_idle_notify.NewIdleNotifier(ctx)
 			registry.Bind(e.Name, e.Interface, 1, a.idleMgr)

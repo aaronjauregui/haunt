@@ -52,23 +52,59 @@ func DefaultTheme() Theme {
 type Renderer struct {
 	theme Theme
 	face  font.Face
+	// scale is the device pixels per logical pixel. Text is the part of a
+	// balloon that suffers most from being drawn small and stretched, so
+	// the whole panel is rendered at the screen's real resolution and the
+	// surface's viewport declares the logical size it stands for.
+	scale float64
 }
 
 // NewRenderer prepares a renderer for the theme (parsing the embedded font).
 func NewRenderer(theme Theme) (*Renderer, error) {
+	return NewRendererScaled(theme, 1)
+}
+
+// NewRendererScaled prepares a renderer that draws at scale device pixels
+// per logical pixel: 2 for a 200% screen, 1.5 for 150%.
+func NewRendererScaled(theme Theme, scale float64) (*Renderer, error) {
+	if scale <= 0 {
+		scale = 1
+	}
 	ft, err := opentype.Parse(goregular.TTF)
 	if err != nil {
 		return nil, err
 	}
+	scaled := theme
+	scaled.FontSize = theme.FontSize * scale
+	scaled.MaxWidth = int(float64(theme.MaxWidth) * scale)
+	scaled.MaxHeight = int(float64(theme.MaxHeight) * scale)
+	scaled.Padding = int(float64(theme.Padding) * scale)
+	scaled.Radius = int(float64(theme.Radius) * scale)
+
 	face, err := opentype.NewFace(ft, &opentype.FaceOptions{
-		Size:    theme.FontSize,
+		Size:    scaled.FontSize,
 		DPI:     72,
 		Hinting: font.HintingFull,
 	})
 	if err != nil {
 		return nil, err
 	}
-	return &Renderer{theme: theme, face: face}, nil
+	return &Renderer{theme: scaled, face: face, scale: scale}, nil
+}
+
+// Scale is the device pixels per logical pixel this renderer draws at.
+func (r *Renderer) Scale() float64 {
+	if r.scale <= 0 {
+		return 1
+	}
+	return r.scale
+}
+
+// LogicalSize converts a rendered panel's pixel size back to the logical
+// size it stands for, which is what the compositor needs to be told.
+func (r *Renderer) LogicalSize(w, h int) (int, int) {
+	s := r.Scale()
+	return int(float64(w)/s + 0.5), int(float64(h)/s + 0.5)
 }
 
 // Render lays out text and paints the balloon.

@@ -255,6 +255,13 @@ func (g *Ghost) allowInitiative(what string) bool {
 	if g.responding() {
 		return true
 	}
+	// Never over a game or a film. This is the rule the design has always
+	// stated and could not enforce until the driver could see a fullscreen
+	// window.
+	if g.desktop != nil && g.desktop.Fullscreen() {
+		g.opts.Log(fmt.Sprintf("haunt: initiative: %s dropped (something is fullscreen)", what))
+		return false
+	}
 	if g.curiosity == nil || g.curiosity.limit <= 0 {
 		g.opts.Log(fmt.Sprintf("haunt: initiative: %s dropped (curiosity disabled)", what))
 		return false

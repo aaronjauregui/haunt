@@ -20,6 +20,7 @@ import (
 	"github.com/aaronjauregui/haunt/internal/brain"
 	"github.com/aaronjauregui/haunt/internal/bus"
 	"github.com/aaronjauregui/haunt/internal/control"
+	"github.com/aaronjauregui/haunt/internal/desktop"
 	"github.com/aaronjauregui/haunt/internal/proto"
 	"github.com/aaronjauregui/haunt/internal/quiet"
 	"github.com/aaronjauregui/haunt/internal/shell"
@@ -97,14 +98,16 @@ type Ghost struct {
 	anim          *animator
 	reducedMotion bool
 	blnRend       *balloon.Renderer
+	blnTheme      balloon.Theme
 
 	blnMu sync.Mutex
 	bln   *wlclient.SpriteSurface
 
-	bus   *bus.Bus
-	brain brain.Runner
-	store Store
-	quiet *quiet.Checker
+	bus     *bus.Bus
+	brain   brain.Runner
+	store   Store
+	quiet   *quiet.Checker
+	desktop *desktop.Watcher
 
 	aiSvc    *ai.Service
 	cacheDir string
@@ -222,8 +225,22 @@ func Run(ctx context.Context, dir string, opts Options) error {
 			theme.MaxHeight = capped
 		}
 	}
-	if g.blnRend, err = balloon.NewRenderer(theme); err != nil {
+	g.blnTheme = theme
+	if g.blnRend, err = balloon.NewRendererScaled(theme, g.surface.Scale()); err != nil {
 		return err
+	}
+	// A ghost dragged to a 200% screen needs its text redrawn at that
+	// screen's resolution, not stretched from the old one.
+	g.surface.OnScaleChanged = func(scale float64) {
+		opts.Log(fmt.Sprintf("haunt: scale is now %g", scale))
+		r, err := balloon.NewRendererScaled(g.blnTheme, scale)
+		if err != nil {
+			opts.Log(fmt.Sprintf("haunt: rescaling balloons: %v", err))
+			return
+		}
+		g.blnMu.Lock()
+		g.blnRend = r
+		g.blnMu.Unlock()
 	}
 
 	// Bus, optionally recording.
@@ -240,6 +257,10 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	if g.quiet, err = quiet.Load(); err != nil {
 		return err
 	}
+	// Fullscreen awareness: the ghost keeps out of the way of games and
+	// films, which is both courtesy and — for image generation — leaving
+	// the GPU alone.
+	g.desktop = desktop.New(opts.Log)
 
 	anim, err := loadAnimationConfig()
 	if err != nil {
@@ -646,7 +667,13 @@ func (g *Ghost) showBalloonSprite(sp *sprite.Sprite) {
 		return // no compositor: tests drive balloons without a screen
 	}
 	x, y := g.balloonPos()
-	bln, err := g.app.CreateSpriteOpts(sp, x, y, wlclient.SurfaceOptions{PassThrough: true})
+	w, h := sp.Size()
+	lw, lh := g.blnRend.LogicalSize(w, h)
+	bln, err := g.app.CreateSpriteOpts(sp, x, y, wlclient.SurfaceOptions{
+		PassThrough: true,
+		LogicalW:    int32(lw),
+		LogicalH:    int32(lh),
+	})
 	if err != nil {
 		g.opts.Log(fmt.Sprintf("haunt: balloon failed: %v", err))
 		return

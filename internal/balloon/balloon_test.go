@@ -231,3 +231,49 @@ func TestRenderPage(t *testing.T) {
 			short.Img.Bounds(), plain.Img.Bounds())
 	}
 }
+
+// TestScaledRendering: on a HiDPI screen the panel is drawn at the real
+// device resolution and stands for the same logical size. Text is the part
+// that suffers most from being drawn small and stretched, so this is where
+// scaling has to happen rather than in the compositor.
+func TestScaledRendering(t *testing.T) {
+	theme := DefaultTheme()
+	one, err := NewRendererScaled(theme, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	two, err := NewRendererScaled(theme, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const line = "Hello, ghost."
+
+	a := one.Render(line).Img.Bounds()
+	b := two.Render(line).Img.Bounds()
+
+	// Twice the pixels, give or take a rounding of the glyph metrics.
+	if ratio := float64(b.Dy()) / float64(a.Dy()); ratio < 1.8 || ratio > 2.2 {
+		t.Errorf("2x panel is %dpx tall against %dpx: ratio %.2f", b.Dy(), a.Dy(), ratio)
+	}
+	if ratio := float64(b.Dx()) / float64(a.Dx()); ratio < 1.8 || ratio > 2.2 {
+		t.Errorf("2x panel is %dpx wide against %dpx: ratio %.2f", b.Dx(), a.Dx(), ratio)
+	}
+
+	// And it reports back the logical size the compositor should be told.
+	lw, lh := two.LogicalSize(b.Dx(), b.Dy())
+	if lw < a.Dx()-2 || lw > a.Dx()+2 || lh < a.Dy()-2 || lh > a.Dy()+2 {
+		t.Errorf("logical size %dx%d, want about %dx%d", lw, lh, a.Dx(), a.Dy())
+	}
+
+	if one.Scale() != 1 || two.Scale() != 2 {
+		t.Errorf("scales = %v, %v", one.Scale(), two.Scale())
+	}
+	// A nonsense scale falls back to 1 rather than dividing by zero.
+	zero, err := NewRendererScaled(theme, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if zero.Scale() != 1 {
+		t.Errorf("scale 0 became %v", zero.Scale())
+	}
+}
