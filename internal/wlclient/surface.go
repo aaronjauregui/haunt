@@ -61,6 +61,10 @@ type SurfaceOptions struct {
 	// PassThrough gives the surface an empty input region: all pointer
 	// input falls through to whatever is beneath (used by balloons).
 	PassThrough bool
+	// Output pins the surface to a named screen. Empty lets the compositor
+	// choose, which is the right default for a first run and the wrong one
+	// for a ghost that was somewhere specific yesterday.
+	Output string
 }
 
 // CreateSprite maps sp as an overlay at position (x, y). Mapping completes
@@ -88,7 +92,22 @@ func (a *App) CreateSpriteOpts(sp *sprite.Sprite, x, y int32, opts SurfaceOption
 	if s.wlSurface, err = a.compositor.CreateSurface(); err != nil {
 		return nil, err
 	}
-	if s.layerSurface, err = a.layerShell.GetLayerSurface(s.wlSurface, nil, LayerOverlay, "haunt"); err != nil {
+	// Layer-shell coordinates are relative to the output the surface is
+	// on, so pinning the output is what makes a remembered position mean
+	// the same thing tomorrow.
+	var wlOut *client.Output
+	if opts.Output != "" {
+		for _, o := range a.outputs {
+			if o.Name == opts.Output {
+				wlOut = o.wl
+				break
+			}
+		}
+		if wlOut == nil {
+			a.logEvent("output %q is not connected; letting the compositor choose", opts.Output)
+		}
+	}
+	if s.layerSurface, err = a.layerShell.GetLayerSurface(s.wlSurface, wlOut, LayerOverlay, "haunt"); err != nil {
 		return nil, err
 	}
 

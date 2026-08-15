@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
 	"sync"
 
 	"github.com/rajveermalviya/go-wayland/wayland/client"
@@ -58,12 +59,10 @@ type App struct {
 	layerShell *layershell.LayerShell
 	idleMgr    *ext_idle_notify.IdleNotifier
 
-	// output geometry, in logical pixels. Zero until the compositor tells
-	// us, which it does during the initial roundtrip.
-	output      *client.Output
-	outputW     int32
-	outputH     int32
-	outputScale int32
+	// outputs are the screens, keyed by their registry name so hotplug can
+	// remove them. A desktop companion lives on one of several monitors and
+	// has to be told which, so this is a list rather than a single screen.
+	outputs map[uint32]*Output
 
 	// pointerFocus tracks which sprite surface the pointer is over;
 	// keyboardFocus which one the compositor is sending keys to.
@@ -74,6 +73,10 @@ type App struct {
 	// EventLog, when set, receives a line per input event. Used by the PoC
 	// to expose protocol activity to tests.
 	EventLog func(string)
+
+	// OnOutputsChanged fires when a screen appears or disappears, so a
+	// ghost stranded on an unplugged monitor can be brought back.
+	OnOutputsChanged func()
 }
 
 func (a *App) logEvent(format string, args ...any) {
@@ -89,7 +92,11 @@ func Connect() (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("connecting to wayland display: %w", err)
 	}
-	a := &App{display: display, surfaces: map[uint32]*SpriteSurface{}}
+	a := &App{
+		display:  display,
+		surfaces: map[uint32]*SpriteSurface{},
+		outputs:  map[uint32]*Output{},
+	}
 
 	registry, err := display.GetRegistry()
 	if err != nil {
@@ -115,26 +122,23 @@ func Connect() (*App, error) {
 			a.layerShell = layershell.NewLayerShell(ctx)
 			registry.Bind(e.Name, e.Interface, minu(e.Version, 4), a.layerShell)
 		case "wl_output":
-			if a.output == nil {
-				a.output = client.NewOutput(ctx)
-				registry.Bind(e.Name, e.Interface, minu(e.Version, 2), a.output)
-				a.output.SetModeHandler(func(m client.OutputModeEvent) {
-					const currentMode = 1
-					if m.Flags&currentMode != 0 {
-						a.mu.Lock()
-						a.outputW, a.outputH = m.Width, m.Height
-						a.mu.Unlock()
-					}
-				})
-				a.output.SetScaleHandler(func(sc client.OutputScaleEvent) {
-					a.mu.Lock()
-					a.outputScale = sc.Factor
-					a.mu.Unlock()
-				})
-			}
+			a.bindOutput(ctx, registry, e.Name, e.Version)
 		case "ext_idle_notifier_v1":
 			a.idleMgr = ext_idle_notify.NewIdleNotifier(ctx)
 			registry.Bind(e.Name, e.Interface, 1, a.idleMgr)
+		}
+	})
+
+	registry.SetGlobalRemoveHandler(func(e client.RegistryGlobalRemoveEvent) {
+		a.mu.Lock()
+		out := a.outputs[e.Name]
+		delete(a.outputs, e.Name)
+		a.mu.Unlock()
+		if out != nil {
+			a.logEvent("output %s disconnected", out.Name)
+			if a.OnOutputsChanged != nil {
+				a.OnOutputsChanged()
+			}
 		}
 	})
 
@@ -182,20 +186,108 @@ func minu(a, b uint32) uint32 {
 	return b
 }
 
-// OutputSize is the current output in logical pixels, and whether the
-// compositor has said. Callers need it to keep surfaces from growing past
-// the screen — a balloon three paragraphs tall is a wall, not a balloon.
-func (a *App) OutputSize() (w, h int32, known bool) {
+// Output is one screen, in the compositor's logical coordinates.
+type Output struct {
+	// Name is the connector as the compositor calls it ("DP-1"), when it
+	// says. It is what a person means by "the left monitor", and what the
+	// driver persists to put a ghost back where it was.
+	Name string
+	// X, Y is the output's position in the global layout; W, H its logical
+	// size.
+	X, Y, W, H int32
+	Scale      int32
+
+	wl       *client.Output
+	rawW     int32
+	rawH     int32
+	registry uint32
+}
+
+// bindOutput starts tracking a screen the compositor has announced.
+func (a *App) bindOutput(ctx *client.Context, registry *client.Registry, name, version uint32) {
+	out := &Output{wl: client.NewOutput(ctx), Scale: 1, registry: name}
+	registry.Bind(name, "wl_output", minu(version, 4), out.wl)
+
+	out.wl.SetGeometryHandler(func(e client.OutputGeometryEvent) {
+		a.mu.Lock()
+		out.X, out.Y = e.X, e.Y
+		a.mu.Unlock()
+	})
+	out.wl.SetModeHandler(func(e client.OutputModeEvent) {
+		const currentMode = 1
+		if e.Flags&currentMode == 0 {
+			return
+		}
+		a.mu.Lock()
+		out.rawW, out.rawH = e.Width, e.Height
+		out.recalc()
+		a.mu.Unlock()
+	})
+	out.wl.SetScaleHandler(func(e client.OutputScaleEvent) {
+		a.mu.Lock()
+		out.Scale = e.Factor
+		out.recalc()
+		a.mu.Unlock()
+	})
+	out.wl.SetNameHandler(func(e client.OutputNameEvent) {
+		a.mu.Lock()
+		out.Name = e.Name
+		a.mu.Unlock()
+	})
+
 	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.outputW == 0 || a.outputH == 0 {
-		return 0, 0, false
-	}
-	scale := a.outputScale
+	a.outputs[name] = out
+	a.mu.Unlock()
+}
+
+// recalc converts the mode to logical pixels; callers hold the lock.
+func (o *Output) recalc() {
+	scale := o.Scale
 	if scale < 1 {
 		scale = 1
 	}
-	return a.outputW / scale, a.outputH / scale, true
+	o.W, o.H = o.rawW/scale, o.rawH/scale
+}
+
+// Outputs lists the screens, ordered left to right then top to bottom, so
+// "the first one" means something stable to a person looking at them.
+func (a *App) Outputs() []Output {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]Output, 0, len(a.outputs))
+	for _, o := range a.outputs {
+		if o.W == 0 || o.H == 0 {
+			continue // announced but not yet configured
+		}
+		out = append(out, *o)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].X != out[j].X {
+			return out[i].X < out[j].X
+		}
+		return out[i].Y < out[j].Y
+	})
+	return out
+}
+
+// OutputNamed finds a screen by connector name.
+func (a *App) OutputNamed(name string) (Output, bool) {
+	for _, o := range a.Outputs() {
+		if o.Name == name {
+			return o, true
+		}
+	}
+	return Output{}, false
+}
+
+// OutputSize is the first screen's logical size, for callers that only need
+// a bound — a balloon three paragraphs tall is a wall on any monitor.
+func (a *App) OutputSize() (w, h int32, known bool) {
+	outs := a.Outputs()
+	if len(outs) == 0 {
+		return 0, 0, false
+	}
+	return outs[0].W, outs[0].H, true
 }
 
 // Roundtrip flushes requests and dispatches events until the compositor

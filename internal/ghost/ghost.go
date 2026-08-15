@@ -49,8 +49,15 @@ type Options struct {
 	StateDir string
 	// RecordTo, if non-empty, records the event session to this file.
 	RecordTo string
-	// X, Y is the sprite's starting position.
+	// X, Y is the sprite's starting position. Ignored unless Placed is
+	// set: without it the ghost returns to where it was left.
 	X, Y int
+	// Placed says X and Y were asked for explicitly, which overrides the
+	// remembered position.
+	Placed bool
+	// Output pins the ghost to a named screen, overriding the remembered
+	// one.
+	Output string
 	// Log receives driver/brain log lines; defaults to stderr.
 	Log func(string)
 	// OnReady is called once the ghost is on screen and booted.
@@ -76,6 +83,9 @@ type Ghost struct {
 	// clip frames from animation timers.
 	shellMu sync.Mutex
 	shell   *shell.Shell
+	// outputName is the screen the ghost is on, remembered along with its
+	// position (see place.go).
+	outputName string
 	// painted is what is currently on screen, so a repaint can be limited
 	// to what actually changed.
 	painted shell.State
@@ -178,8 +188,26 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		return err
 	}
 	defer g.app.Close()
-	if g.surface, err = g.app.CreateSprite(sp, int32(opts.X), int32(opts.Y)); err != nil {
+	// Where it sits: an explicit position, or wherever it was left.
+	outName, startX, startY := g.startingPlace(g.app, opts.X, opts.Y, opts.Placed)
+	if opts.Output != "" {
+		outName = opts.Output
+		if o, ok := g.app.OutputNamed(outName); ok && !opts.Placed {
+			startX, startY = defaultSpot(o)
+		}
+	}
+	g.outputName = outName
+	if g.surface, err = g.app.CreateSpriteOpts(sp, int32(startX), int32(startY),
+		wlclient.SurfaceOptions{Output: outName}); err != nil {
 		return err
+	}
+	// Record where it ended up, not only where it is dragged to: a ghost
+	// started with -x/-y or dropped in a default corner should be in the
+	// same place after a restart, without the user having to nudge it
+	// first.
+	g.savePlace(startX, startY)
+	if outName != "" {
+		opts.Log(fmt.Sprintf("haunt: placed on %s at (%d,%d)", outName, startX, startY))
 	}
 	if err = g.surface.WaitMapped(); err != nil {
 		return err
@@ -285,6 +313,11 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	}
 	g.surface.OnDragEnd = func(x, y int) {
 		g.publish(proto.Event{Type: proto.EventDragEnd, X: x, Y: y, Region: g.shell.RegionAt(x, y)})
+		// Dragging is how a person says where they want it, so that is
+		// what gets remembered.
+		if sx, sy, _, _ := g.surface.Geometry(); true {
+			g.savePlace(int(sx), int(sy))
+		}
 	}
 	// The balloon belongs to the ghost: it follows the sprite while dragged.
 	g.surface.OnMove = func(x, y int) {

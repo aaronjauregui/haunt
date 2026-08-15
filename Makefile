@@ -1,9 +1,10 @@
 GO ?= go
 
-.PHONY: build test vet fmt demo demo-ai demo-headless clean
+.PHONY: build test vet fmt demo demo-ai demo-headless install-user clean
 
 build:
 	$(GO) build ./...
+	$(GO) build -o haunt ./cmd/haunt
 
 test:
 	$(GO) test ./...
@@ -29,6 +30,15 @@ demo-ai:
 demo-headless:
 	WLR_BACKENDS=headless ./scripts/demo.sh
 
+# Install for daily use: the binary on your PATH and a systemd user unit,
+# so the ghost is there when you log in. See dist/README.md.
+install-user: build
+	install -Dm755 haunt $(HOME)/.local/bin/haunt
+	install -Dm644 dist/haunt.service $(HOME)/.config/systemd/user/haunt.service
+	systemctl --user daemon-reload
+	@echo
+	@echo "installed. start it with:  systemctl --user enable --now haunt"
+
 clean:
-	rm -f haunt-poc
+	rm -f haunt haunt-poc
 	$(GO) clean

@@ -63,9 +63,21 @@ func main() {
 	}
 }
 
+// isSet reports whether a flag was given on the command line, which is how
+// an explicit position is told apart from a default one.
+func isSet(fs *flag.FlagSet, name string) bool {
+	found := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			found = true
+		}
+	})
+	return found
+}
+
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage:
-  haunt run [-x N] [-y N] [-record FILE] [-state DIR] [ghost-dir|name]
+  haunt run [-x N] [-y N] [-output NAME] [-record FILE] [-state DIR] [ghost-dir|name]
   haunt dev [-x N] [-y N] [-state DIR] <ghost-dir>
   haunt say [-ghost NAME] <text>
   haunt new <name>
@@ -80,8 +92,9 @@ func usage() {
 
 func cmdRun(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
-	x := fs.Int("x", 100, "initial sprite x position")
-	y := fs.Int("y", 100, "initial sprite y position")
+	x := fs.Int("x", 100, "sprite x position (default: where it was left)")
+	y := fs.Int("y", 100, "sprite y position (default: where it was left)")
+	output := fs.String("output", "", "screen to place the ghost on (default: where it was left)")
 	record := fs.String("record", "", "record the event session to FILE (JSONL)")
 	state := fs.String("state", "", "override state directory")
 	idleMS := fs.Uint("idle-ms", 0, "idle threshold in milliseconds (default 2 minutes)")
@@ -92,6 +105,8 @@ func cmdRun(args []string) error {
 
 	opts := ghost.Options{
 		X: *x, Y: *y,
+		Placed:        isSet(fs, "x") || isSet(fs, "y"),
+		Output:        *output,
 		RecordTo:      *record,
 		StateDir:      *state,
 		IdleTimeoutMS: uint32(*idleMS),

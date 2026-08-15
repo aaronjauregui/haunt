@@ -5,6 +5,7 @@ package testenv
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -27,6 +28,61 @@ const (
 
 // ScreenSize is the headless output's size in pixels.
 func ScreenSize() (w, h int) { return screenW, screenH }
+
+// AddOutput plugs in another headless screen, so multi-monitor behaviour
+// can be tested rather than assumed. Returns its connector name.
+func (c *Compositor) AddOutput() (string, error) {
+	before, err := c.outputNames()
+	if err != nil {
+		return "", err
+	}
+	if _, err := c.Swaymsg("create_output"); err != nil {
+		return "", fmt.Errorf("create_output: %w", err)
+	}
+	for i := 0; i < 50; i++ {
+		now, err := c.outputNames()
+		if err != nil {
+			return "", err
+		}
+		for n := range now {
+			if !before[n] {
+				// Give it a predictable size, like the first one.
+				if _, err := c.Swaymsg("output", n, "resolution",
+					fmt.Sprintf("%dx%d", screenW, screenH)); err != nil {
+					return "", err
+				}
+				return n, nil
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return "", fmt.Errorf("the new output never appeared")
+}
+
+// RemoveOutput unplugs a screen.
+func (c *Compositor) RemoveOutput(name string) error {
+	_, err := c.Swaymsg("output", name, "unplug")
+	return err
+}
+
+// outputNames is the set of connectors sway currently has.
+func (c *Compositor) outputNames() (map[string]bool, error) {
+	out, err := c.Swaymsg("-t", "get_outputs")
+	if err != nil {
+		return nil, err
+	}
+	var outputs []struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(out, &outputs); err != nil {
+		return nil, err
+	}
+	set := map[string]bool{}
+	for _, o := range outputs {
+		set[o.Name] = true
+	}
+	return set, nil
+}
 
 // Compositor is a running headless sway instance.
 type Compositor struct {
