@@ -52,6 +52,8 @@ func main() {
 		err = cmdUnshush(os.Args[2:])
 	case "journal":
 		err = cmdJournal(os.Args[2:])
+	case "history":
+		err = cmdHistory(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -72,7 +74,8 @@ func usage() {
   haunt install [-yes] <file.haunt>
   haunt ls | rm <name> | switch <name>
   haunt shush [duration] | unshush
-  haunt journal [name | -state DIR]`)
+  haunt journal [name | -state DIR]
+  haunt history [-n N] [name | -state DIR]`)
 }
 
 func cmdRun(args []string) error {

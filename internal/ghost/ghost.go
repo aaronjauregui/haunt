@@ -78,7 +78,12 @@ type Ghost struct {
 	shell   *shell.Shell
 	// painted is what is currently on screen, so a repaint can be limited
 	// to what actually changed.
-	painted       shell.State
+	painted shell.State
+
+	// paged is the long line the user is reading through (see paging.go).
+	pageMu sync.Mutex
+	paged  *paged
+
 	anim          *animator
 	reducedMotion bool
 	blnRend       *balloon.Renderer
@@ -259,6 +264,10 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		// clicking off an input box does anywhere else — and does it first,
 		// so the brain's reaction is not suppressed as "user is typing".
 		g.closeInput()
+		// A balloon with more to read has first claim on the click.
+		if g.turnPage() {
+			return
+		}
 		g.publish(proto.Event{Type: proto.EventClick, X: x, Y: y, Region: g.shell.RegionAt(x, y)})
 	}
 	// Right-click opens a line to type at the ghost. A separate gesture
@@ -468,12 +477,15 @@ func (g *Ghost) execIntent(in proto.Intent) {
 		// Scripted dialogue gets the free tier of expression inference. A
 		// brain that also sets an expression runs after this and wins.
 		g.inferExpression(in.Text, false)
-		g.showBalloon(in.Text)
+		// Scripted dialogue arrives whole, so it is readable from its
+		// beginning immediately, pages and all.
+		g.showPaged(in.Text)
 		// And the mouth moves for about as long as the line would take to
 		// say, since there is no stream to follow here.
 		g.talkFor(in.Text)
 	case proto.IntentHideSay:
 		g.stopTalking()
+		g.clearPaging()
 		g.hideBalloon()
 	case proto.IntentMove:
 		if err := g.surface.MoveTo(int32(in.X), int32(in.Y)); err != nil {
@@ -597,6 +609,9 @@ func (g *Ghost) showBalloon(text string) {
 // because the input line itself must appear regardless of both.
 func (g *Ghost) showBalloonSprite(sp *sprite.Sprite) {
 	g.hideBalloon()
+	if g.surface == nil {
+		return // no compositor: tests drive balloons without a screen
+	}
 	x, y := g.balloonPos()
 	bln, err := g.app.CreateSpriteOpts(sp, x, y, wlclient.SurfaceOptions{PassThrough: true})
 	if err != nil {

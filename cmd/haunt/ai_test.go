@@ -252,6 +252,35 @@ wasm = "brain.wasm"
 	say("second message")
 	waitRecordContains(t, record, "[noted] indeed, you said: second message")
 
+	// The history CLI reads the conversation back: the balloon is
+	// transient, and a long reply pages away, so the words have to be
+	// legible somewhere that keeps them.
+	hist := exec.Command(bin, "history", "-state", filepath.Join(dir, "state"))
+	hist.Env = env
+	hout, err := hist.CombinedOutput()
+	if err != nil {
+		t.Fatalf("history: %v: %s", err, hout)
+	}
+	if !strings.Contains(string(hout), "hello muse") {
+		t.Errorf("history is missing what was said to the ghost:\n%s", hout)
+	}
+	if !strings.Contains(string(hout), "indeed, you said: hello muse") {
+		t.Errorf("history is missing what the ghost answered:\n%s", hout)
+	}
+	if !strings.Contains(string(hout), "you:") || !strings.Contains(string(hout), "ghost:") {
+		t.Errorf("history does not say who spoke:\n%s", hout)
+	}
+	// -n trims to the most recent turns.
+	trimmed := exec.Command(bin, "history", "-n", "2", "-state", filepath.Join(dir, "state"))
+	trimmed.Env = env
+	tout, err := trimmed.CombinedOutput()
+	if err != nil {
+		t.Fatalf("history -n: %v: %s", err, tout)
+	}
+	if lines := strings.Count(strings.TrimSpace(string(tout)), "\n") + 1; lines > 4 {
+		t.Errorf("history -n 2 printed %d lines:\n%s", lines, tout)
+	}
+
 	// The journal CLI reads the notes back.
 	jr := exec.Command(bin, "journal", "-state", filepath.Join(dir, "state"))
 	jr.Env = env

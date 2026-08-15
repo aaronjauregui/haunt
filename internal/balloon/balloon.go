@@ -4,6 +4,7 @@
 package balloon
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"strings"
@@ -81,6 +82,14 @@ func (r *Renderer) Render(text string) *sprite.Sprite {
 
 	lines = r.fit(lines, lineHeight)
 
+	return r.renderLines(lines, lineHeight)
+}
+
+// renderLines paints laid-out lines into a panel sized to them.
+func (r *Renderer) renderLines(lines []string, lineHeight int) *sprite.Sprite {
+	t := r.theme
+	metrics := r.face.Metrics()
+
 	textWidth := 0
 	for _, l := range lines {
 		if w := font.MeasureString(r.face, l).Ceil(); w > textWidth {
@@ -105,6 +114,59 @@ func (r *Renderer) Render(text string) *sprite.Sprite {
 		y += lineHeight
 	}
 	return &sprite.Sprite{Img: img}
+}
+
+// RenderPage paints one screenful of a long line, and reports how many
+// screenfuls there are. Page numbers past the end clamp to the last.
+//
+// This is the counterpart to the tail-following in Render: while dialogue is
+// streaming, the newest words are what matters and the balloon behaves like
+// a terminal; once it has all arrived, the reader wants the beginning, and
+// wants the rest to still be reachable. Pagination is the smallest thing
+// that makes a long reply readable at all — without it the opening scrolls
+// away and there is no way back to it at any speed.
+func (r *Renderer) RenderPage(text string, page int) (sp *sprite.Sprite, pages int) {
+	t := r.theme
+	lines := r.wrap(text, t.MaxWidth-2*t.Padding)
+	metrics := r.face.Metrics()
+	lineHeight := (metrics.Ascent + metrics.Descent).Ceil() + 2
+
+	per := r.linesPerPage(lineHeight)
+	pages = (len(lines) + per - 1) / per
+	if pages < 1 {
+		pages = 1
+	}
+	if page >= pages {
+		page = pages - 1
+	}
+	if page < 0 {
+		page = 0
+	}
+
+	start := page * per
+	end := start + per
+	if end > len(lines) {
+		end = len(lines)
+	}
+	shown := append([]string{}, lines[start:end]...)
+	if pages > 1 {
+		// A quiet marker, so a reader knows there is more and that
+		// clicking will bring it.
+		shown = append(shown, fmt.Sprintf("— %d/%d —", page+1, pages))
+	}
+	return r.renderLines(shown, lineHeight), pages
+}
+
+// linesPerPage is how many lines fit, leaving room for the page marker.
+func (r *Renderer) linesPerPage(lineHeight int) int {
+	if r.theme.MaxHeight <= 0 {
+		return 1 << 30
+	}
+	n := (r.theme.MaxHeight-2*r.theme.Padding)/lineHeight - 1
+	if n < 1 {
+		n = 1
+	}
+	return n
 }
 
 // RenderInput paints the line the user is typing, with a caret. It keeps a

@@ -115,7 +115,10 @@ func (g *Ghost) execChat(in proto.Intent, userDriven bool) {
 	// expression is already right when the line appears, and ahead of the
 	// ai_reply event so a brain that sets its own expression lands last.
 	g.inferExpression(full, true)
-	g.showBalloon(full)
+	// Streaming followed the tail so the newest words were visible as they
+	// arrived; now that it is all here, show it from the beginning and let
+	// the reader page through the rest.
+	g.showPaged(full)
 
 	turns := g.manifest.Persona.HistoryTurns
 	if turns <= 0 {
@@ -231,6 +234,30 @@ func (g *Ghost) saveHistory(h []ai.Message) {
 	if err := g.store.Set(historyKey, string(b)); err != nil {
 		g.opts.Log(fmt.Sprintf("haunt: saving chat history: %v", err))
 	}
+}
+
+// HistoryStoreKey exposes the conversation's store key to the CLI.
+const HistoryStoreKey = historyKey
+
+// Exchange is one turn of recorded conversation, for `haunt history`.
+type Exchange struct {
+	Role string
+	Text string
+}
+
+// DecodeHistory parses a stored conversation. The balloon is transient and
+// a long reply pages away; this is how a person reads back what was
+// actually said.
+func DecodeHistory(raw string) ([]Exchange, error) {
+	var msgs []ai.Message
+	if err := json.Unmarshal([]byte(raw), &msgs); err != nil {
+		return nil, err
+	}
+	out := make([]Exchange, 0, len(msgs))
+	for _, m := range msgs {
+		out = append(out, Exchange{Role: m.Role, Text: m.Content})
+	}
+	return out, nil
 }
 
 // storeGet adapts the narrow Store interface (which lacks Get) by scanning

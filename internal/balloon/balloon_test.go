@@ -181,3 +181,53 @@ func TestCappedBalloonKeepsTheTail(t *testing.T) {
 		t.Errorf("an impossibly tight cap kept %v", got)
 	}
 }
+
+// TestRenderPage: a long line is split into readable screenfuls, each
+// marked so the reader knows there is more.
+func TestRenderPage(t *testing.T) {
+	theme := DefaultTheme()
+	theme.MaxHeight = 200
+	r, err := NewRenderer(theme)
+	if err != nil {
+		t.Fatal(err)
+	}
+	long := strings.Repeat("The ghost considered the matter at length. ", 30)
+
+	sp, pages := r.RenderPage(long, 0)
+	if pages < 3 {
+		t.Fatalf("long text made %d pages, want several", pages)
+	}
+	if h := sp.Img.Bounds().Dy(); h > theme.MaxHeight {
+		t.Errorf("page is %dpx tall, want <= %d", h, theme.MaxHeight)
+	}
+
+	// Every page is within the cap, and the count is stable.
+	for p := 0; p < pages; p++ {
+		sp, n := r.RenderPage(long, p)
+		if n != pages {
+			t.Errorf("page %d reported %d pages, want %d", p, n, pages)
+		}
+		if h := sp.Img.Bounds().Dy(); h > theme.MaxHeight {
+			t.Errorf("page %d is %dpx tall", p, h)
+		}
+	}
+
+	// Out-of-range clamps rather than failing.
+	if _, n := r.RenderPage(long, pages+10); n != pages {
+		t.Errorf("clamped page reported %d pages", n)
+	}
+	if _, n := r.RenderPage(long, -3); n != pages {
+		t.Errorf("negative page reported %d pages", n)
+	}
+
+	// Short text is a single page with no marker, so an ordinary line does
+	// not grow a footer.
+	short, n := r.RenderPage("Hello.", 0)
+	if n != 1 {
+		t.Errorf("short text made %d pages", n)
+	}
+	if plain := r.Render("Hello."); short.Img.Bounds() != plain.Img.Bounds() {
+		t.Errorf("a one-page balloon %v differs from a plain one %v",
+			short.Img.Bounds(), plain.Img.Bounds())
+	}
+}
