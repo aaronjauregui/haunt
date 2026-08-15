@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/aaronjauregui/haunt/internal/testenv"
 )
@@ -122,4 +123,76 @@ func waitMouth(t *testing.T, c *testenv.Compositor, dir string, r image.Rectangl
 	}
 	t.Fatalf("the expected mouth never appeared (last: %d above, %d below)", up, down)
 	return 0, 0
+}
+
+// TestMouthMovesWhileSpeaking: the `talk` clip has to run for as long as
+// words are arriving and then hand the mouth back to the pose. Whisper's
+// reply is scripted, so this exercises the length-estimated path rather
+// than the streaming one.
+func TestMouthMovesWhileSpeaking(t *testing.T) {
+	c := testenv.StartT(t)
+	dir := t.TempDir()
+	rt := filepath.Join(dir, "run")
+	bin := filepath.Join(dir, "haunt")
+	build(t, bin, ".")
+
+	gDir := filepath.Join(dir, "whisper")
+	writeGhost(t, gDir, `[ghost]
+name = "whisper"
+capabilities = ["message"]
+
+[brain]
+wasm = "brain.wasm"
+`)
+	build(t, filepath.Join(gDir, "brain.wasm"), "../../examples/whisper", "GOOS=wasip1", "GOARCH=wasm")
+
+	const spriteX, spriteY = 200, 200
+	record := filepath.Join(dir, "session.jsonl")
+	cmd := exec.Command(bin, "run", "-x", "200", "-y", "200",
+		"-state", filepath.Join(dir, "state"), "-record", record, gDir)
+	cmd.Env = append(c.Env(), "HAUNT_RUNTIME_DIR="+rt)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cmd.Process.Signal(syscall.SIGTERM)
+		cmd.Wait()
+	})
+	waitFor(t, stdout, "READY")
+
+	mouth := image.Rect(spriteX+55, spriteY+85, spriteX+105, spriteY+115)
+	say := exec.Command(bin, "say", "-ghost", "whisper",
+		"tell me something at reasonable length so the mouth keeps moving")
+	say.Env = append(os.Environ(), "HAUNT_RUNTIME_DIR="+rt)
+	if out, err := say.CombinedOutput(); err != nil {
+		t.Fatalf("say: %v: %s", err, out)
+	}
+	waitRecordContains(t, record, `"type":"message"`)
+
+	// The open mouth is a filled ellipse and the closed one is not, so the
+	// ink count swings widely while talking.
+	var lo, hi int
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		up, down := inkProfile(t, c, dir, mouth)
+		n := up + down
+		if n > hi {
+			hi = n
+		}
+		if lo == 0 || n < lo {
+			lo = n
+		}
+		if hi > 40 && hi-lo > 20 {
+			break
+		}
+		time.Sleep(40 * time.Millisecond)
+	}
+	if hi <= 40 || hi-lo <= 20 {
+		t.Errorf("mouth ink ranged %d..%d; want it opening and closing while speaking", lo, hi)
+	}
 }

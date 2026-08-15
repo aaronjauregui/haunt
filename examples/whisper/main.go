@@ -34,6 +34,8 @@ func (w *whisper) OnEvent(e brainkit.Event, emit *brainkit.Emitter) {
 		}
 	case "click":
 		w.clicks++
+		// A shell that has no poke clip ignores this quietly.
+		emit.PlayClip("poke")
 		// Shells that declare regions say where they were poked; ones that
 		// do not send an empty region, so this still works on a flat shell.
 		if e.Region == "face" {

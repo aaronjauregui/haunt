@@ -459,7 +459,11 @@ func (g *Ghost) execIntent(in proto.Intent) {
 		// brain that also sets an expression runs after this and wins.
 		g.inferExpression(in.Text, false)
 		g.showBalloon(in.Text)
+		// And the mouth moves for about as long as the line would take to
+		// say, since there is no stream to follow here.
+		g.talkFor(in.Text)
 	case proto.IntentHideSay:
+		g.stopTalking()
 		g.hideBalloon()
 	case proto.IntentMove:
 		if err := g.surface.MoveTo(int32(in.X), int32(in.Y)); err != nil {

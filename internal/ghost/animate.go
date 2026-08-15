@@ -51,6 +51,11 @@ type animator struct {
 	seq     int
 	rng     *rand.Rand
 	stopped bool
+
+	// talking is true while dialogue is arriving; talkTimer ends it for
+	// text that did not stream.
+	talking   bool
+	talkTimer *time.Timer
 }
 
 // startAnimation begins the shell's automatic clips. Reduced motion stops
@@ -76,6 +81,7 @@ func (g *Ghost) startAnimation() {
 	}
 	for _, c := range g.shell.Clips() {
 		switch c.Trigger {
+		// Talk clips are started by dialogue, not by the clock.
 		case shell.TriggerAlways, shell.TriggerRunOnce:
 			g.playClip(c.Name)
 		case shell.TriggerSometimes, shell.TriggerRarely:
@@ -97,6 +103,9 @@ func (g *Ghost) stopAnimation() {
 	}
 	for _, t := range g.anim.pending {
 		t.Stop()
+	}
+	if g.anim.talkTimer != nil {
+		g.anim.talkTimer.Stop()
 	}
 	g.anim.active = map[string]*running{}
 	g.anim.pending = map[string]*time.Timer{}
@@ -176,6 +185,13 @@ func (g *Ghost) advanceClip(name string) {
 	}
 	// The clip finished: loop it, or line up its next outing.
 	switch trigger {
+	case shell.TriggerTalk:
+		g.anim.mu.Lock()
+		still := g.anim.talking && !g.anim.stopped
+		g.anim.mu.Unlock()
+		if still {
+			g.playClip(name)
+		}
 	case shell.TriggerAlways:
 		if !g.reducedMotion {
 			g.playClip(name)
@@ -239,4 +255,84 @@ func (g *Ghost) repaintAnimation() {
 	if err := g.surface.RedrawRect(sp, damage); err != nil {
 		g.opts.Log(fmt.Sprintf("haunt: animation repaint: %v", err))
 	}
+}
+
+// Talking. SERIKO drove mouth movement from how much the ghost was saying,
+// and it is still the right hook: a clip triggered by `talk` loops for
+// exactly as long as there are words arriving, whether they come from a
+// script or a model streaming a token at a time.
+//
+// Reduced motion covers this too. A moving mouth is decoration on top of
+// the words, and the words are still there without it.
+
+// talkRate is how long a character of scripted dialogue is "spoken" for,
+// used to guess how long a mouth should move when there is no stream to
+// follow. Bounded, because neither a grunt nor an essay should be taken
+// literally.
+const (
+	talkRate = 45 * time.Millisecond
+	talkMin  = 500 * time.Millisecond
+	talkMax  = 6 * time.Second
+)
+
+// startTalking runs every `talk` clip until stopTalking.
+func (g *Ghost) startTalking() {
+	if g.anim == nil || g.reducedMotion {
+		return
+	}
+	g.anim.mu.Lock()
+	g.anim.talking = true
+	g.anim.mu.Unlock()
+	for _, c := range g.shell.Clips() {
+		if c.Trigger == shell.TriggerTalk {
+			g.playClip(c.Name)
+		}
+	}
+}
+
+// stopTalking ends them, letting the pose's own mouth return.
+func (g *Ghost) stopTalking() {
+	if g.anim == nil {
+		return
+	}
+	g.anim.mu.Lock()
+	g.anim.talking = false
+	var stop []string
+	for name, r := range g.anim.active {
+		if r.clip.Trigger == shell.TriggerTalk {
+			r.timer.Stop()
+			stop = append(stop, name)
+		}
+	}
+	for _, name := range stop {
+		delete(g.anim.active, name)
+	}
+	g.anim.mu.Unlock()
+
+	if len(stop) > 0 {
+		g.repaintAnimation()
+	}
+}
+
+// talkFor moves the mouth for a stretch proportional to the text, for
+// dialogue that arrives all at once rather than streaming.
+func (g *Ghost) talkFor(text string) {
+	if g.anim == nil || g.reducedMotion {
+		return
+	}
+	d := time.Duration(len([]rune(text))) * talkRate
+	if d < talkMin {
+		d = talkMin
+	}
+	if d > talkMax {
+		d = talkMax
+	}
+	g.startTalking()
+
+	g.anim.mu.Lock()
+	if g.anim.talkTimer != nil {
+		g.anim.talkTimer.Stop()
+	}
+	g.anim.talkTimer = time.AfterFunc(d, g.stopTalking)
+	g.anim.mu.Unlock()
 }

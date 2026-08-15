@@ -93,6 +93,18 @@ func Builtin(size int) *Shell {
 		}
 		return img
 	}
+	// An open mouth, for talking: a filled ellipse in the same patch.
+	open_ := image.NewNRGBA(image.Rect(0, 0, mouthW, mouthH))
+	for y := 0; y < mouthH; y++ {
+		for x := 0; x < mouthW; x++ {
+			dx := (float64(x+mouthAt.X) + 0.5 - cx) / (mr * 0.45)
+			dy := (float64(y+mouthAt.Y) + 0.5 - my) / (mr * 0.4)
+			if dx*dx+dy*dy <= 1 {
+				open_.SetNRGBA(x, y, ink)
+			}
+		}
+	}
+
 	blank := image.NewNRGBA(image.Rect(0, 0, mouthW, mouthH))
 
 	s := &Shell{
@@ -116,6 +128,33 @@ func Builtin(size int) *Shell {
 				{At: 110, Set: map[string]string{"eyes": "open"}},
 			},
 		}, {
+			// Talking: the mouth opens and closes for as long as words are
+			// arriving. It overrides whatever mouth the pose chose and
+			// hands it back when the line ends, which is what overrides
+			// are for.
+			Name:    "talk",
+			Trigger: TriggerTalk,
+			Keys: []Key{
+				{At: 0, Set: map[string]string{"mouth": "open"}},
+				{At: 130, Set: map[string]string{"mouth": "neutral"}},
+				{At: 260, Set: map[string]string{"mouth": "open"}},
+				{At: 400, Set: map[string]string{"mouth": "neutral"}},
+			},
+		}, {
+			// Being poked: a quick squash and recover. Manual, because
+			// only the brain knows it was poked.
+			Name:    "poke",
+			Trigger: TriggerManual,
+			Keys: []Key{
+				{At: 0, Move: map[string]Transform{"body": {Scale: 1}}},
+				{At: 90, Ease: EaseSine, Move: map[string]Transform{
+					"body": {Scale: 0.94, Offset: [2]float64{0, 4}},
+				}},
+				{At: 320, Ease: EaseSine, Move: map[string]Transform{
+					"body": {Scale: 1},
+				}},
+			},
+		}, {
 			// A breath: two pixels, four seconds, eased so it drifts rather
 			// than ticks. The face is parented to the body and rides along,
 			// which is the whole point of the parent chain.
@@ -134,7 +173,12 @@ func Builtin(size int) *Shell {
 	}
 	s.layers = []*loaded{
 		{
-			Layer:    Layer{Name: "body", Z: 0, Region: "body"},
+			Layer: Layer{
+				Name: "body", Z: 0, Region: "body",
+				// Centre pivot, so scaling squashes towards the middle
+				// rather than out of the corner.
+				Pivot: [2]int{size / 2, size / 2},
+			},
 			variants: map[string]*image.NRGBA{"": bodyImg},
 		},
 		{
@@ -150,8 +194,10 @@ func Builtin(size int) *Shell {
 				Name: "mouth", Z: 11, Default: "neutral", Region: "face",
 				At: [2]int{mouthAt.X, mouthAt.Y}, Parent: "body",
 			},
-			variants: map[string]*image.NRGBA{"neutral": blank, "smile": arc(false), "frown": arc(true)},
-			order:    2,
+			variants: map[string]*image.NRGBA{
+				"neutral": blank, "smile": arc(false), "frown": arc(true), "open": open_,
+			},
+			order: 2,
 		},
 	}
 	for _, l := range s.layers {

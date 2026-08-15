@@ -325,7 +325,7 @@ func (s *Shell) loadClips(clips []Clip) error {
 		}
 		seen[c.Name] = true
 		switch c.Trigger {
-		case TriggerAlways, TriggerSometimes, TriggerRarely, TriggerRunOnce, TriggerManual, "":
+		case TriggerAlways, TriggerSometimes, TriggerRarely, TriggerTalk, TriggerRunOnce, TriggerManual, "":
 		default:
 			return fmt.Errorf("shell clip %q has unknown trigger %q", c.Name, c.Trigger)
 		}
@@ -455,6 +455,7 @@ type Clip struct {
 	//   always    — restart as soon as it ends
 	//   sometimes — at random intervals of a few seconds
 	//   rarely    — at random intervals of a minute or so
+	//   talk      — loops for as long as the ghost is speaking
 	//   runonce   — once, at boot
 	//   manual    — only when the brain asks
 	Trigger string `toml:"trigger"`
@@ -556,6 +557,7 @@ const (
 	TriggerAlways    = "always"
 	TriggerSometimes = "sometimes"
 	TriggerRarely    = "rarely"
+	TriggerTalk      = "talk"
 	TriggerRunOnce   = "runonce"
 	TriggerManual    = "manual"
 )
@@ -714,6 +716,12 @@ type State struct {
 	selection map[string]string
 	moves     map[string]Transform
 }
+
+// Selection is which variant each layer is showing.
+func (st State) Selection() map[string]string { return st.selection }
+
+// Moves is where each layer has been placed.
+func (st State) Moves() map[string]Transform { return st.moves }
 
 // State snapshots the current appearance.
 func (s *Shell) State() State {

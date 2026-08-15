@@ -80,6 +80,13 @@ func (g *Ghost) execChat(in proto.Intent, userDriven bool) {
 	msgs = append(msgs, history...)
 	msgs = append(msgs, ai.Message{Role: "user", Content: text})
 
+	// The mouth moves for exactly as long as words are arriving — the whole
+	// reason the trigger is called `talk` and not `animate`.
+	if !silent {
+		g.startTalking()
+		defer g.stopTalking()
+	}
+
 	// Stream into the balloon, re-rendering at a gentle pace.
 	var acc string
 	last := time.Now()
