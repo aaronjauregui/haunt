@@ -788,10 +788,18 @@ func layerBounds(b image.Rectangle, l Layer, t Transform) image.Rectangle {
 }
 
 // drawTransformed blits art under a transform: rotation and scale about the
-// layer's pivot, then the offset. Sampling is nearest-neighbour, which is
-// four times cheaper than bilinear and, at the sizes a desktop companion
-// uses, is the difference between a rig that costs nothing and one that
-// shows up in a battery graph.
+// layer's pivot, then the offset.
+//
+// Sampling is bilinear, and that is not a quality nicety — it is what makes
+// interpolation mean anything. A breath of two pixels over two seconds
+// passes through offsets like 0.19 and 0.68, and a renderer that snaps to
+// whole pixels turns all of that into three positions with long pauses
+// between them: the motion is computed smoothly and then thrown away at the
+// last step, which reads as a twitch rather than a breath. Sub-pixel
+// placement is the entire difference.
+//
+// Whole-pixel placements skip the sampling entirely, so a layer that has
+// merely been moved an integer distance still costs a plain blit.
 func drawTransformed(dst *image.NRGBA, art *image.NRGBA, l Layer, t Transform) {
 	b := art.Bounds()
 	rad := t.Rotate * math.Pi / 180
@@ -804,17 +812,25 @@ func drawTransformed(dst *image.NRGBA, art *image.NRGBA, l Layer, t Transform) {
 	if t.Opacity != nil {
 		alpha = *t.Opacity
 	}
-	// Inverse-map each destination pixel back into the art.
+	// A whole-pixel translation needs no resampling at all.
+	whole := t.Rotate == 0 && t.Scale == 1 &&
+		t.Offset[0] == math.Trunc(t.Offset[0]) && t.Offset[1] == math.Trunc(t.Offset[1])
+
 	for y := area.Min.Y; y < area.Max.Y; y++ {
 		for x := area.Min.X; x < area.Max.X; x++ {
 			sx, sy := inverse(
 				float64(x)-float64(l.At[0]), float64(y)-float64(l.At[1]),
 				px, py, cos, sin, t)
-			ix, iy := int(sx), int(sy)
-			if sx < 0 || sy < 0 || ix >= b.Dx() || iy >= b.Dy() {
-				continue
+			var c color.NRGBA
+			if whole {
+				ix, iy := int(math.Round(sx)), int(math.Round(sy))
+				if ix < 0 || iy < 0 || ix >= b.Dx() || iy >= b.Dy() {
+					continue
+				}
+				c = art.NRGBAAt(ix, iy)
+			} else {
+				c = sampleBilinear(art, sx, sy)
 			}
-			c := art.NRGBAAt(ix, iy)
 			if c.A == 0 {
 				continue
 			}
@@ -823,6 +839,54 @@ func drawTransformed(dst *image.NRGBA, art *image.NRGBA, l Layer, t Transform) {
 			}
 			blend(dst, x, y, c)
 		}
+	}
+}
+
+// sampleBilinear reads art at a fractional position, blending the four
+// neighbouring pixels. Colour is weighted by alpha as well as by distance,
+// so a semi-transparent edge does not drag its neighbours' colour into the
+// visible part — the usual halo around naively filtered sprite art.
+func sampleBilinear(art *image.NRGBA, sx, sy float64) color.NRGBA {
+	b := art.Bounds()
+	x0, y0 := int(math.Floor(sx)), int(math.Floor(sy))
+	fx, fy := sx-float64(x0), sy-float64(y0)
+
+	var r, g, bl, a, wsum float64
+	for _, p := range [4]struct {
+		dx, dy int
+		w      float64
+	}{
+		{0, 0, (1 - fx) * (1 - fy)},
+		{1, 0, fx * (1 - fy)},
+		{0, 1, (1 - fx) * fy},
+		{1, 1, fx * fy},
+	} {
+		if p.w == 0 {
+			continue
+		}
+		x, y := x0+p.dx, y0+p.dy
+		if x < 0 || y < 0 || x >= b.Dx() || y >= b.Dy() {
+			continue
+		}
+		c := art.NRGBAAt(x, y)
+		ca := float64(c.A) / 255
+		r += float64(c.R) * p.w * ca
+		g += float64(c.G) * p.w * ca
+		bl += float64(c.B) * p.w * ca
+		a += float64(c.A) * p.w
+		wsum += p.w * ca
+	}
+	if a <= 0 {
+		return color.NRGBA{}
+	}
+	if wsum == 0 {
+		return color.NRGBA{A: uint8(a)}
+	}
+	return color.NRGBA{
+		R: uint8(math.Round(r / wsum)),
+		G: uint8(math.Round(g / wsum)),
+		B: uint8(math.Round(bl / wsum)),
+		A: uint8(math.Round(a)),
 	}
 }
 

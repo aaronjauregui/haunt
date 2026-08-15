@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -59,6 +60,25 @@ func ollamaModel(t *testing.T) string {
 	return ""
 }
 
+// ollamaAnswers checks that the server actually completes a request, not
+// merely that it is listening. A wedged Ollama keeps serving /api/tags
+// while inference hangs forever, and a live test that only checks the
+// former spends its whole timeout before reporting a failure that belongs
+// to the machine rather than to the code.
+func ollamaAnswers(t *testing.T, model string) bool {
+	t.Helper()
+	body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hi"}],"stream":false}`, model)
+	client := &http.Client{Timeout: 25 * time.Second}
+	resp, err := client.Post(ollamaURL+"/v1/chat/completions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Logf("ollama is listening but not completing requests: %v", err)
+		return false
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	return resp.StatusCode == http.StatusOK
+}
+
 // TestOllamaGhost runs muse against a real local Ollama server: a live LLM
 // reply must stream back and reach the session record. Skips when Ollama is
 // unavailable, so CI without it stays green.
@@ -66,6 +86,9 @@ func TestOllamaGhost(t *testing.T) {
 	model := ollamaModel(t)
 	if model == "" {
 		t.Skip("no local Ollama server with a model; skipping live LLM test")
+	}
+	if !ollamaAnswers(t, model) {
+		t.Skip("local Ollama is not completing requests; skipping live LLM test")
 	}
 	c := testenv.StartT(t)
 
@@ -202,6 +225,9 @@ func TestOllamaMemory(t *testing.T) {
 	const embedModel = "nomic-embed-text"
 	if !ollamaHasModel(embedModel) {
 		t.Skipf("no %s model pulled; skipping live memory test", embedModel)
+	}
+	if !ollamaAnswers(t, model) {
+		t.Skip("local Ollama is not completing requests; skipping live memory test")
 	}
 	c := testenv.StartT(t)
 

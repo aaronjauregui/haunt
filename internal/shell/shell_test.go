@@ -600,3 +600,69 @@ func TestTransformDamage(t *testing.T) {
 		t.Errorf("damage %v does not cover where the eyes are now", d)
 	}
 }
+
+// TestSubPixelMotion: interpolation is pointless if the renderer snaps to
+// whole pixels. A breath of two pixels passes through offsets like 0.19 and
+// 0.68; sampled nearest-neighbour those collapse into three positions with
+// long pauses between them, which reads as a twitch rather than a breath.
+func TestSubPixelMotion(t *testing.T) {
+	s := Builtin(160)
+
+	// A fractional offset must produce a partially covered edge, which
+	// whole-pixel sampling cannot.
+	s.SetMoves(map[string]Transform{"body": {Offset: [2]float64{0, 0.5}}})
+	partial := false
+	img := s.Sprite().Img
+	for y := 0; y < 160 && !partial; y++ {
+		for x := 0; x < 160; x++ {
+			if a := img.NRGBAAt(x, y).A; a > 0 && a < 255 {
+				partial = true
+				break
+			}
+		}
+	}
+	if !partial {
+		t.Error("a half-pixel offset produced no partial coverage: motion is snapping to whole pixels")
+	}
+
+	// And across a whole breath the ghost should occupy many distinct
+	// positions, not three.
+	clip, _ := s.Clip("breathe")
+	topRow := func() float64 {
+		img := s.Sprite().Img
+		for y := 0; y < 160; y++ {
+			cover := 0.0
+			for x := 0; x < 160; x++ {
+				cover += float64(img.NRGBAAt(x, y).A)
+			}
+			if cover > 0 {
+				return float64(y) + cover/255/64
+			}
+		}
+		return -1
+	}
+	seen := map[float64]bool{}
+	for ms := 0; ms <= clip.Duration(); ms += 66 { // 15fps
+		_, move, _, _ := clip.FrameAt(ms)
+		s.SetMoves(move)
+		seen[topRow()] = true
+	}
+	if len(seen) < 20 {
+		t.Errorf("a breath passed through %d distinct positions; want smooth motion", len(seen))
+	}
+}
+
+// TestWholePixelMotionIsExact: an integer offset must not be softened by
+// the sampler — sprite art moved a whole pixel should stay crisp.
+func TestWholePixelMotionIsExact(t *testing.T) {
+	s, _ := testShell(t)
+	s.SetMoves(map[string]Transform{"eyes": {Offset: [2]float64{20, 0}}})
+	img := s.Sprite().Img
+	for y := 5; y < 15; y++ {
+		for x := 25; x < 35; x++ {
+			if got := img.NRGBAAt(x, y); got != green {
+				t.Fatalf("pixel at (%d,%d) = %v, want the eye art unaltered", x, y, got)
+			}
+		}
+	}
+}
