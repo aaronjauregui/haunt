@@ -56,9 +56,10 @@ wasm = "brain.wasm"
 	// apart — both arcs are the same number of pixels — so compare where
 	// the ink sits: a smile bows below its baseline, a frown above.
 	mouth := image.Rect(spriteX+55, spriteY+85, spriteX+105, spriteY+115)
-	if up, down := inkProfile(t, c, dir, mouth); up+down != 0 {
-		t.Errorf("the neutral face has a mouth: %d above, %d below", up, down)
-	}
+	// No assertion about the starting face on purpose: whisper's boot
+	// greeting ends in "!", which the lexicon quite reasonably reads as
+	// happy, so the ghost may already be smiling before this test says
+	// anything. What matters is that each line puts the right mouth on.
 
 	say := func(text string) {
 		t.Helper()
@@ -69,26 +70,20 @@ wasm = "brain.wasm"
 		}
 	}
 
-	// "hello" maps to happy, which draws a smile: ink below the baseline.
-	say("hello")
-	waitRecordContains(t, record, `"type":"message"`)
-	up, down := waitInk(t, c, dir, mouth)
-	if down <= up {
-		t.Errorf("happy drew %d ink above and %d below; want a smile", up, down)
-	}
-
-	// A sad line bows the other way.
+	// A sad line bows the mouth upward.
 	say("that is sad")
-	waitRecordCount(t, record, `"type":"message"`, 2)
-	for i := 0; i < 100; i++ {
-		up, down = inkProfile(t, c, dir, mouth)
-		if up > down && up > 0 {
-			break
-		}
-		wait100ms()
-	}
+	waitRecordContains(t, record, `"type":"message"`)
+	up, down := waitMouth(t, c, dir, mouth, func(up, down int) bool { return up > down })
 	if up <= down {
 		t.Errorf("sad drew %d ink above and %d below; want a frown", up, down)
+	}
+
+	// A cheerful one bows it the other way.
+	say("thank you, that is lovely")
+	waitRecordCount(t, record, `"type":"message"`, 2)
+	up, down = waitMouth(t, c, dir, mouth, func(up, down int) bool { return down > up })
+	if down <= up {
+		t.Errorf("happy drew %d ink above and %d below; want a smile", up, down)
 	}
 }
 
@@ -114,15 +109,17 @@ func inkProfile(t *testing.T, c *testenv.Compositor, dir string, r image.Rectang
 	return up, down
 }
 
-// waitInk polls until a mouth appears at all.
-func waitInk(t *testing.T, c *testenv.Compositor, dir string, r image.Rectangle) (up, down int) {
+// waitMouth polls until the mouth satisfies want, which is how the test
+// waits for a specific expression rather than for any change at all.
+func waitMouth(t *testing.T, c *testenv.Compositor, dir string, r image.Rectangle,
+	want func(up, down int) bool) (up, down int) {
 	t.Helper()
 	for i := 0; i < 100; i++ {
-		if up, down = inkProfile(t, c, dir, r); up+down > 0 {
+		if up, down = inkProfile(t, c, dir, r); want(up, down) {
 			return up, down
 		}
 		wait100ms()
 	}
-	t.Fatal("no expression ever reached the screen")
+	t.Fatalf("the expected mouth never appeared (last: %d above, %d below)", up, down)
 	return 0, 0
 }

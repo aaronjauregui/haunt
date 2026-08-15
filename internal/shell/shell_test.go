@@ -420,3 +420,183 @@ func TestBuiltinBlinks(t *testing.T) {
 		t.Error("the blink's first frame looks identical to open eyes")
 	}
 }
+
+// TestDamageIsLimitedToWhatChanged: a blink must repaint two eyes, not a
+// whole ghost. Layer art cropped to the area it covers is what makes that
+// possible, which is why the built-in shell is authored that way.
+func TestDamageIsLimitedToWhatChanged(t *testing.T) {
+	s := Builtin(160)
+	full := image.Rect(0, 0, 160, 160)
+
+	if got := s.Damage(State{}); got != full {
+		t.Errorf("first paint damage = %v, want the whole canvas", got)
+	}
+
+	before := s.State()
+	if got := s.Damage(before); !got.Empty() {
+		t.Errorf("damage with nothing changed = %v, want empty", got)
+	}
+
+	// The blink's closed-eyes frame.
+	clip, _ := s.Clip("blink")
+	set, _, _ := clip.Frame(0)
+	s.SetOverrides(set)
+	got := s.Damage(before)
+	if got.Empty() {
+		t.Fatal("a blink reported no damage at all")
+	}
+	if area, whole := got.Dx()*got.Dy(), full.Dx()*full.Dy(); area > whole/8 {
+		t.Errorf("a blink damaged %v (%d px of %d): the eye art is not cropped",
+			got, area, whole)
+	}
+	// And it covers the eyes, wherever they are.
+	if !got.Overlaps(image.Rect(60, 55, 100, 75)) {
+		t.Errorf("blink damage %v does not cover the eyes", got)
+	}
+}
+
+// TestTransformInterpolation: a `move` keyframe is reached gradually, which
+// is the whole difference from a frame-swap format — a breath becomes a
+// curve instead of eight drawings.
+func TestTransformInterpolation(t *testing.T) {
+	c := Clip{Name: "breathe", Keys: []Key{
+		{At: 0, Move: map[string]Transform{"body": {Offset: [2]float64{0, 0}}}},
+		{At: 1000, Move: map[string]Transform{"body": {Offset: [2]float64{0, 10}}}},
+	}}
+	for _, tc := range []struct {
+		elapsed int
+		wantY   float64
+	}{{0, 0}, {250, 2.5}, {500, 5}, {1000, 10}} {
+		_, move, _, _ := c.FrameAt(tc.elapsed)
+		if got := move["body"].Offset[1]; got != tc.wantY {
+			t.Errorf("at %dms: offset y = %v, want %v", tc.elapsed, got, tc.wantY)
+		}
+	}
+
+	if !c.Animates() {
+		t.Error("a clip with moves says it does not animate")
+	}
+	swapOnly := Clip{Keys: []Key{{At: 0, Set: map[string]string{"eyes": "closed"}}}}
+	if swapOnly.Animates() {
+		t.Error("a variant-swap clip claims to animate, and would be sampled needlessly")
+	}
+}
+
+// TestEasing: step holds, sine smooths, linear is the default.
+func TestEasing(t *testing.T) {
+	mid := func(easing string) float64 {
+		c := Clip{Keys: []Key{
+			{At: 0, Move: map[string]Transform{"x": {}}},
+			{At: 100, Ease: easing, Move: map[string]Transform{"x": {Offset: [2]float64{100, 0}}}},
+		}}
+		_, move, _, _ := c.FrameAt(50)
+		return move["x"].Offset[0]
+	}
+	if got := mid(EaseLinear); got != 50 {
+		t.Errorf("linear midpoint = %v, want 50", got)
+	}
+	if got := mid(EaseStep); got != 0 {
+		t.Errorf("step midpoint = %v, want it held at 0", got)
+	}
+	// Sine is symmetric, so its midpoint matches linear's but its quarter
+	// points do not.
+	if got := mid(EaseSine); got < 49 || got > 51 {
+		t.Errorf("sine midpoint = %v, want ~50", got)
+	}
+}
+
+// TestTransformMovesPixels: an offset actually relocates the art.
+func TestTransformMovesPixels(t *testing.T) {
+	s, _ := testShell(t)
+	if got := at(t, s, 8, 8); got != green {
+		t.Fatalf("eyes not where expected: %v", got)
+	}
+	s.SetMoves(map[string]Transform{"eyes": {Offset: [2]float64{20, 0}}})
+	if got := at(t, s, 8, 8); got == green {
+		t.Error("the eyes did not move away from their old position")
+	}
+	if got := at(t, s, 28, 8); got != green {
+		t.Errorf("pixel at the new position = %v, want the eyes there", got)
+	}
+}
+
+// TestParentedTransforms: rotating an upper arm carries the forearm with
+// it. This is the reason `parent` was in the format from the start.
+func TestParentedTransforms(t *testing.T) {
+	dir := t.TempDir()
+	writePNG(t, dir, "body.png", 60, 60, red)
+	writePNG(t, dir, "arm.png", 10, 10, green)
+	writePNG(t, dir, "hand.png", 6, 6, blue)
+	s, err := Load(dir, Manifest{
+		Layers: []Layer{
+			{Name: "body", Image: "body.png"},
+			{Name: "arm", Image: "arm.png", Z: 1, At: [2]int{20, 20}},
+			{Name: "hand", Image: "hand.png", Z: 2, At: [2]int{30, 20}, Parent: "arm"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handAt := func() (int, int) {
+		img := s.Sprite().Img
+		for y := 0; y < 60; y++ {
+			for x := 0; x < 60; x++ {
+				if img.NRGBAAt(x, y) == blue {
+					return x, y
+				}
+			}
+		}
+		return -1, -1
+	}
+	x0, y0 := handAt()
+	if x0 < 0 {
+		t.Fatal("the hand is not drawn at all")
+	}
+
+	// Move only the arm; the hand must follow.
+	s.SetMoves(map[string]Transform{"arm": {Offset: [2]float64{0, 12}}})
+	x1, y1 := handAt()
+	if y1 != y0+12 || x1 != x0 {
+		t.Errorf("hand moved to (%d,%d) from (%d,%d); want it carried 12px down", x1, y1, x0, y0)
+	}
+
+	// An unparented layer stays put.
+	s.SetMoves(map[string]Transform{"body": {Offset: [2]float64{0, 5}}})
+	if x2, y2 := handAt(); x2 != x0 || y2 != y0 {
+		t.Errorf("hand at (%d,%d) after moving an unrelated layer; want (%d,%d)", x2, y2, x0, y0)
+	}
+}
+
+// TestOpacity: fading a layer lets what is behind it show through.
+func TestOpacity(t *testing.T) {
+	s, _ := testShell(t)
+	half := 0.5
+	s.SetMoves(map[string]Transform{"eyes": {Opacity: &half}})
+	got := at(t, s, 8, 8)
+	if got == green || got == red {
+		t.Errorf("half-faded eyes = %v, want a blend of the two", got)
+	}
+	if got.G < 60 || got.R < 60 {
+		t.Errorf("blend = %v, want roughly half of each", got)
+	}
+}
+
+// TestTransformDamage: a moved layer must be repainted both where it was
+// and where it now is, or it leaves a trail.
+func TestTransformDamage(t *testing.T) {
+	s, _ := testShell(t)
+	before := s.State()
+	s.SetMoves(map[string]Transform{"eyes": {Offset: [2]float64{20, 0}}})
+
+	d := s.Damage(before)
+	if d.Empty() {
+		t.Fatal("moving a layer reported no damage")
+	}
+	// The eyes are 10x10 at (5,5), moving to (25,5): damage must span both.
+	if !d.Overlaps(image.Rect(5, 5, 15, 15)) {
+		t.Errorf("damage %v does not cover where the eyes were", d)
+	}
+	if !d.Overlaps(image.Rect(25, 5, 35, 15)) {
+		t.Errorf("damage %v does not cover where the eyes are now", d)
+	}
+}

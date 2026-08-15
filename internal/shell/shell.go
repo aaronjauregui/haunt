@@ -22,7 +22,9 @@ package shell
 import (
 	"fmt"
 	"image"
+	"image/color"
 	"image/draw"
+	"math"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -91,8 +93,9 @@ type Shell struct {
 	pose    string
 	current map[string]string // layer name -> variant, from the pose
 	// overrides is what a running clip is showing right now, on top of the
-	// pose.
+	// pose; moves are where clips have placed layers.
 	overrides map[string]string
+	moves     map[string]Transform
 	clips     []Clip
 
 	// cache holds composited poses. A ghost that is not changing
@@ -365,11 +368,23 @@ func (s *Shell) selection(name string) string {
 	return s.current[name]
 }
 
-// key identifies the current variant selection for caching.
+// key identifies the current appearance for caching: which variants are
+// showing, and where they have been moved to. Interpolated motion makes a
+// fresh key every frame, so the cache stops helping mid-animation — which
+// is correct, since every frame genuinely differs.
 func (s *Shell) key() string {
 	parts := make([]string, 0, len(s.layers))
 	for _, l := range s.layers {
-		parts = append(parts, l.Name+"="+s.selection(l.Name))
+		part := l.Name + "=" + s.selection(l.Name)
+		if t := s.resolve(l.Name); t.moved() {
+			opacity := 1.0
+			if t.Opacity != nil {
+				opacity = *t.Opacity
+			}
+			part += fmt.Sprintf("@%.2f,%.2f,%.2f,%.3f,%.3f",
+				t.Offset[0], t.Offset[1], t.Rotate, t.Scale, opacity)
+		}
+		parts = append(parts, part)
 	}
 	return strings.Join(parts, ",")
 }
@@ -388,8 +403,13 @@ func (s *Shell) Sprite() *sprite.Sprite {
 			continue
 		}
 		b := art.Bounds()
-		at := image.Rect(l.At[0], l.At[1], l.At[0]+b.Dx(), l.At[1]+b.Dy())
-		draw.Draw(img, at, art, b.Min, draw.Over)
+		t := s.resolve(l.Name)
+		if !t.moved() {
+			at := image.Rect(l.At[0], l.At[1], l.At[0]+b.Dx(), l.At[1]+b.Dy())
+			draw.Draw(img, at, art, b.Min, draw.Over)
+			continue
+		}
+		drawTransformed(img, art, l.Layer, t)
 	}
 	sp := &sprite.Sprite{Img: img}
 	s.cache[k] = sp
@@ -448,8 +468,87 @@ type Key struct {
 	At int `toml:"at"`
 	// Set chooses a variant per layer, exactly as a pose does. Layers not
 	// mentioned keep whatever the pose selected, so a blink can leave the
-	// mouth alone.
+	// mouth alone. Stepped: you cannot tween a change of drawing.
 	Set map[string]string `toml:"set"`
+	// Move places layers. Interpolated from the previous keyframe's value,
+	// which is what a frame-swap format cannot do: a breath or a head tilt
+	// becomes a curve instead of eight drawings.
+	Move map[string]Transform `toml:"move"`
+	// Ease shapes that interpolation on the way *to* this keyframe:
+	// "linear" (default), "sine" (smooth in and out), or "step" (hold the
+	// previous value until this keyframe arrives).
+	Ease string `toml:"ease"`
+}
+
+// Transform places a layer relative to where its art sits. The zero value
+// is "unmoved", so a keyframe naming only Offset leaves rotation and scale
+// alone.
+type Transform struct {
+	// Offset shifts the layer, in shell pixels.
+	Offset [2]float64 `toml:"offset"`
+	// Rotate turns it about its pivot, in degrees, clockwise.
+	Rotate float64 `toml:"rotate"`
+	// Scale multiplies its size about its pivot. Zero means 1.
+	Scale float64 `toml:"scale"`
+	// Opacity fades it, 0 to 1. A nil pointer means fully opaque, so that
+	// "unset" and "invisible" are not the same value.
+	Opacity *float64 `toml:"opacity"`
+}
+
+// Easing names.
+const (
+	EaseLinear = "linear"
+	EaseSine   = "sine"
+	EaseStep   = "step"
+)
+
+// identity is the transform of a layer nothing has touched.
+var identity = Transform{Scale: 1}
+
+// normalized fills in the zero values that mean "unchanged".
+func (t Transform) normalized() Transform {
+	if t.Scale == 0 {
+		t.Scale = 1
+	}
+	return t
+}
+
+// lerp interpolates between two transforms. frac is already eased.
+func lerp(a, b Transform, frac float64) Transform {
+	a, b = a.normalized(), b.normalized()
+	out := Transform{
+		Offset: [2]float64{
+			a.Offset[0] + (b.Offset[0]-a.Offset[0])*frac,
+			a.Offset[1] + (b.Offset[1]-a.Offset[1])*frac,
+		},
+		Rotate: a.Rotate + (b.Rotate-a.Rotate)*frac,
+		Scale:  a.Scale + (b.Scale-a.Scale)*frac,
+	}
+	av, bv := 1.0, 1.0
+	if a.Opacity != nil {
+		av = *a.Opacity
+	}
+	if b.Opacity != nil {
+		bv = *b.Opacity
+	}
+	if a.Opacity != nil || b.Opacity != nil {
+		v := av + (bv-av)*frac
+		out.Opacity = &v
+	}
+	return out
+}
+
+// ease shapes a 0..1 fraction.
+func ease(name string, f float64) float64 {
+	switch name {
+	case EaseStep:
+		return 0
+	case EaseSine:
+		// Smooth in and out; the motion a living thing makes.
+		return 0.5 - 0.5*math.Cos(f*math.Pi)
+	default:
+		return f
+	}
 }
 
 // Trigger values.
@@ -481,6 +580,55 @@ func (s *Shell) SetOverrides(set map[string]string) {
 	s.overrides = set
 }
 
+// SetMoves places layers for the current instant of an animation.
+func (s *Shell) SetMoves(move map[string]Transform) {
+	s.moves = move
+}
+
+// resolve composes a layer's transform with its parents', so rotating an
+// upper arm carries the forearm and the hand. Cycles are impossible: the
+// loader rejects them.
+func (s *Shell) resolve(name string) Transform {
+	t := s.moves[name]
+	t = t.normalized()
+	l := s.layer(name)
+	if l == nil || l.Parent == "" {
+		return t
+	}
+	p := s.resolve(l.Parent)
+	// The parent's rotation and scale apply about the parent's pivot, and
+	// carry the child's own offset with them.
+	rad := p.Rotate * math.Pi / 180
+	cos, sin := math.Cos(rad), math.Sin(rad)
+	ox, oy := t.Offset[0]*p.Scale, t.Offset[1]*p.Scale
+	out := Transform{
+		Offset: [2]float64{
+			p.Offset[0] + ox*cos - oy*sin,
+			p.Offset[1] + ox*sin + oy*cos,
+		},
+		Rotate: p.Rotate + t.Rotate,
+		Scale:  p.Scale * t.Scale,
+	}
+	switch {
+	case t.Opacity != nil && p.Opacity != nil:
+		v := *t.Opacity * *p.Opacity
+		out.Opacity = &v
+	case t.Opacity != nil:
+		out.Opacity = t.Opacity
+	case p.Opacity != nil:
+		out.Opacity = p.Opacity
+	}
+	return out
+}
+
+// moved reports whether a transform actually does anything, so an
+// untransformed shell composites by plain blitting as before.
+func (t Transform) moved() bool {
+	t = t.normalized()
+	return t.Offset != [2]float64{} || t.Rotate != 0 || t.Scale != 1 ||
+		(t.Opacity != nil && *t.Opacity < 1)
+}
+
 // Duration is how long a clip runs, which is the time of its last keyframe.
 func (c Clip) Duration() int {
 	if len(c.Keys) == 0 {
@@ -497,19 +645,221 @@ func (c Clip) Duration() int {
 // a wake-up per keyframe rather than running a frame loop, so a blink costs
 // two timers rather than thirty repaints a second.
 func (c Clip) Frame(elapsed int) (set map[string]string, nextIn int, done bool) {
+	set, _, nextIn, done = c.FrameAt(elapsed)
+	return set, nextIn, done
+}
+
+// FrameAt is Frame plus the interpolated transforms, and reports whether
+// anything is mid-interpolation — which is the one case the driver has to
+// sample rather than sleep through.
+func (c Clip) FrameAt(elapsed int) (set map[string]string, move map[string]Transform, nextIn int, done bool) {
 	if len(c.Keys) == 0 {
-		return nil, 0, true
+		return nil, nil, 0, true
 	}
 	set = map[string]string{}
-	for _, k := range c.Keys {
+	move = map[string]Transform{}
+	// from holds the transform each layer is interpolating away from.
+	from := map[string]Transform{}
+
+	for i, k := range c.Keys {
 		if k.At > elapsed {
-			return set, k.At - elapsed, false
+			// Mid-segment: blend towards this keyframe's transforms.
+			prevAt := 0
+			if i > 0 {
+				prevAt = c.Keys[i-1].At
+			}
+			span := k.At - prevAt
+			frac := 1.0
+			if span > 0 {
+				frac = float64(elapsed-prevAt) / float64(span)
+			}
+			frac = ease(k.Ease, frac)
+			for layer, to := range k.Move {
+				start, ok := from[layer]
+				if !ok {
+					start = identity
+				}
+				move[layer] = lerp(start, to, frac)
+			}
+			return set, move, k.At - elapsed, false
 		}
 		// Keyframes accumulate: a later key that mentions only the mouth
 		// leaves an earlier key's eyes in place.
 		for layer, variant := range k.Set {
 			set[layer] = variant
 		}
+		for layer, t := range k.Move {
+			move[layer] = t.normalized()
+			from[layer] = t
+		}
 	}
-	return set, 0, true
+	return set, move, 0, true
+}
+
+// Animates reports whether the clip moves anything, as opposed to only
+// swapping variants. Only moving clips need sampling between keyframes.
+func (c Clip) Animates() bool {
+	for _, k := range c.Keys {
+		if len(k.Move) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// State is what the shell looks like at an instant: which variant each
+// layer shows and where it has been moved to. Callers keep one to ask what
+// has changed since they last painted.
+type State struct {
+	selection map[string]string
+	moves     map[string]Transform
+}
+
+// State snapshots the current appearance.
+func (s *Shell) State() State {
+	st := State{
+		selection: make(map[string]string, len(s.layers)),
+		moves:     make(map[string]Transform, len(s.layers)),
+	}
+	for _, l := range s.layers {
+		st.selection[l.Name] = s.selection(l.Name)
+		st.moves[l.Name] = s.resolve(l.Name)
+	}
+	return st
+}
+
+// Damage is the region that differs from a previous state: the union of the
+// bounds of every layer whose variant or placement changed, in shell
+// coordinates. A zero previous state means everything; an empty rectangle
+// means nothing changed and there is nothing to repaint.
+//
+// Both the old and new appearance count, since a layer that moved has to be
+// erased from where it was as well as drawn where it is now.
+func (s *Shell) Damage(prev State) image.Rectangle {
+	whole := image.Rect(0, 0, s.w, s.h)
+	if prev.selection == nil {
+		return whole
+	}
+	var out image.Rectangle
+	for _, l := range s.layers {
+		now, nowT := s.selection(l.Name), s.resolve(l.Name)
+		was, seen := prev.selection[l.Name]
+		wasT := prev.moves[l.Name]
+		if seen && was == now && wasT == nowT {
+			continue
+		}
+		for _, st := range []struct {
+			variant string
+			t       Transform
+		}{{now, nowT}, {was, wasT}} {
+			art, ok := l.variants[st.variant]
+			if !ok {
+				continue
+			}
+			out = out.Union(layerBounds(art.Bounds(), l.Layer, st.t))
+		}
+	}
+	return out.Intersect(whole)
+}
+
+// layerBounds is where a layer's art lands in shell coordinates under a
+// transform.
+func layerBounds(b image.Rectangle, l Layer, t Transform) image.Rectangle {
+	t = t.normalized()
+	if !t.moved() {
+		return b.Add(image.Pt(l.At[0], l.At[1]))
+	}
+	rad := t.Rotate * math.Pi / 180
+	cos, sin := math.Cos(rad), math.Sin(rad)
+	px, py := float64(l.Pivot[0]), float64(l.Pivot[1])
+
+	minX, minY := math.Inf(1), math.Inf(1)
+	maxX, maxY := math.Inf(-1), math.Inf(-1)
+	for _, c := range [][2]float64{
+		{0, 0}, {float64(b.Dx()), 0}, {0, float64(b.Dy())}, {float64(b.Dx()), float64(b.Dy())},
+	} {
+		x, y := forward(c[0], c[1], px, py, cos, sin, t)
+		x, y = x+float64(l.At[0]), y+float64(l.At[1])
+		minX, minY = math.Min(minX, x), math.Min(minY, y)
+		maxX, maxY = math.Max(maxX, x), math.Max(maxY, y)
+	}
+	return image.Rect(int(math.Floor(minX)), int(math.Floor(minY)),
+		int(math.Ceil(maxX))+1, int(math.Ceil(maxY))+1)
+}
+
+// drawTransformed blits art under a transform: rotation and scale about the
+// layer's pivot, then the offset. Sampling is nearest-neighbour, which is
+// four times cheaper than bilinear and, at the sizes a desktop companion
+// uses, is the difference between a rig that costs nothing and one that
+// shows up in a battery graph.
+func drawTransformed(dst *image.NRGBA, art *image.NRGBA, l Layer, t Transform) {
+	b := art.Bounds()
+	rad := t.Rotate * math.Pi / 180
+	cos, sin := math.Cos(rad), math.Sin(rad)
+	px, py := float64(l.Pivot[0]), float64(l.Pivot[1])
+
+	area := layerBounds(b, l, t).Intersect(dst.Bounds())
+
+	alpha := 1.0
+	if t.Opacity != nil {
+		alpha = *t.Opacity
+	}
+	// Inverse-map each destination pixel back into the art.
+	for y := area.Min.Y; y < area.Max.Y; y++ {
+		for x := area.Min.X; x < area.Max.X; x++ {
+			sx, sy := inverse(
+				float64(x)-float64(l.At[0]), float64(y)-float64(l.At[1]),
+				px, py, cos, sin, t)
+			ix, iy := int(sx), int(sy)
+			if sx < 0 || sy < 0 || ix >= b.Dx() || iy >= b.Dy() {
+				continue
+			}
+			c := art.NRGBAAt(ix, iy)
+			if c.A == 0 {
+				continue
+			}
+			if alpha < 1 {
+				c.A = uint8(float64(c.A) * alpha)
+			}
+			blend(dst, x, y, c)
+		}
+	}
+}
+
+// forward maps a point in art space to shell space (before At).
+func forward(x, y, px, py, cos, sin float64, t Transform) (float64, float64) {
+	x, y = (x-px)*t.Scale, (y-py)*t.Scale
+	return px + x*cos - y*sin + t.Offset[0], py + x*sin + y*cos + t.Offset[1]
+}
+
+// inverse maps a point in shell space (after At) back into art space.
+func inverse(x, y, px, py, cos, sin float64, t Transform) (float64, float64) {
+	x, y = x-t.Offset[0]-px, y-t.Offset[1]-py
+	rx, ry := x*cos+y*sin, -x*sin+y*cos
+	if t.Scale == 0 {
+		return -1, -1
+	}
+	return rx/t.Scale + px, ry/t.Scale + py
+}
+
+// blend puts a non-premultiplied pixel over the destination.
+func blend(dst *image.NRGBA, x, y int, c color.NRGBA) {
+	if c.A == 255 {
+		dst.SetNRGBA(x, y, c)
+		return
+	}
+	d := dst.NRGBAAt(x, y)
+	a := uint32(c.A)
+	inv := 255 - a
+	// Straight-alpha over; both sides are non-premultiplied here.
+	outA := a + uint32(d.A)*inv/255
+	if outA == 0 {
+		return
+	}
+	mix := func(sc, dc uint8) uint8 {
+		return uint8((uint32(sc)*a + uint32(dc)*uint32(d.A)*inv/255) / outA)
+	}
+	dst.SetNRGBA(x, y, color.NRGBA{
+		R: mix(c.R, d.R), G: mix(c.G, d.G), B: mix(c.B, d.B), A: uint8(outA),
+	})
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"math/rand"
+	"sort"
 	"sync"
 	"time"
 
@@ -20,6 +21,12 @@ import (
 // layers: blinking while the mouth talks. When two clips reach for the same
 // layer, the one started most recently wins, and the pose shows through
 // wherever no clip has an opinion.
+
+// sampleInterval is how often a clip that interpolates is resampled: 15fps,
+// which is plenty for a 2D companion and a quarter of the cost of 60. Clips
+// that only swap variants are not sampled at all — they sleep from one
+// keyframe to the next.
+const sampleInterval = 66 * time.Millisecond
 
 // Random intervals for the automatic triggers. Wide enough that two ghosts
 // on one screen do not blink in lockstep.
@@ -146,13 +153,18 @@ func (g *Ghost) advanceClip(name string) {
 		return
 	}
 	elapsed := int(time.Since(r.started) / time.Millisecond)
-	_, nextIn, done := r.clip.Frame(elapsed)
+	_, _, nextIn, done := r.clip.FrameAt(elapsed)
 	if done {
 		delete(g.anim.active, name)
 	} else {
-		r.timer = time.AfterFunc(time.Duration(nextIn)*time.Millisecond, func() {
-			g.advanceClip(name)
-		})
+		// A clip that only swaps variants sleeps until its next keyframe.
+		// One that interpolates has to be sampled, but no faster than the
+		// eye needs.
+		wake := time.Duration(nextIn) * time.Millisecond
+		if r.clip.Animates() && wake > sampleInterval {
+			wake = sampleInterval
+		}
+		r.timer = time.AfterFunc(wake, func() { g.advanceClip(name) })
 	}
 	trigger := r.clip.Trigger
 	g.anim.mu.Unlock()
@@ -187,41 +199,44 @@ func (g *Ghost) repaintAnimation() {
 	type framed struct {
 		order int
 		set   map[string]string
+		move  map[string]shell.Transform
 	}
 	frames := make([]framed, 0, len(g.anim.active))
 	for _, r := range g.anim.active {
-		set, _, _ := r.clip.Frame(int(time.Since(r.started) / time.Millisecond))
-		frames = append(frames, framed{r.order, set})
+		set, move, _, _ := r.clip.FrameAt(int(time.Since(r.started) / time.Millisecond))
+		frames = append(frames, framed{r.order, set, move})
 	}
 	g.anim.mu.Unlock()
 
-	// Newest clip wins a contested layer.
+	// Oldest first, so the newest clip's opinion lands last and wins a
+	// contested layer.
+	sort.Slice(frames, func(i, j int) bool { return frames[i].order < frames[j].order })
 	overrides := map[string]string{}
-	for pass := 0; pass < len(frames); pass++ {
-		best := -1
-		for i, f := range frames {
-			if f.set != nil && (best < 0 || f.order < frames[best].order) {
-				best = i
-			}
-		}
-		if best < 0 {
-			break
-		}
-		for layer, variant := range frames[best].set {
+	moves := map[string]shell.Transform{}
+	for _, f := range frames {
+		for layer, variant := range f.set {
 			overrides[layer] = variant
 		}
-		frames[best].set = nil
+		for layer, t := range f.move {
+			moves[layer] = t
+		}
 	}
 
 	g.shellMu.Lock()
+	prev := g.painted
+	g.shell.SetMoves(moves)
 	g.shell.SetOverrides(overrides)
 	sp := g.shell.Sprite()
+	// Only the layers whose variant changed need to reach the compositor:
+	// a blink is a repaint of two eyes, not of a ghost.
+	damage := g.shell.Damage(prev)
+	g.painted = g.shell.State()
 	g.shellMu.Unlock()
 
-	if g.surface == nil {
+	if g.surface == nil || damage.Empty() {
 		return
 	}
-	if err := g.surface.Redraw(sp); err != nil {
+	if err := g.surface.RedrawRect(sp, damage); err != nil {
 		g.opts.Log(fmt.Sprintf("haunt: animation repaint: %v", err))
 	}
 }

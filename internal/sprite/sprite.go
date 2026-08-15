@@ -41,18 +41,26 @@ func (s *Sprite) Size() (w, h int) {
 // WriteBGRA fills dst with premultiplied BGRA pixels (wl_shm ARGB8888 on a
 // little-endian machine). dst must be at least 4*w*h bytes.
 func (s *Sprite) WriteBGRA(dst []byte) {
+	s.WriteBGRARect(dst, s.Img.Bounds())
+}
+
+// WriteBGRARect writes only the pixels inside r, leaving the rest of dst
+// untouched. Animation repaints a blinking eye, not a whole ghost, and the
+// upload is otherwise the largest remaining cost of a small change.
+func (s *Sprite) WriteBGRARect(dst []byte, r image.Rectangle) {
 	b := s.Img.Bounds()
-	w, h := b.Dx(), b.Dy()
-	for y := 0; y < h; y++ {
+	w := b.Dx()
+	r = r.Intersect(b)
+	for y := r.Min.Y; y < r.Max.Y; y++ {
 		row := s.Img.Pix[y*s.Img.Stride : y*s.Img.Stride+w*4]
 		out := dst[y*w*4 : (y+1)*w*4]
-		for x := 0; x < w; x++ {
-			r, g, bl, a := row[x*4], row[x*4+1], row[x*4+2], row[x*4+3]
+		for x := r.Min.X; x < r.Max.X; x++ {
+			cr, cg, cb, ca := row[x*4], row[x*4+1], row[x*4+2], row[x*4+3]
 			// Premultiply.
-			out[x*4] = uint8(uint32(bl) * uint32(a) / 255)
-			out[x*4+1] = uint8(uint32(g) * uint32(a) / 255)
-			out[x*4+2] = uint8(uint32(r) * uint32(a) / 255)
-			out[x*4+3] = a
+			out[x*4] = uint8(uint32(cb) * uint32(ca) / 255)
+			out[x*4+1] = uint8(uint32(cg) * uint32(ca) / 255)
+			out[x*4+2] = uint8(uint32(cr) * uint32(ca) / 255)
+			out[x*4+3] = ca
 		}
 	}
 }

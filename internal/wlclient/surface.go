@@ -3,6 +3,7 @@ package wlclient
 import (
 	"errors"
 	"fmt"
+	"image"
 
 	"github.com/rajveermalviya/go-wayland/wayland/client"
 	"golang.org/x/sys/unix"
@@ -275,6 +276,13 @@ var ErrSizeChanged = errors.New("sprite size differs from the surface")
 // principled fix, if it ever shows, is a second buffer swapped on
 // wl_buffer.release.
 func (s *SpriteSurface) Redraw(sp *sprite.Sprite) error {
+	return s.RedrawRect(sp, sp.Img.Bounds())
+}
+
+// RedrawRect is Redraw for a known-changed region: only those pixels are
+// written and only that rectangle is damaged, so the compositor re-reads a
+// blinking eye rather than a whole ghost.
+func (s *SpriteSurface) RedrawRect(sp *sprite.Sprite, r image.Rectangle) error {
 	s.app.mu.Lock()
 	defer s.app.mu.Unlock()
 	if s.destroyed {
@@ -284,12 +292,16 @@ func (s *SpriteSurface) Redraw(sp *sprite.Sprite) error {
 	if int32(w) != s.W || int32(h) != s.H || s.shmData == nil || s.buffer == nil {
 		return ErrSizeChanged
 	}
-	sp.WriteBGRA(s.shmData)
+	r = r.Intersect(sp.Img.Bounds())
+	if r.Empty() {
+		return nil
+	}
+	sp.WriteBGRARect(s.shmData, r)
 	s.src = sp
 	if err := s.wlSurface.Attach(s.buffer, 0, 0); err != nil {
 		return err
 	}
-	if err := s.wlSurface.Damage(0, 0, int32(w), int32(h)); err != nil {
+	if err := s.wlSurface.Damage(int32(r.Min.X), int32(r.Min.Y), int32(r.Dx()), int32(r.Dy())); err != nil {
 		return err
 	}
 	return s.wlSurface.Commit()

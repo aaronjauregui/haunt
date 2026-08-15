@@ -74,8 +74,11 @@ type Ghost struct {
 
 	// shellMu guards the shell: pose changes come from the intent loop,
 	// clip frames from animation timers.
-	shellMu       sync.Mutex
-	shell         *shell.Shell
+	shellMu sync.Mutex
+	shell   *shell.Shell
+	// painted is what is currently on screen, so a repaint can be limited
+	// to what actually changed.
+	painted       shell.State
 	anim          *animator
 	reducedMotion bool
 	blnRend       *balloon.Renderer
@@ -647,14 +650,17 @@ func (g *Ghost) setExpression(pose string) {
 		return
 	}
 	sp := g.shell.Sprite()
+	damage := g.shell.Damage(g.painted)
+	g.painted = g.shell.State()
 	g.shellMu.Unlock()
 
 	if g.surface == nil {
 		return // no compositor: tests drive the shell without one
 	}
 	// Poses composite onto one canvas, so the surface can be repainted in
-	// place — no flicker, and no re-derived input region.
-	if err := g.surface.Redraw(sp); err != nil {
+	// place — no flicker, and no re-derived input region — and only the
+	// layers the new pose actually changed.
+	if err := g.surface.RedrawRect(sp, damage); err != nil {
 		g.opts.Log(fmt.Sprintf("haunt: expression %q: %v", pose, err))
 	}
 }
