@@ -243,3 +243,70 @@ func min(a, b int) int {
 	}
 	return b
 }
+
+// TestLongDialogueStaysOnScreen: a reply of several paragraphs must not
+// produce a balloon taller than the display. It did once — a 308x1678
+// panel on a 720-tall screen, which covers everything and reads as the
+// ghost having broken.
+func TestLongDialogueStaysOnScreen(t *testing.T) {
+	c := testenv.StartT(t)
+	dir := t.TempDir()
+	rt := filepath.Join(dir, "run")
+	bin := filepath.Join(dir, "haunt")
+	build(t, bin, ".")
+
+	gDir := filepath.Join(dir, "whisper")
+	writeGhost(t, gDir, `[ghost]
+name = "whisper"
+capabilities = ["message"]
+
+[brain]
+wasm = "brain.wasm"
+`)
+	build(t, filepath.Join(gDir, "brain.wasm"), "../../examples/whisper", "GOOS=wasip1", "GOARCH=wasm")
+
+	record := filepath.Join(dir, "session.jsonl")
+	cmd := exec.Command(bin, "run", "-x", "200", "-y", "200",
+		"-state", filepath.Join(dir, "state"), "-record", record, gDir)
+	// HAUNT_DEBUG makes wlclient log the size of every surface it creates.
+	cmd.Env = append(c.Env(), "HAUNT_RUNTIME_DIR="+rt, "HAUNT_DEBUG=1")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr := &syncBuffer{}
+	cmd.Stderr = stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cmd.Process.Signal(syscall.SIGTERM)
+		cmd.Wait()
+	})
+	waitFor(t, stdout, "READY")
+
+	para := strings.Repeat("The ghost considered the matter at some length, and found it wanting. ", 12)
+	say := exec.Command(bin, "say", "-ghost", "whisper", para+"\n\n"+para+"\n\n"+para)
+	say.Env = append(os.Environ(), "HAUNT_RUNTIME_DIR="+rt)
+	if out, err := say.CombinedOutput(); err != nil {
+		t.Fatalf("say: %v: %s", err, out)
+	}
+	// Wait for the balloon to be on screen, then check every surface the
+	// driver made.
+	waitBalloon(t, c, dir, 200, 200, true)
+
+	_, screenH := testenv.ScreenSize()
+	for _, line := range strings.Split(stderr.String(), "\n") {
+		var w, h int
+		if _, err := fmt.Sscanf(strings.TrimSpace(line), "haunt: surface create %dx%d", &w, &h); err != nil {
+			continue
+		}
+		if h > screenH {
+			t.Errorf("a %dx%d surface was created on a %dpx-tall screen", w, h, screenH)
+		}
+	}
+
+	if !strings.Contains(stderr.String(), "surface create") {
+		t.Fatal("no surfaces were logged; HAUNT_DEBUG is not doing its job")
+	}
+}

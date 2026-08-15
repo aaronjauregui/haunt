@@ -24,9 +24,13 @@ type Theme struct {
 	Border     color.NRGBA
 	// MaxWidth is the widest a balloon grows before wrapping, in pixels.
 	MaxWidth int
-	FontSize float64
-	Padding  int
-	Radius   int
+	// MaxHeight caps how tall a balloon may grow. Zero means unlimited,
+	// which is only reasonable for tests: on a screen, a balloon that
+	// outgrows the display stops being a balloon and becomes a wall.
+	MaxHeight int
+	FontSize  float64
+	Padding   int
+	Radius    int
 }
 
 // DefaultTheme is a soft dark panel with light text.
@@ -36,6 +40,7 @@ func DefaultTheme() Theme {
 		Text:       color.NRGBA{R: 235, G: 235, B: 245, A: 255},
 		Border:     color.NRGBA{R: 120, G: 130, B: 180, A: 255},
 		MaxWidth:   320,
+		MaxHeight:  420,
 		FontSize:   16,
 		Padding:    14,
 		Radius:     12,
@@ -73,6 +78,8 @@ func (r *Renderer) Render(text string) *sprite.Sprite {
 
 	metrics := r.face.Metrics()
 	lineHeight := (metrics.Ascent + metrics.Descent).Ceil() + 2
+
+	lines = r.fit(lines, lineHeight)
 
 	textWidth := 0
 	for _, l := range lines {
@@ -153,6 +160,25 @@ func (r *Renderer) RenderImage(src image.Image) *sprite.Sprite {
 		}
 	}
 	return &sprite.Sprite{Img: panel}
+}
+
+// fit trims wrapped text to the theme's height, keeping the tail. Dialogue
+// arrives a token at a time and the newest words are the ones being said,
+// so a balloon behaves like a terminal rather than a page: the ellipsis
+// marks what scrolled off above. Proper paging belongs with balloon markup,
+// which is a later item.
+func (r *Renderer) fit(lines []string, lineHeight int) []string {
+	if r.theme.MaxHeight <= 0 {
+		return lines
+	}
+	max := (r.theme.MaxHeight - 2*r.theme.Padding) / lineHeight
+	if max < 1 {
+		max = 1
+	}
+	if len(lines) <= max {
+		return lines
+	}
+	return append([]string{"…"}, lines[len(lines)-max+1:]...)
 }
 
 // wrap breaks text into lines no wider than maxWidth pixels, on spaces where

@@ -144,7 +144,7 @@ wasm = "brain.wasm"
 
 	// A real model can be slow on first load; allow a generous window for
 	// the reply event, then confirm the balloon made it to the screen.
-	waitRecordContainsSlow(t, record, `"type":"ai_reply"`, 120*time.Second)
+	waitRecordContainsSlow(t, record, `"type":"ai_reply"`, 120*time.Second, model)
 	waitBalloon(t, c, dir, 100, 100, true)
 
 	cmd.Process.Signal(syscall.SIGTERM)
@@ -153,8 +153,13 @@ wasm = "brain.wasm"
 	}
 }
 
-// waitRecordContainsSlow is waitRecordContains with a custom deadline.
-func waitRecordContainsSlow(t *testing.T, path, want string, timeout time.Duration) {
+// waitRecordContainsSlow is waitRecordContains with a custom deadline, and
+// with a check on the way out: a live test can only conclude anything if
+// its dependency stayed up. If nothing arrived and Ollama has stopped
+// answering — which it does under load on some setups, while still serving
+// its API — that is the machine's problem and the test skips rather than
+// blaming the code.
+func waitRecordContainsSlow(t *testing.T, path, want string, timeout time.Duration, model string) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for {
@@ -163,6 +168,9 @@ func waitRecordContainsSlow(t *testing.T, path, want string, timeout time.Durati
 			return
 		}
 		if time.Now().After(deadline) {
+			if !ollamaAnswers(t, model) {
+				t.Skipf("ollama stopped completing requests mid-test; skipping rather than reporting a failure it caused")
+			}
 			t.Fatalf("recording never contained %q; have:\n%s", want, data)
 		}
 		time.Sleep(250 * time.Millisecond)
@@ -295,7 +303,7 @@ wasm = "brain.wasm"
 			t.Fatalf("say %q: %v: %s", text, err, out)
 		}
 		replies++
-		waitRecordCountSlow(t, record, `"type":"ai_reply"`, replies, 120*time.Second)
+		waitRecordCountSlow(t, record, `"type":"ai_reply"`, replies, 120*time.Second, model)
 	}
 
 	say("I drink oolong tea every morning")
@@ -326,7 +334,7 @@ wasm = "brain.wasm"
 
 // waitRecordCountSlow is waitRecordCount with a timeout sized for real
 // models, which can stall on first load.
-func waitRecordCountSlow(t *testing.T, path, s string, want int, timeout time.Duration) {
+func waitRecordCountSlow(t *testing.T, path, s string, want int, timeout time.Duration, model string) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for {
@@ -335,6 +343,9 @@ func waitRecordCountSlow(t *testing.T, path, s string, want int, timeout time.Du
 			return
 		}
 		if time.Now().After(deadline) {
+			if !ollamaAnswers(t, model) {
+				t.Skipf("ollama stopped completing requests mid-test; skipping rather than reporting a failure it caused")
+			}
 			t.Fatalf("recording never held %d occurrences of %q; have:\n%s", want, s, data)
 		}
 		time.Sleep(250 * time.Millisecond)

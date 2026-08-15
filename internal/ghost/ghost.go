@@ -179,7 +179,17 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	if err = g.surface.WaitMapped(); err != nil {
 		return err
 	}
-	if g.blnRend, err = balloon.NewRenderer(balloon.DefaultTheme()); err != nil {
+	// Balloons are capped to a share of the screen: three paragraphs of
+	// generated dialogue would otherwise produce a panel taller than the
+	// display, which covers everything and reads as the ghost having
+	// broken.
+	theme := balloon.DefaultTheme()
+	if _, outH, known := g.app.OutputSize(); known {
+		if capped := int(outH) * 2 / 3; capped > 120 {
+			theme.MaxHeight = capped
+		}
+	}
+	if g.blnRend, err = balloon.NewRenderer(theme); err != nil {
 		return err
 	}
 

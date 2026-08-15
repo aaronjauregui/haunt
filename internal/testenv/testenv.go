@@ -18,6 +18,16 @@ import (
 
 var displayRe = regexp.MustCompile(`Running compositor on wayland display '([^']+)'`)
 
+// The harness screen. Exported through ScreenSize so tests can assert
+// against it — a surface taller than the display is a bug with a number.
+const (
+	screenW = 1280
+	screenH = 720
+)
+
+// ScreenSize is the headless output's size in pixels.
+func ScreenSize() (w, h int) { return screenW, screenH }
+
 // Compositor is a running headless sway instance.
 type Compositor struct {
 	// Display is the WAYLAND_DISPLAY value clients should use.
@@ -47,7 +57,7 @@ func Start() (*Compositor, error) {
 	cfg := filepath.Join(dir, "sway.cfg")
 	sock := filepath.Join(dir, "sway.sock")
 	// Minimal config: no bars, no autostart, a predictable output size.
-	conf := "output HEADLESS-1 resolution 1280x720\n" +
+	conf := fmt.Sprintf("output HEADLESS-1 resolution %dx%d\n", screenW, screenH) +
 		"seat seat0 xcursor_theme default 24\n"
 	if err := os.WriteFile(cfg, []byte(conf), 0o644); err != nil {
 		os.RemoveAll(dir)

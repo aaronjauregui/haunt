@@ -58,6 +58,13 @@ type App struct {
 	layerShell *layershell.LayerShell
 	idleMgr    *ext_idle_notify.IdleNotifier
 
+	// output geometry, in logical pixels. Zero until the compositor tells
+	// us, which it does during the initial roundtrip.
+	output      *client.Output
+	outputW     int32
+	outputH     int32
+	outputScale int32
+
 	// pointerFocus tracks which sprite surface the pointer is over;
 	// keyboardFocus which one the compositor is sending keys to.
 	surfaces      map[uint32]*SpriteSurface
@@ -107,6 +114,24 @@ func Connect() (*App, error) {
 		case "zwlr_layer_shell_v1":
 			a.layerShell = layershell.NewLayerShell(ctx)
 			registry.Bind(e.Name, e.Interface, minu(e.Version, 4), a.layerShell)
+		case "wl_output":
+			if a.output == nil {
+				a.output = client.NewOutput(ctx)
+				registry.Bind(e.Name, e.Interface, minu(e.Version, 2), a.output)
+				a.output.SetModeHandler(func(m client.OutputModeEvent) {
+					const currentMode = 1
+					if m.Flags&currentMode != 0 {
+						a.mu.Lock()
+						a.outputW, a.outputH = m.Width, m.Height
+						a.mu.Unlock()
+					}
+				})
+				a.output.SetScaleHandler(func(sc client.OutputScaleEvent) {
+					a.mu.Lock()
+					a.outputScale = sc.Factor
+					a.mu.Unlock()
+				})
+			}
 		case "ext_idle_notifier_v1":
 			a.idleMgr = ext_idle_notify.NewIdleNotifier(ctx)
 			registry.Bind(e.Name, e.Interface, 1, a.idleMgr)
@@ -155,6 +180,22 @@ func minu(a, b uint32) uint32 {
 		return a
 	}
 	return b
+}
+
+// OutputSize is the current output in logical pixels, and whether the
+// compositor has said. Callers need it to keep surfaces from growing past
+// the screen — a balloon three paragraphs tall is a wall, not a balloon.
+func (a *App) OutputSize() (w, h int32, known bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.outputW == 0 || a.outputH == 0 {
+		return 0, 0, false
+	}
+	scale := a.outputScale
+	if scale < 1 {
+		scale = 1
+	}
+	return a.outputW / scale, a.outputH / scale, true
 }
 
 // Roundtrip flushes requests and dispatches events until the compositor

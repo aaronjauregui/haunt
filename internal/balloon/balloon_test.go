@@ -110,3 +110,74 @@ func TestRenderInputFixedSize(t *testing.T) {
 		})
 	}
 }
+
+// TestBalloonHeightIsCapped: three paragraphs of generated dialogue must
+// not produce a panel taller than the screen. A balloon that outgrows the
+// display stops being a balloon and becomes a wall.
+func TestBalloonHeightIsCapped(t *testing.T) {
+	theme := DefaultTheme()
+	theme.MaxHeight = 200
+	r, err := NewRenderer(theme)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	para := strings.Repeat("The ghost considered the matter at length. ", 12)
+	long := para + "\n\n" + para + "\n\n" + para
+
+	sp := r.Render(long)
+	if h := sp.Img.Bounds().Dy(); h > theme.MaxHeight {
+		t.Errorf("balloon is %dpx tall, want no more than %d", h, theme.MaxHeight)
+	}
+
+	// Short text is untouched by the cap.
+	short := r.Render("Hello.")
+	if h := short.Img.Bounds().Dy(); h > 60 {
+		t.Errorf("a one-line balloon is %dpx tall", h)
+	}
+
+	// Unlimited stays unlimited, so tests and headless uses can opt out.
+	theme.MaxHeight = 0
+	r2, err := NewRenderer(theme)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h := r2.Render(long).Img.Bounds().Dy(); h <= 200 {
+		t.Errorf("an uncapped balloon was capped anyway: %dpx", h)
+	}
+}
+
+// TestCappedBalloonKeepsTheTail: dialogue streams in, so the newest words
+// are the ones being spoken. The ellipsis marks what scrolled off.
+func TestCappedBalloonKeepsTheTail(t *testing.T) {
+	theme := DefaultTheme()
+	theme.MaxHeight = 200
+	r, err := NewRenderer(theme)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := []string{"one", "two", "three", "four", "five", "six", "seven", "eight"}
+
+	got := r.fit(in, 40) // 40px lines: (200-28)/40 = 4 fit
+	if len(got) != 4 {
+		t.Fatalf("fit kept %d lines (%v), want 4", len(got), got)
+	}
+	if got[0] != "…" {
+		t.Errorf("first line = %q, want the ellipsis marking what scrolled off", got[0])
+	}
+	if got[len(got)-1] != "eight" {
+		t.Errorf("last line = %q, want the newest text kept", got[len(got)-1])
+	}
+	if got[1] != "six" {
+		t.Errorf("kept lines = %v, want the tail", got)
+	}
+
+	// Text that fits is returned untouched, ellipsis and all.
+	if got := r.fit(in[:3], 40); len(got) != 3 || got[0] != "one" {
+		t.Errorf("short text was trimmed: %v", got)
+	}
+	// A cap too small for even one line still renders something.
+	if got := r.fit(in, 10_000); len(got) != 1 {
+		t.Errorf("an impossibly tight cap kept %v", got)
+	}
+}
