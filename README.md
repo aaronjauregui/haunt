@@ -61,12 +61,19 @@ Hyprland config if the service does not start.
 ## Make a ghost
 
     haunt new mycompanion
-    cd mycompanion && make run
+    cd mycompanion && haunt run .
 
-That scaffolds a working ghost: a manifest, a shell, and a brain in Go
-compiled to WASM. Brains are stdio programs — events in, intents out — and
-the same source builds as a sandboxed WASM module or a native process.
-`examples/whisper` is scripted; `examples/muse` uses the LLM.
+That scaffolds a whole ghost: a manifest and a persona. There is no brain
+in it and nothing to compile — a ghost that declares no brain runs on the
+driver's built-in one, which chats in your persona, draws when asked, keeps
+a journal and speaks first now and then. What is left to do is the art.
+
+    haunt new -brain mycompanion
+
+scaffolds the other kind, for a ghost whose logic is its own: a brain in Go
+with a Makefile that builds it to WASM. Brains are stdio programs — events
+in, intents out — and the same source builds as a sandboxed WASM module or
+a native process. `examples/whisper` is one.
 
 ## Commands
 

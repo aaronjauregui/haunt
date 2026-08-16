@@ -1,7 +1,7 @@
 // Command haunt is the ghost driver CLI.
 //
 //	haunt run <ghost-dir>   run a ghost (requires a layer-shell compositor)
-//	haunt new <name>        scaffold a new ghost project
+//	haunt new <name>        scaffold a new ghost project (art + persona)
 package main
 
 import (
@@ -80,7 +80,7 @@ func usage() {
   haunt run [-x N] [-y N] [-output NAME] [-record FILE] [-state DIR] [ghost-dir|name]
   haunt dev [-x N] [-y N] [-state DIR] <ghost-dir>
   haunt say [-ghost NAME] <text>
-  haunt new <name>
+  haunt new [-brain] <name>
   haunt keygen
   haunt pack [-o FILE] <ghost-dir>
   haunt install [-yes] <file.haunt>

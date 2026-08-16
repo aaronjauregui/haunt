@@ -10,8 +10,44 @@ import (
 	"github.com/aaronjauregui/haunt/internal/ghost"
 )
 
-// TestNewScaffoldBuilds scaffolds a ghost, points its go.mod at this
-// checkout, and verifies the brain compiles to WASM and the manifest loads.
+// TestNewScaffoldsAPersonaGhost: the default scaffold is a ghost with no
+// brain of its own — the whole point being that nothing in it needs
+// compiling, so an artist can go straight to the drawing.
+func TestNewScaffoldsAPersonaGhost(t *testing.T) {
+	dir := t.TempDir()
+	cwd, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	if err := cmdNew([]string{"wisp"}); err != nil {
+		t.Fatal(err)
+	}
+	m, err := ghost.LoadManifest(filepath.Join(dir, "wisp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.Brain.Builtin() {
+		t.Errorf("scaffolded brain = %+v, want the built-in one", m.Brain)
+	}
+	if m.Persona.System == "" {
+		t.Error("scaffolded ghost has no persona, which is all it is")
+	}
+	entries, err := os.ReadDir(filepath.Join(dir, "wisp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() != "ghost.toml" && e.Name() != "README.md" {
+			t.Errorf("scaffold includes %q; the persona ghost should need no build step", e.Name())
+		}
+	}
+}
+
+// TestNewScaffoldBuilds scaffolds a ghost with a brain of its own, points
+// its go.mod at this checkout, and verifies the brain compiles to WASM and
+// the manifest loads.
 func TestNewScaffoldBuilds(t *testing.T) {
 	repo, err := filepath.Abs("../..")
 	if err != nil {
@@ -24,10 +60,10 @@ func TestNewScaffoldBuilds(t *testing.T) {
 	}
 	defer os.Chdir(cwd)
 
-	if err := cmdNew([]string{"specter"}); err != nil {
+	if err := cmdNew([]string{"-brain", "specter"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := cmdNew([]string{"specter"}); err == nil {
+	if err := cmdNew([]string{"-brain", "specter"}); err == nil {
 		t.Error("expected error scaffolding over an existing directory")
 	}
 	if err := cmdNew([]string{"Bad Name"}); err == nil {

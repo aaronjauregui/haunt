@@ -114,21 +114,17 @@ llm_requests_per_hour = 20
 
 	bin := filepath.Join(dir, "haunt")
 	build(t, bin, ".")
-	gDir := filepath.Join(dir, "muse")
+	gDir := filepath.Join(dir, "wisp")
 	// history_turns = 1: only the previous exchange rides along, so
 	// anything older can reach the prompt through recall or not at all.
 	writeGhost(t, gDir, `[ghost]
-name = "muse"
+name = "wisp"
 capabilities = ["message", "llm"]
 
 [persona]
-system = "You are Muse."
+system = "You are Wisp."
 history_turns = 1
-
-[brain]
-wasm = "brain.wasm"
 `)
-	build(t, filepath.Join(gDir, "brain.wasm"), "../../examples/muse", "GOOS=wasip1", "GOARCH=wasm")
 
 	record := filepath.Join(dir, "session.jsonl")
 	cmd := exec.Command(bin, "run", "-x", "100", "-y", "100",
@@ -151,7 +147,7 @@ wasm = "brain.wasm"
 	env := append(os.Environ(), "HAUNT_RUNTIME_DIR="+rt)
 	rawSay := func(text string) {
 		t.Helper()
-		sc := exec.Command(bin, "say", "-ghost", "muse", text)
+		sc := exec.Command(bin, "say", "-ghost", "wisp", text)
 		sc.Env = env
 		if out, err := sc.CombinedOutput(); err != nil {
 			t.Fatalf("say %q: %v: %s", text, err, out)

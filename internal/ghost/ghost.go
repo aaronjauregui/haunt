@@ -20,6 +20,7 @@ import (
 	"github.com/aaronjauregui/haunt/internal/brain"
 	"github.com/aaronjauregui/haunt/internal/bus"
 	"github.com/aaronjauregui/haunt/internal/control"
+	"github.com/aaronjauregui/haunt/internal/defaultbrain"
 	"github.com/aaronjauregui/haunt/internal/desktop"
 	"github.com/aaronjauregui/haunt/internal/proto"
 	"github.com/aaronjauregui/haunt/internal/quiet"
@@ -295,16 +296,25 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		g.cacheDir = filepath.Join(os.TempDir(), "haunt-cache-"+m.Ghost.Name)
 	}
 
-	// Brain: sandboxed WASM by default; a native process only when the
-	// manifest declares (and the user granted) the native-brain capability.
-	if len(m.Brain.Command) > 0 {
+	// Brain: the driver's built-in one when the manifest declares none,
+	// sandboxed WASM when it does, a native process only when the manifest
+	// declares (and the user granted) the native-brain capability. All three
+	// speak the same event/intent schema down the same pipe: the built-in
+	// brain is hosted, not privileged.
+	switch {
+	case m.Brain.Builtin():
+		opts.Log("haunt: no brain declared; running the built-in brain")
+		if g.brain, err = brain.StartBuiltin(defaultbrain.Run, g.execIntent, brain.Options{}); err != nil {
+			return err
+		}
+	case len(m.Brain.Command) > 0:
 		if !g.capabilityActive("native-brain") {
 			return fmt.Errorf("ghost %q wants a native brain but the native-brain capability is not granted", m.Ghost.Name)
 		}
 		if g.brain, err = brain.StartProcess(dir, m.Brain.Command, g.execIntent, brain.Options{}); err != nil {
 			return err
 		}
-	} else {
+	default:
 		wasmBytes, err := os.ReadFile(filepath.Join(dir, m.Brain.Wasm))
 		if err != nil {
 			return err

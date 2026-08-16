@@ -91,18 +91,14 @@ func TestGhostKeepsQuietOverFullscreen(t *testing.T) {
 
 	bin := filepath.Join(dir, "haunt")
 	build(t, bin, ".")
-	gDir := filepath.Join(dir, "muse")
+	gDir := filepath.Join(dir, "wisp")
 	writeGhost(t, gDir, `[ghost]
-name = "muse"
+name = "wisp"
 capabilities = ["message", "llm"]
 
 [persona]
-system = "You are Muse."
-
-[brain]
-wasm = "brain.wasm"
+system = "You are Wisp."
 `)
-	build(t, filepath.Join(gDir, "brain.wasm"), "../../examples/muse", "GOOS=wasip1", "GOARCH=wasm")
 
 	// Fill the screen before the ghost even starts.
 	if out, err := c.Swaymsg("exec", "foot"); err != nil {

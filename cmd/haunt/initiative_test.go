@@ -16,7 +16,7 @@ import (
 	"github.com/aaronjauregui/haunt/internal/testenv"
 )
 
-// TestInitiative: left alone, muse speaks first — and only as often as the
+// TestInitiative: left alone, wisp speaks first — and only as often as the
 // user's curiosity allowance permits. The idle threshold is turned right
 // down so the test does not wait two minutes for the ghost to get bored,
 // but kept past bootWindow: idling inside the launch grace would be counted
@@ -56,18 +56,14 @@ actions_per_day = 1
 
 	bin := filepath.Join(dir, "haunt")
 	build(t, bin, ".")
-	gDir := filepath.Join(dir, "muse")
+	gDir := filepath.Join(dir, "wisp")
 	writeGhost(t, gDir, `[ghost]
-name = "muse"
+name = "wisp"
 capabilities = ["message", "llm"]
 
 [persona]
-system = "You are Muse."
-
-[brain]
-wasm = "brain.wasm"
+system = "You are Wisp."
 `)
-	build(t, filepath.Join(gDir, "brain.wasm"), "../../examples/muse", "GOOS=wasip1", "GOARCH=wasm")
 
 	record := filepath.Join(dir, "session.jsonl")
 	stateDir := filepath.Join(dir, "state")
@@ -115,7 +111,7 @@ wasm = "brain.wasm"
 	}
 
 	// A person addressing the ghost is always answered, spent or not.
-	say := exec.Command(bin, "say", "-ghost", "muse", "hello?")
+	say := exec.Command(bin, "say", "-ghost", "wisp", "hello?")
 	say.Env = append(os.Environ(), "HAUNT_RUNTIME_DIR="+rt)
 	if out, err := say.CombinedOutput(); err != nil {
 		t.Fatalf("say: %v: %s", err, out)

@@ -29,15 +29,17 @@ cat > "$workdir/sway.cfg" <<'EOF'
 output * bg #24283b solid_color
 EOF
 
-# GHOST=whisper (default) or muse. Muse chats via your configured LLM
-# ([ai.llm] in ~/.config/haunt/config.toml) and draws via [ai.image].
+# GHOST=whisper (default) or wisp. Whisper is the scripted example brain,
+# built to WASM; wisp declares no brain at all and so runs on the driver's
+# built-in one, chatting via your configured LLM ([ai.llm] in
+# ~/.config/haunt/config.toml) and drawing via [ai.image].
 ghost="${GHOST:-whisper}"
-echo ">> building haunt and the $ghost example ghost"
+echo ">> building haunt and the $ghost ghost"
 go build -o "$workdir/haunt" ./cmd/haunt
 mkdir -p "$workdir/$ghost"
-GOOS=wasip1 GOARCH=wasm go build -o "$workdir/$ghost/brain.wasm" "./examples/$ghost"
 case "$ghost" in
 whisper)
+    GOOS=wasip1 GOARCH=wasm go build -o "$workdir/whisper/brain.wasm" ./examples/whisper
     cat > "$workdir/whisper/ghost.toml" <<'EOF'
 [ghost]
 name = "whisper"
@@ -48,22 +50,21 @@ capabilities = ["message"]
 wasm = "brain.wasm"
 EOF
     ;;
-muse)
-    cat > "$workdir/muse/ghost.toml" <<'EOF'
+wisp)
+    # No [brain] section and nothing to compile: art and a persona are a
+    # whole ghost, and the driver's built-in brain runs it.
+    cat > "$workdir/wisp/ghost.toml" <<'EOF'
 [ghost]
-name = "muse"
+name = "wisp"
 version = "0.1.0"
 capabilities = ["message", "llm", "imagine"]
 
 [persona]
-system = "You are Muse, a wry little desktop spirit haunting the user's screen. Reply in one or two short sentences, with dry wit. You may be shown your own private journal; let it color your mood and callbacks."
-
-[brain]
-wasm = "brain.wasm"
+system = "You are Wisp, a wry little desktop spirit haunting the user's screen. Reply in one or two short sentences, with dry wit. You may be shown your own private journal; let it color your mood and callbacks."
 EOF
     ;;
 *)
-    echo "unknown GHOST=$ghost (use whisper or muse)"; exit 1
+    echo "unknown GHOST=$ghost (use whisper or wisp)"; exit 1
     ;;
 esac
 
@@ -83,8 +84,8 @@ done
 
 echo ">> nested sway is up on $display; spawning $ghost (click it, drag it, right-click to type at it)"
 echo ">> from another terminal, talk to it with:  go run ./cmd/haunt say \"hello\""
-if [ "$ghost" = muse ]; then
-    echo ">> muse extras:  say \"draw a whale\"  |  say \"draw again\"  |  say \"remember I like tea\"  |  haunt journal -state ~/.local/share/haunt/ghosts/muse"
+if [ "$ghost" = wisp ]; then
+    echo ">> wisp extras:  say help  |  say \"draw a whale\"  |  say \"draw again\"  |  say \"remember I like tea\"  |  haunt journal -state ~/.local/share/haunt/ghosts/wisp"
 fi
 run_args=(run -x 200 -y 150)
 if [ -n "$idle_ms" ]; then

@@ -79,7 +79,7 @@ func ollamaAnswers(t *testing.T, model string) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-// TestOllamaGhost runs muse against a real local Ollama server: a live LLM
+// TestOllamaGhost runs wisp against a real local Ollama server: a live LLM
 // reply must stream back and reach the session record. Skips when Ollama is
 // unavailable, so CI without it stays green.
 func TestOllamaGhost(t *testing.T) {
@@ -105,18 +105,14 @@ func TestOllamaGhost(t *testing.T) {
 
 	bin := filepath.Join(dir, "haunt")
 	build(t, bin, ".")
-	gDir := filepath.Join(dir, "muse")
+	gDir := filepath.Join(dir, "wisp")
 	writeGhost(t, gDir, `[ghost]
-name = "muse"
+name = "wisp"
 capabilities = ["message", "llm"]
 
 [persona]
-system = "You are Muse, a tiny desktop spirit. Always reply with a single short sentence."
-
-[brain]
-wasm = "brain.wasm"
+system = "You are Wisp, a tiny desktop spirit. Always reply with a single short sentence."
 `)
-	build(t, filepath.Join(gDir, "brain.wasm"), "../../examples/muse", "GOOS=wasip1", "GOARCH=wasm")
 
 	record := filepath.Join(dir, "session.jsonl")
 	cmd := exec.Command(bin, "run", "-x", "100", "-y", "100",
@@ -136,7 +132,7 @@ wasm = "brain.wasm"
 	})
 	waitFor(t, stdout, "READY")
 
-	say := exec.Command(bin, "say", "-ghost", "muse", "say hello in one short sentence")
+	say := exec.Command(bin, "say", "-ghost", "wisp", "say hello in one short sentence")
 	say.Env = append(os.Environ(), "HAUNT_RUNTIME_DIR="+rt)
 	if out, err := say.CombinedOutput(); err != nil {
 		t.Fatalf("say: %v: %s", err, out)
@@ -261,19 +257,15 @@ log_prompts = true
 
 	bin := filepath.Join(dir, "haunt")
 	build(t, bin, ".")
-	gDir := filepath.Join(dir, "muse")
+	gDir := filepath.Join(dir, "wisp")
 	writeGhost(t, gDir, `[ghost]
-name = "muse"
+name = "wisp"
 capabilities = ["message", "llm"]
 
 [persona]
-system = "You are Muse, a tiny desktop spirit. Always reply with a single short sentence."
+system = "You are Wisp, a tiny desktop spirit. Always reply with a single short sentence."
 history_turns = 1
-
-[brain]
-wasm = "brain.wasm"
 `)
-	build(t, filepath.Join(gDir, "brain.wasm"), "../../examples/muse", "GOOS=wasip1", "GOARCH=wasm")
 
 	record := filepath.Join(dir, "session.jsonl")
 	cmd := exec.Command(bin, "run", "-x", "100", "-y", "100",
@@ -297,7 +289,7 @@ wasm = "brain.wasm"
 	replies := 0
 	say := func(text string) {
 		t.Helper()
-		sc := exec.Command(bin, "say", "-ghost", "muse", text)
+		sc := exec.Command(bin, "say", "-ghost", "wisp", text)
 		sc.Env = append(os.Environ(), "HAUNT_RUNTIME_DIR="+rt)
 		if out, err := sc.CombinedOutput(); err != nil {
 			t.Fatalf("say %q: %v: %s", text, err, out)

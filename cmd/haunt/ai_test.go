@@ -131,7 +131,7 @@ func cutAfter(s, sep string) (string, bool) {
 	return after, ok
 }
 
-// TestAIGhostEndToEnd: muse chats through a fake LLM (persona verified
+// TestAIGhostEndToEnd: wisp chats through a fake LLM (persona verified
 // server-side), streams into a balloon, and paints images on request.
 func TestAIGhostEndToEnd(t *testing.T) {
 	c := testenv.StartT(t)
@@ -163,18 +163,14 @@ image_requests_per_hour = 2
 
 	bin := filepath.Join(dir, "haunt")
 	build(t, bin, ".")
-	gDir := filepath.Join(dir, "muse")
+	gDir := filepath.Join(dir, "wisp")
 	writeGhost(t, gDir, `[ghost]
-name = "muse"
+name = "wisp"
 capabilities = ["message", "llm", "imagine"]
 
 [persona]
-system = "You are Muse, a wry desktop spirit."
-
-[brain]
-wasm = "brain.wasm"
+system = "You are Wisp, a wry desktop spirit."
 `)
-	build(t, filepath.Join(gDir, "brain.wasm"), "../../examples/muse", "GOOS=wasip1", "GOARCH=wasm")
 
 	record := filepath.Join(dir, "session.jsonl")
 	cmd := exec.Command(bin, "run", "-x", "100", "-y", "100",
@@ -197,7 +193,7 @@ wasm = "brain.wasm"
 	env := append(os.Environ(), "HAUNT_RUNTIME_DIR="+rt)
 	say := func(text string) {
 		t.Helper()
-		sc := exec.Command(bin, "say", "-ghost", "muse", text)
+		sc := exec.Command(bin, "say", "-ghost", "wisp", text)
 		sc.Env = env
 		if out, err := sc.CombinedOutput(); err != nil {
 			t.Fatalf("say %q: %v: %s", text, err, out)
@@ -205,8 +201,8 @@ wasm = "brain.wasm"
 	}
 
 	// Chat: reply flows through persona backend into the record + balloon.
-	say("hello muse")
-	waitRecordContains(t, record, "indeed, you said: hello muse")
+	say("hello wisp")
+	waitRecordContains(t, record, "indeed, you said: hello wisp")
 	waitBalloon(t, c, dir, 100, 100, true)
 
 	// Imagine: the request is rewritten by a silent LLM call first (the fake
@@ -261,10 +257,10 @@ wasm = "brain.wasm"
 	if err != nil {
 		t.Fatalf("history: %v: %s", err, hout)
 	}
-	if !strings.Contains(string(hout), "hello muse") {
+	if !strings.Contains(string(hout), "hello wisp") {
 		t.Errorf("history is missing what was said to the ghost:\n%s", hout)
 	}
-	if !strings.Contains(string(hout), "indeed, you said: hello muse") {
+	if !strings.Contains(string(hout), "indeed, you said: hello wisp") {
 		t.Errorf("history is missing what the ghost answered:\n%s", hout)
 	}
 	if !strings.Contains(string(hout), "you:") || !strings.Contains(string(hout), "ghost:") {

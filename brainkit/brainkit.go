@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 
@@ -156,9 +157,16 @@ func (em *Emitter) Note(text string) {
 
 // Run reads events from stdin until EOF, dispatching each to b. Call it from
 // main; it returns when the driver closes the event stream.
-func Run(b Brain) {
-	em := &Emitter{enc: json.NewEncoder(os.Stdout)}
-	sc := bufio.NewScanner(os.Stdin)
+func Run(b Brain) { RunIO(b, os.Stdin, os.Stdout) }
+
+// RunIO is Run over an arbitrary event stream and intent sink. The driver
+// uses it to host its own built-in brain in-process: the transport is a
+// pipe rather than a WASI module's stdio, but the brain still speaks JSON
+// lines through the same schema and the same validation, so the built-in
+// brain can do nothing a downloaded one cannot.
+func RunIO(b Brain, r io.Reader, w io.Writer) {
+	em := &Emitter{enc: json.NewEncoder(w)}
+	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
 	for sc.Scan() {
 		if len(sc.Bytes()) == 0 {

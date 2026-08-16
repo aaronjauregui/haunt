@@ -68,6 +68,10 @@ type GhostSection struct {
 // with named poses. See internal/shell.
 type ShellSection = shell.Manifest
 
+// BrainSection selects the ghost's logic. Omit it entirely — no [brain]
+// section at all — and the ghost gets the driver's built-in brain
+// (internal/defaultbrain), so a ghost can be art plus a persona with no
+// compiler anywhere in the authoring path.
 type BrainSection struct {
 	// Wasm is the brain module path, relative to the ghost directory.
 	Wasm string `toml:"wasm"`
@@ -76,6 +80,10 @@ type BrainSection struct {
 	// the native-brain capability. Mutually exclusive with Wasm.
 	Command []string `toml:"command"`
 }
+
+// Builtin reports whether the ghost declares no brain of its own and so
+// runs on the driver's built-in one.
+func (b BrainSection) Builtin() bool { return b.Wasm == "" && len(b.Command) == 0 }
 
 // LoadManifest reads and validates <dir>/ghost.toml.
 func LoadManifest(dir string) (*Manifest, error) {
@@ -93,8 +101,16 @@ func LoadManifest(dir string) (*Manifest, error) {
 	}
 	hasWasm := m.Brain.Wasm != ""
 	hasCmd := len(m.Brain.Command) > 0
-	if hasWasm == hasCmd {
-		return nil, fmt.Errorf("%s: exactly one of brain.wasm or brain.command is required", path)
+	if hasWasm && hasCmd {
+		return nil, fmt.Errorf("%s: brain.wasm and brain.command are mutually exclusive", path)
+	}
+	// No brain at all is the persona-only ghost: the driver's built-in brain
+	// runs it. That brain converses for a living, so a ghost asking for it
+	// without the llm capability would work only in the sense that clicking
+	// it produces a quip — better to say so at load than to have every
+	// sentence come back as a capability error in the balloon.
+	if !hasWasm && !hasCmd && !hasCapability(&m, "llm") {
+		return nil, fmt.Errorf("%s: a ghost with no [brain] section uses the built-in brain, which needs the llm capability", path)
 	}
 	if hasCmd && !hasCapability(&m, "native-brain") {
 		return nil, fmt.Errorf("%s: brain.command requires the native-brain capability", path)
