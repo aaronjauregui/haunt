@@ -83,6 +83,47 @@ func loadAnimationConfig() (AnimationConfig, error) {
 	return root.Animation, nil
 }
 
+// AwarenessConfig is the [awareness] portion of the user config: what the
+// ghost is allowed to notice about your screen.
+type AwarenessConfig struct {
+	// Ignore lists applications never to report, matched case-insensitively
+	// by substring. Password managers and banking belong here, and the
+	// defaults cover the obvious ones so the careless case is not the
+	// dangerous one.
+	Ignore []string `toml:"ignore"`
+}
+
+// defaultIgnoredApps are never watched unless the user replaces the list.
+var defaultIgnoredApps = []string{
+	"1password", "bitwarden", "keepass", "gnome-keyring", "seahorse",
+	"polkit", "pinentry", "gnome-disks", "banking",
+}
+
+// loadAwarenessConfig reads [awareness] from the user config file.
+func loadAwarenessConfig() (AwarenessConfig, error) {
+	path, err := quiet.ConfigPath()
+	if err != nil {
+		return AwarenessConfig{}, err
+	}
+	var root struct {
+		Awareness AwarenessConfig `toml:"awareness"`
+	}
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return AwarenessConfig{}, err
+	}
+	if err == nil {
+		if err := toml.Unmarshal(data, &root); err != nil {
+			return AwarenessConfig{}, fmt.Errorf("parsing %s: %w", path, err)
+		}
+	}
+	cfg := root.Awareness
+	if cfg.Ignore == nil {
+		cfg.Ignore = defaultIgnoredApps
+	}
+	return cfg, nil
+}
+
 // CuriosityConfig is the [curiosity] portion of the user config. It is the
 // user's dial, not the ghost's: a ghost declares no allowance and cannot
 // raise one.

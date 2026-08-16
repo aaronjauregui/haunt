@@ -37,11 +37,17 @@ const (
 	EventCron   EventType = "cron"   // a manifest-scheduled trigger fired
 	EventIdle   EventType = "idle"   // user went idle
 	EventActive EventType = "active" // user came back
+	// EventWindow reports the focused window changing: Name is the
+	// application, Text its title. Requires the window capability.
+	EventWindow EventType = "window"
 
 	// AI results, delivered after chat/imagine intents.
 	EventAIReply EventType = "ai_reply" // Text holds the full reply
 	EventAIImage EventType = "ai_image" // Name holds the cached image path
 	EventAIError EventType = "ai_error" // Text holds the failure reason
+	// EventAILook answers a look intent: Text is what the vision model
+	// said, Name the application it was shown.
+	EventAILook EventType = "ai_look"
 )
 
 // Event is one occurrence delivered to a brain.
@@ -90,6 +96,7 @@ const (
 	IntentNote          IntentType = "note"           // journal a self-note; recent notes join LLM context
 	IntentSetExpression IntentType = "set_expression" // wear a declared pose
 	IntentPlayClip      IntentType = "play_clip"      // run a declared animation
+	IntentLook          IntentType = "look"           // show the focused window to a vision model
 )
 
 // Intent is one request emitted by a brain. The driver validates and
@@ -190,6 +197,8 @@ func (i *Intent) Validate() error {
 		if i.Name == "" {
 			return fmt.Errorf("play_clip intent with empty clip name")
 		}
+	case IntentLook:
+		// Text is optional: an empty look asks the driver's own question.
 	case IntentHideSay, IntentMove, IntentLog:
 	default:
 		return fmt.Errorf("unknown intent type %q", i.Type)

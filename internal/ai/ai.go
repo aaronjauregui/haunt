@@ -22,6 +22,7 @@ type Config struct {
 	LLM    LLMConfig    `toml:"llm"`
 	Image  ImageConfig  `toml:"image"`
 	Embed  EmbedConfig  `toml:"embed"`
+	Vision VisionConfig `toml:"vision"`
 	Budget BudgetConfig `toml:"budget"`
 
 	// ExpressionInference chooses how dialogue is mapped to shell poses:
@@ -99,6 +100,27 @@ type ImageConfig struct {
 	CFG      float64 `toml:"cfg"`
 	Sampler  string  `toml:"sampler"`
 	Negative string  `toml:"negative"`
+}
+
+// VisionConfig points at a model that can be shown a picture. Empty
+// disables looking at the screen regardless of what a ghost asks for: the
+// capability says a ghost may look, this says there is anything to look
+// with.
+type VisionConfig struct {
+	// BaseURL defaults to the LLM base URL.
+	BaseURL string `toml:"base_url"`
+	// Model must be vision-capable. Screen understanding is a task where
+	// the difference between a frontier model and a small local one is
+	// stark, so this is configured separately from dialogue.
+	Model     string `toml:"model"`
+	APIKeyEnv string `toml:"api_key_env"`
+}
+
+func (c *VisionConfig) apiKey() string {
+	if c.APIKeyEnv == "" {
+		return ""
+	}
+	return os.Getenv(c.APIKeyEnv)
 }
 
 // BudgetConfig caps how fast ghosts may burn backend calls. Zero values get
@@ -264,6 +286,18 @@ func (s *Service) ExpressionMode() string {
 	default:
 		return ExpressionLexicon
 	}
+}
+
+// VisionEnabled reports whether a vision model is configured.
+func (s *Service) VisionEnabled() bool {
+	return s.cfg.Vision.Model != "" && s.visionBaseURL() != ""
+}
+
+func (s *Service) visionBaseURL() string {
+	if s.cfg.Vision.BaseURL != "" {
+		return s.cfg.Vision.BaseURL
+	}
+	return s.cfg.LLM.BaseURL
 }
 
 // LLMEnabled reports whether the user configured an LLM backend.

@@ -134,6 +134,19 @@ func (em *Emitter) PlayClip(name string) {
 	em.emit(Intent{Type: proto.IntentPlayClip, Name: name})
 }
 
+// Look shows the focused window to the user's vision model and returns
+// what it says as an ai_look event (requires the screen capability, which
+// is granted separately from everything else and for good reason).
+// question may be empty, which asks the driver's own: what is this person
+// working on, in one sentence.
+//
+// The answer comes to the brain, not to the balloon. What the ghost does
+// with having looked is its own business — narrating it is the tiresome
+// version of this.
+func (em *Emitter) Look(tag, question string) {
+	em.emit(Intent{Type: proto.IntentLook, Text: question, Tag: tag})
+}
+
 // Note writes a private journal entry. Recent notes are injected into LLM
 // context on every Chat, so what the ghost chooses to remember shapes its
 // future behavior. The user can read the journal with `haunt journal`.

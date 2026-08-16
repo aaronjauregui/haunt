@@ -30,6 +30,9 @@ Request: `
 const promptKeyPrefix = "prompt/"
 
 var (
+	// lastWindow is the application and title the user last had focused,
+	// when the window capability is granted.
+	lastWindow string
 	// lastRequest is the user's own words, kept as the fallback prompt if
 	// the rewrite fails.
 	lastRequest string
@@ -59,13 +62,31 @@ func main() {
 			if e.Name == "hush" {
 				emit.HideSay()
 			}
+		case "window":
+			// Titles carry more than they look like they do — file names,
+			// branch names, error text. Muse just remembers what it saw;
+			// what it does with that is the LLM's business later, through
+			// recall.
+			if e.Name != "" {
+				lastWindow = e.Name + ": " + e.Text
+			}
+		case "ai_look":
+			// Looking is deliberate and rationed, so what came back is
+			// worth writing down rather than announcing.
+			emit.Note("Glanced at their screen: " + e.Text)
 		case "idle":
 			// Initiative: nobody asked. The driver decides whether Muse may
 			// spend one of its unprompted actions on this — the brain just
 			// tries. Initiate rather than Chat, so the direction below is
 			// not remembered as something the user said.
-			emit.Initiate("Nobody has spoken to you in a while. Say one short thing " +
-				"to them, unprompted — draw on what you remember about them.")
+			direction := "Nobody has spoken to you in a while. Say one short thing " +
+				"to them, unprompted — draw on what you remember about them."
+			if lastWindow != "" {
+				// What they were last doing is usually the most interesting
+				// thing the ghost knows.
+				direction += " They were last looking at " + lastWindow + "."
+			}
+			emit.Initiate(direction)
 		case "message":
 			text := strings.TrimSpace(e.Text)
 			if text == "draw again" || text == "again" {

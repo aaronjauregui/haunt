@@ -49,6 +49,11 @@ var KnownCapabilities = map[string]string{
 	"native-brain": "run its brain as a native process instead of the WASM sandbox",
 	"llm":          "generate dialogue with your configured language model",
 	"imagine":      "generate images with your configured image model",
+	// The two screen-awareness capabilities are deliberately separate:
+	// knowing which window you have open is a different order of intrusion
+	// from being shown a picture of it.
+	"window": "see which application and window you have focused, and its title",
+	"screen": "take pictures of the focused window and show them to a vision model",
 }
 
 type GhostSection struct {

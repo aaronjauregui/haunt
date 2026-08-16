@@ -1,5 +1,5 @@
-// Package desktop answers questions about the session the ghost lives in.
-// Today that is one question: is something fullscreen right now?
+// Package desktop answers questions about the session the ghost lives in:
+// is something fullscreen, and what is the person actually looking at?
 //
 // It matters twice over. A companion that chatters over a film is a
 // nuisance, and one that starts a diffusion run mid-firefight is worse than
@@ -33,9 +33,23 @@ import (
 // alt-tabbing out of a game is noticed promptly.
 const pollInterval = 2 * time.Second
 
+// Window is the focused window, as the compositor describes it.
+type Window struct {
+	// AppID is the application ("firefox", "foot"), from app_id on Wayland
+	// or the X11 class through XWayland.
+	AppID string
+	// Title is the window title, which carries more than it looks like it
+	// does: file names, branch names, error text, what is playing.
+	Title string
+	// X, Y, W, H is where it is, for capturing just that window.
+	X, Y, W, H int
+}
+
 // Watcher answers whether the focused window is fullscreen.
 type Watcher struct {
 	ask func() (bool, error)
+	// askWindow describes the focused window.
+	askWindow func() (Window, error)
 	// what names the mechanism, for logs.
 	what string
 	log  func(string)
@@ -54,9 +68,9 @@ func New(log func(string)) *Watcher {
 	w := &Watcher{log: log}
 	switch {
 	case os.Getenv("SWAYSOCK") != "":
-		w.ask, w.what = swayFullscreen, "sway"
+		w.ask, w.askWindow, w.what = swayFullscreen, swayWindow, "sway"
 	case os.Getenv("HYPRLAND_INSTANCE_SIGNATURE") != "":
-		w.ask, w.what = hyprFullscreen, "hyprland"
+		w.ask, w.askWindow, w.what = hyprFullscreen, hyprWindow, "hyprland"
 	default:
 		w.what = "none"
 		log("haunt: no compositor IPC found; fullscreen awareness is off")
@@ -98,19 +112,44 @@ func (w *Watcher) Fullscreen() bool {
 	return full
 }
 
+// ActiveWindow describes the focused window. The error is worth reporting
+// to a caller here, unlike the fullscreen check: a ghost that cannot see
+// what you are doing should say so once rather than pretend the desktop is
+// empty.
+func (w *Watcher) ActiveWindow() (Window, error) {
+	if w.askWindow == nil {
+		return Window{}, fmt.Errorf("no compositor IPC available")
+	}
+	return w.askWindow()
+}
+
 // --- sway ---
 
 // swayFullscreen asks sway's IPC for the tree and looks for a focused node
 // that is fullscreen. The protocol is a magic string, a little-endian
 // length and type, then JSON.
 func swayFullscreen() (bool, error) {
+	body, err := swayTree()
+	if err != nil {
+		return false, err
+	}
+	var tree swayNode
+	if err := json.Unmarshal(body, &tree); err != nil {
+		return false, err
+	}
+	return tree.fullscreenFocused(), nil
+}
+
+// swayTree fetches the window tree over sway's IPC: a magic string, a
+// little-endian length and type, then JSON.
+func swayTree() ([]byte, error) {
 	sock := os.Getenv("SWAYSOCK")
 	if sock == "" {
-		return false, fmt.Errorf("SWAYSOCK is unset")
+		return nil, fmt.Errorf("SWAYSOCK is unset")
 	}
 	conn, err := net.DialTimeout("unix", sock, 2*time.Second)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	defer conn.Close()
 	conn.SetDeadline(time.Now().Add(2 * time.Second))
@@ -121,36 +160,79 @@ func swayFullscreen() (bool, error) {
 	req = binary.LittleEndian.AppendUint32(req, 0)
 	req = binary.LittleEndian.AppendUint32(req, getTree)
 	if _, err := conn.Write(req); err != nil {
-		return false, err
+		return nil, err
 	}
 
 	head := make([]byte, 14)
 	if _, err := readFull(conn, head); err != nil {
-		return false, err
+		return nil, err
 	}
 	if string(head[:6]) != "i3-ipc" {
-		return false, fmt.Errorf("unexpected reply from sway")
+		return nil, fmt.Errorf("unexpected reply from sway")
 	}
 	n := binary.LittleEndian.Uint32(head[6:10])
 	body := make([]byte, n)
 	if _, err := readFull(conn, body); err != nil {
-		return false, err
+		return nil, err
 	}
-
-	var tree swayNode
-	if err := json.Unmarshal(body, &tree); err != nil {
-		return false, err
-	}
-	return tree.fullscreenFocused(), nil
+	return body, nil
 }
 
 // swayNode is the part of sway's tree this cares about.
 type swayNode struct {
-	Type           string     `json:"type"`
-	Focused        bool       `json:"focused"`
-	FullscreenMode int        `json:"fullscreen_mode"`
-	Nodes          []swayNode `json:"nodes"`
-	Floating       []swayNode `json:"floating_nodes"`
+	Type           string `json:"type"`
+	Focused        bool   `json:"focused"`
+	FullscreenMode int    `json:"fullscreen_mode"`
+	Name           string `json:"name"`
+	AppID          string `json:"app_id"`
+	Rect           struct {
+		X, Y, Width, Height int
+	} `json:"rect"`
+	// WindowProperties carries the X11 class for XWayland windows, which
+	// have no app_id.
+	WindowProperties struct {
+		Class string `json:"class"`
+	} `json:"window_properties"`
+	Nodes    []swayNode `json:"nodes"`
+	Floating []swayNode `json:"floating_nodes"`
+}
+
+// swayWindow asks sway which window has focus.
+func swayWindow() (Window, error) {
+	body, err := swayTree()
+	if err != nil {
+		return Window{}, err
+	}
+	var tree swayNode
+	if err := json.Unmarshal(body, &tree); err != nil {
+		return Window{}, err
+	}
+	n, ok := tree.focusedWindow()
+	if !ok {
+		return Window{}, nil // a bare desktop is not an error
+	}
+	app := n.AppID
+	if app == "" {
+		app = n.WindowProperties.Class
+	}
+	return Window{
+		AppID: app,
+		Title: n.Name,
+		X:     n.Rect.X, Y: n.Rect.Y, W: n.Rect.Width, H: n.Rect.Height,
+	}, nil
+}
+
+// focusedWindow finds the focused container, if any window has focus.
+func (n swayNode) focusedWindow() (swayNode, bool) {
+	if n.Focused && (n.Type == "con" || n.Type == "floating_con") {
+		return n, true
+	}
+	for _, c := range append(append([]swayNode{}, n.Nodes...), n.Floating...) {
+		if got, ok := c.focusedWindow(); ok {
+			return got, true
+		}
+	}
+	return swayNode{}, false
 }
 
 // fullscreenFocused reports whether the focused *window* is fullscreen.
@@ -184,36 +266,7 @@ func (n swayNode) fullscreenFocused() bool {
 
 // hyprFullscreen asks hyprctl's socket about the active window.
 func hyprFullscreen() (bool, error) {
-	sig := os.Getenv("HYPRLAND_INSTANCE_SIGNATURE")
-	if sig == "" {
-		return false, fmt.Errorf("HYPRLAND_INSTANCE_SIGNATURE is unset")
-	}
-	runtime := os.Getenv("XDG_RUNTIME_DIR")
-	if runtime == "" {
-		return false, fmt.Errorf("XDG_RUNTIME_DIR is unset")
-	}
-	// Hyprland moved the socket in 0.40; try both.
-	paths := []string{
-		filepath.Join(runtime, "hypr", sig, ".socket.sock"),
-		filepath.Join("/tmp/hypr", sig, ".socket.sock"),
-	}
-	var conn net.Conn
-	var err error
-	for _, p := range paths {
-		if conn, err = net.DialTimeout("unix", p, 2*time.Second); err == nil {
-			break
-		}
-	}
-	if conn == nil {
-		return false, err
-	}
-	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(2 * time.Second))
-
-	if _, err := conn.Write([]byte("j/activewindow")); err != nil {
-		return false, err
-	}
-	body, err := readAll(conn)
+	body, err := hyprAsk("j/activewindow")
 	if err != nil {
 		return false, err
 	}
@@ -230,6 +283,61 @@ func hyprFullscreen() (bool, error) {
 		return false, nil
 	}
 	return true, nil
+}
+
+// hyprAsk sends one command to Hyprland's socket.
+func hyprAsk(cmd string) ([]byte, error) {
+	sig := os.Getenv("HYPRLAND_INSTANCE_SIGNATURE")
+	if sig == "" {
+		return nil, fmt.Errorf("HYPRLAND_INSTANCE_SIGNATURE is unset")
+	}
+	runtime := os.Getenv("XDG_RUNTIME_DIR")
+	if runtime == "" {
+		return nil, fmt.Errorf("XDG_RUNTIME_DIR is unset")
+	}
+	// Hyprland moved the socket in 0.40; try both.
+	paths := []string{
+		filepath.Join(runtime, "hypr", sig, ".socket.sock"),
+		filepath.Join("/tmp/hypr", sig, ".socket.sock"),
+	}
+	var conn net.Conn
+	var err error
+	for _, p := range paths {
+		if conn, err = net.DialTimeout("unix", p, 2*time.Second); err == nil {
+			break
+		}
+	}
+	if conn == nil {
+		return nil, err
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(2 * time.Second))
+	if _, err := conn.Write([]byte(cmd)); err != nil {
+		return nil, err
+	}
+	return readAll(conn)
+}
+
+// hyprWindow asks Hyprland about the active window.
+func hyprWindow() (Window, error) {
+	body, err := hyprAsk("j/activewindow")
+	if err != nil {
+		return Window{}, err
+	}
+	var win struct {
+		Class string `json:"class"`
+		Title string `json:"title"`
+		At    []int  `json:"at"`
+		Size  []int  `json:"size"`
+	}
+	if err := json.Unmarshal(body, &win); err != nil {
+		return Window{}, err
+	}
+	out := Window{AppID: win.Class, Title: win.Title}
+	if len(win.At) == 2 && len(win.Size) == 2 {
+		out.X, out.Y, out.W, out.H = win.At[0], win.At[1], win.Size[0], win.Size[1]
+	}
+	return out, nil
 }
 
 func readFull(c net.Conn, buf []byte) (int, error) {

@@ -117,6 +117,9 @@ type Ghost struct {
 	inputMu sync.Mutex
 	input   inputState
 
+	// awareness is what the ghost may notice about the screen.
+	awareness AwarenessConfig
+
 	// Initiative accounting (see curiosity.go).
 	curiosity       *curiosity
 	initMu          sync.Mutex
@@ -268,6 +271,10 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	}
 	g.reducedMotion = anim.ReducedMotion
 
+	if g.awareness, err = loadAwarenessConfig(); err != nil {
+		return err
+	}
+
 	// Initiative allowance. Persisted, so restarting the ghost is not a way
 	// to refill it.
 	actionsPerDay, err := loadCuriosityConfig()
@@ -412,6 +419,10 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	if opts.OnReady != nil {
 		opts.OnReady()
 	}
+
+	// Watching the focused window, if the ghost asked for that and the user
+	// agreed to it.
+	go g.watchWindows()
 
 	// Idle animation: blinking and the like, on the shell's own schedule.
 	g.startAnimation()
@@ -596,6 +607,13 @@ func (g *Ghost) execIntent(in proto.Intent) {
 		g.setExpression(in.Name)
 	case proto.IntentPlayClip:
 		g.playClip(in.Name)
+	case proto.IntentLook:
+		// Own goroutine: capture plus a vision request is seconds of work.
+		go func() {
+			g.aiMu.Lock()
+			defer g.aiMu.Unlock()
+			g.execLook(in)
+		}()
 	case proto.IntentNote:
 		g.execNote(in.Text)
 	case proto.IntentTell:
