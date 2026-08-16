@@ -4,13 +4,15 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/wlclient"
 )
 
 func placeGhost(t *testing.T) *Ghost {
 	t.Helper()
 	return &Ghost{
-		opts:  Options{Log: func(string) {}},
+		opts:  Options{},
+		log:   hlog.Discard(),
 		store: &memStore{m: map[string]string{}},
 	}
 }

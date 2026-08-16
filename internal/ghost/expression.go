@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/aaronjauregui/haunt/internal/ai"
+	"github.com/aaronjauregui/haunt/internal/hlog"
 )
 
 // Expression inference: dialogue arrives, the face follows. Hand-tagged
@@ -152,7 +153,7 @@ func (g *Ghost) classifyExpression(text string, poses []string) string {
 		{Role: "user", Content: prompt},
 	}, nil, ai.Options{Silent: true, Tag: "expression"})
 	if err != nil {
-		g.opts.Log(fmt.Sprintf("haunt: expression inference: %v", err))
+		g.log.Warn(hlog.Anim, "expression inference: %v", err)
 		return ""
 	}
 
@@ -167,6 +168,6 @@ func (g *Ghost) classifyExpression(text string, poses []string) string {
 			return p
 		}
 	}
-	g.opts.Log(fmt.Sprintf("haunt: expression inference: %q names none of %v", strings.TrimSpace(reply), poses))
+	g.log.Debug(hlog.Anim, "expression inference: %q names none of %v", strings.TrimSpace(reply), poses)
 	return ""
 }

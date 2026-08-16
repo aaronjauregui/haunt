@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/aaronjauregui/haunt/internal/bus"
+	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/proto"
 )
 
@@ -37,17 +38,18 @@ func TestPromptedEvent(t *testing.T) {
 	}
 }
 
-func testCuriosityGhost(t *testing.T, limit int) (*Ghost, *[]string) {
+func testCuriosityGhost(t *testing.T, limit int) (*Ghost, func() []string) {
 	t.Helper()
-	var logged []string
+	rec, logged := hlog.Recorder()
 	g := &Ghost{
-		opts: Options{Log: func(s string) { logged = append(logged, s) }},
+		opts: Options{},
+		log:  rec,
 		// Buffered and unread: these tests care about what publish marks,
 		// not about delivery.
 		bus: bus.New(64),
 	}
-	g.curiosity = newCuriosity(limit, &memStore{m: map[string]string{}}, g.opts.Log)
-	return g, &logged
+	g.curiosity = newCuriosity(limit, &memStore{m: map[string]string{}}, g.log)
+	return g, logged
 }
 
 // TestInitiativeIsFreeWhileResponding: everything inside the window after
@@ -78,7 +80,7 @@ func TestInitiativeChargesWhenUnprompted(t *testing.T) {
 	if len(g.curiosity.spends) != 1 {
 		t.Errorf("spends = %d, want 1", len(g.curiosity.spends))
 	}
-	if len(*logged) == 0 {
+	if len(logged()) == 0 {
 		t.Error("spending curiosity went unlogged")
 	}
 }
@@ -153,7 +155,8 @@ func TestCuriosityExhausts(t *testing.T) {
 	if g.allowInitiative("say") {
 		t.Error("third action allowed past a limit of 2")
 	}
-	last := (*logged)[len(*logged)-1]
+	lines := logged()
+	last := lines[len(lines)-1]
 	if want := "daily curiosity spent"; !strings.Contains(last, want) {
 		t.Errorf("log = %q, want mention of %q", last, want)
 	}
@@ -181,7 +184,7 @@ func TestCuriosityDisabled(t *testing.T) {
 // TestCuriosityPersists: restarting is not a way to refill the allowance.
 func TestCuriosityPersists(t *testing.T) {
 	s := &memStore{m: map[string]string{}}
-	log := func(string) {}
+	log := hlog.Discard()
 
 	first := newCuriosity(2, s, log)
 	if ok, _ := first.spend(); !ok {
@@ -199,7 +202,7 @@ func TestCuriosityPersists(t *testing.T) {
 
 // TestCuriosityWindowRolls: spends older than a day stop counting.
 func TestCuriosityWindowRolls(t *testing.T) {
-	c := newCuriosity(1, &memStore{m: map[string]string{}}, func(string) {})
+	c := newCuriosity(1, &memStore{m: map[string]string{}}, hlog.Discard())
 	now := time.Now()
 	c.now = func() time.Time { return now }
 

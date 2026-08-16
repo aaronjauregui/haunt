@@ -306,7 +306,7 @@ history_turns = 1
 	// The last traced chat request is the one that matters: two exchanges
 	// have pushed the tea remark out of a one-turn history window.
 	traced := stderr.String()
-	lastChat := strings.LastIndex(traced, "haunt: ai: chat →")
+	lastChat := strings.LastIndex(traced, "[prompt] chat →")
 	if lastChat < 0 {
 		t.Fatalf("no chat trace; log_prompts not working:\n%s", traced)
 	}

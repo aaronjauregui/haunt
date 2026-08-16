@@ -23,6 +23,7 @@ import (
 	"github.com/aaronjauregui/haunt/internal/control"
 	"github.com/aaronjauregui/haunt/internal/defaultbrain"
 	"github.com/aaronjauregui/haunt/internal/desktop"
+	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/proto"
 	"github.com/aaronjauregui/haunt/internal/quiet"
 	"github.com/aaronjauregui/haunt/internal/shell"
@@ -61,8 +62,11 @@ type Options struct {
 	// Output pins the ghost to a named screen, overriding the remembered
 	// one.
 	Output string
-	// Log receives driver/brain log lines; defaults to stderr.
-	Log func(string)
+	// Logger receives everything the driver has to say. Nil builds one
+	// from the user's config and environment (see internal/hlog), which is
+	// what the CLI wants; tests hand in hlog.Discard() or one that keeps
+	// its lines.
+	Logger *hlog.Logger
 	// OnReady is called once the ghost is on screen and booted.
 	OnReady func()
 	// Granted reports whether the user granted a capability the manifest
@@ -144,6 +148,7 @@ type Ghost struct {
 	timersMu sync.Mutex
 	timers   map[string]*time.Timer
 
+	log     *hlog.Logger
 	recordF *os.File
 	done    chan struct{}
 	// stopping closes when the session begins tearing down, before the
@@ -161,9 +166,10 @@ type Ghost struct {
 // Run loads and starts the ghost in dir, blocking until ctx is cancelled or
 // the session fails. The Wayland connection must be usable (WAYLAND_DISPLAY).
 func Run(ctx context.Context, dir string, opts Options) error {
-	if opts.Log == nil {
-		opts.Log = func(s string) { fmt.Fprintln(os.Stderr, s) }
+	if opts.Logger == nil {
+		opts.Logger = hlog.Open(os.Stderr)
 	}
+	log := opts.Logger
 	m, err := LoadManifest(dir)
 	if err != nil {
 		return err
@@ -171,6 +177,7 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	g := &Ghost{
 		manifest: m,
 		opts:     opts,
+		log:      log,
 		timers:   map[string]*time.Timer{},
 		done:     make(chan struct{}),
 		stopping: make(chan struct{}),
@@ -217,6 +224,13 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		return err
 	}
 	defer g.app.Close()
+	// Pointer, keyboard and surface traffic, when someone asks for it by
+	// name. It is a line per input event, which is unreadable as ordinary
+	// output and indispensable when a click is landing somewhere it should
+	// not.
+	if log.Enabled(hlog.Wayland, hlog.LevelDebug) {
+		g.app.EventLog = func(line string) { log.Debug(hlog.Wayland, "%s", line) }
+	}
 	// Where it sits: an explicit position, or wherever it was left.
 	outName, startX, startY := g.startingPlace(g.app, opts.X, opts.Y, opts.Placed)
 	if opts.Output != "" {
@@ -236,7 +250,7 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	// first.
 	g.savePlace(startX, startY)
 	if outName != "" {
-		opts.Log(fmt.Sprintf("haunt: placed on %s at (%d,%d)", outName, startX, startY))
+		log.Info(hlog.Place, "placed on %s at (%d,%d)", outName, startX, startY)
 	}
 	if err = g.surface.WaitMapped(); err != nil {
 		return err
@@ -260,10 +274,10 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	// A ghost dragged to a 200% screen needs its text redrawn at that
 	// screen's resolution, not stretched from the old one.
 	g.surface.OnScaleChanged = func(scale float64) {
-		opts.Log(fmt.Sprintf("haunt: scale is now %g", scale))
+		log.Debug(hlog.Wayland, "scale is now %g", scale)
 		r, err := balloon.NewRendererScaled(g.blnTheme, scale)
 		if err != nil {
-			opts.Log(fmt.Sprintf("haunt: rescaling balloons: %v", err))
+			log.Warn(hlog.Balloon, "rescaling balloons: %v", err)
 			return
 		}
 		g.blnMu.Lock()
@@ -288,7 +302,7 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	// Fullscreen awareness: the ghost keeps out of the way of games and
 	// films, which is both courtesy and — for image generation — leaving
 	// the GPU alone.
-	g.desktop = desktop.New(opts.Log)
+	g.desktop = desktop.New(log)
 
 	anim, err := loadAnimationConfig()
 	if err != nil {
@@ -306,7 +320,7 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	if err != nil {
 		return err
 	}
-	g.curiosity = newCuriosity(actionsPerDay, g.store, opts.Log)
+	g.curiosity = newCuriosity(actionsPerDay, g.store, log)
 
 	// AI services (backends are user-configured; absent config just means
 	// the capabilities error out when used).
@@ -314,7 +328,7 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	if err != nil {
 		return err
 	}
-	g.aiSvc = ai.NewService(aiCfg, opts.Log)
+	g.aiSvc = ai.NewService(aiCfg, log)
 	g.cacheDir = filepath.Join(opts.StateDir, "cache")
 	if opts.StateDir == "" {
 		g.cacheDir = filepath.Join(os.TempDir(), "haunt-cache-"+m.Ghost.Name)
@@ -327,7 +341,7 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	// brain is hosted, not privileged.
 	switch {
 	case m.Brain.Builtin():
-		opts.Log("haunt: no brain declared; running the built-in brain")
+		log.Info(hlog.Brain, "no brain declared; running the built-in brain")
 		if g.brain, err = brain.StartBuiltin(defaultbrain.Run, g.execIntent, brain.Options{}); err != nil {
 			return err
 		}
@@ -392,7 +406,7 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		defer close(deliveryDone)
 		for e := range g.bus.Events() {
 			if err := g.brain.Deliver(e); err != nil {
-				opts.Log(fmt.Sprintf("haunt: brain delivery failed: %v", err))
+				log.Error(hlog.Brain, "brain delivery failed: %v", err)
 				return
 			}
 		}
@@ -405,7 +419,7 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		// Through g.publishExternal, not the bus directly: `haunt say` is a
 		// person addressing the ghost, and the reply must not be charged to
 		// the ghost's own initiative.
-		ctl, err := control.Listen(m.Ghost.Name, g.publishExternal, opts.Log)
+		ctl, err := control.Listen(m.Ghost.Name, g.publishExternal, log)
 		if err != nil {
 			return err
 		}
@@ -426,7 +440,7 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		return err
 	}
 	if !supported {
-		opts.Log("haunt: compositor lacks ext-idle-notify; idle events disabled")
+		log.Info(hlog.Session, "compositor lacks ext-idle-notify; idle events disabled")
 	}
 
 	// Scheduled triggers from the manifest.
@@ -538,7 +552,7 @@ func (g *Ghost) capabilityActive(cap string) bool {
 		// Once per capability: this is checked on every use, and memory
 		// work checks it several times per exchange.
 		if _, seen := g.autoGranted.LoadOrStore(cap, true); !seen {
-			g.opts.Log(fmt.Sprintf("haunt: dev mode, auto-granting capability %q", cap))
+			g.log.Info(hlog.Session, "dev mode, auto-granting capability %q", cap)
 		}
 		return true
 	}
@@ -547,7 +561,7 @@ func (g *Ghost) capabilityActive(cap string) bool {
 
 func (g *Ghost) publish(e proto.Event) {
 	if err := g.publishExternal(e); err != nil {
-		g.opts.Log(fmt.Sprintf("haunt: publish %s: %v", e.Type, err))
+		g.log.Warn(hlog.Session, "publish %s: %v", e.Type, err)
 	}
 }
 
@@ -596,7 +610,7 @@ func (g *Ghost) execIntent(in proto.Intent) {
 		g.hideBalloon()
 	case proto.IntentMove:
 		if err := g.surface.MoveTo(int32(in.X), int32(in.Y)); err != nil {
-			g.opts.Log(fmt.Sprintf("haunt: move failed: %v", err))
+			g.log.Warn(hlog.Wayland, "move failed: %v", err)
 		}
 		g.placeBalloon()
 	case proto.IntentSetTimer:
@@ -610,14 +624,14 @@ func (g *Ghost) execIntent(in proto.Intent) {
 		g.timersMu.Unlock()
 	case proto.IntentKVSet:
 		if strings.HasPrefix(in.Name, internalKeyPrefix) {
-			g.opts.Log(fmt.Sprintf("haunt: kv_set %s dropped: reserved prefix", in.Name))
+			g.log.Debug(hlog.Store, "kv_set %s dropped: reserved prefix", in.Name)
 			return
 		}
 		if err := g.store.Set(in.Name, in.Value); err != nil {
-			g.opts.Log(fmt.Sprintf("haunt: kv_set %s: %v", in.Name, err))
+			g.log.Warn(hlog.Store, "kv_set %s: %v", in.Name, err)
 		}
 	case proto.IntentLog:
-		g.opts.Log("ghost: " + in.Text)
+		g.log.Line("ghost: " + in.Text)
 	case proto.IntentChat:
 		// Gate before the goroutine: the answer to "was this provoked?"
 		// belongs to the moment the intent arrived, not to whenever a
@@ -660,11 +674,11 @@ func (g *Ghost) execIntent(in proto.Intent) {
 		g.execNote(in.Text)
 	case proto.IntentTell:
 		if !g.capabilityActive("tell") {
-			g.opts.Log(fmt.Sprintf("haunt: tell intent dropped: capability not granted"))
+			g.log.Debug(hlog.Control, "tell intent dropped: capability not granted")
 			return
 		}
 		if in.Name == g.manifest.Ghost.Name {
-			g.opts.Log("haunt: tell intent dropped: ghost addressed itself")
+			g.log.Debug(hlog.Control, "tell intent dropped: ghost addressed itself")
 			return
 		}
 		err := control.Send(in.Name, proto.Event{
@@ -673,7 +687,7 @@ func (g *Ghost) execIntent(in proto.Intent) {
 			From: g.manifest.Ghost.Name,
 		})
 		if err != nil {
-			g.opts.Log(fmt.Sprintf("haunt: tell %s: %v", in.Name, err))
+			g.log.Warn(hlog.Control, "tell %s: %v", in.Name, err)
 		}
 	}
 }
@@ -717,12 +731,12 @@ func (g *Ghost) renderer() *balloon.Renderer {
 // hours it drops the balloon; the driver enforces this, not the ghost.
 func (g *Ghost) showBalloon(text string) {
 	if muted, why := g.quiet.Active(); muted {
-		g.opts.Log(fmt.Sprintf("haunt: balloon suppressed (%s)", why))
+		g.log.Debug(hlog.Balloon, "balloon suppressed (%s)", why)
 		return
 	}
 	// Never paint over a line the user is in the middle of typing.
 	if g.inputOpen() {
-		g.opts.Log("haunt: balloon suppressed (user is typing)")
+		g.log.Debug(hlog.Balloon, "balloon suppressed (user is typing)")
 		return
 	}
 	g.showBalloonSprite(g.renderer().Render(text))
@@ -745,7 +759,7 @@ func (g *Ghost) showBalloonSprite(sp *sprite.Sprite) {
 		LogicalH:    int32(lh),
 	})
 	if err != nil {
-		g.opts.Log(fmt.Sprintf("haunt: balloon failed: %v", err))
+		g.log.Warn(hlog.Balloon, "balloon failed: %v", err)
 		return
 	}
 	g.blnMu.Lock()
@@ -757,11 +771,11 @@ func (g *Ghost) showBalloonSprite(sp *sprite.Sprite) {
 // showImageBalloon renders an image into a balloon panel beside the sprite.
 func (g *Ghost) showImageBalloon(img image.Image) {
 	if muted, why := g.quiet.Active(); muted {
-		g.opts.Log(fmt.Sprintf("haunt: image balloon suppressed (%s)", why))
+		g.log.Debug(hlog.Balloon, "image balloon suppressed (%s)", why)
 		return
 	}
 	if g.inputOpen() {
-		g.opts.Log("haunt: image balloon suppressed (user is typing)")
+		g.log.Debug(hlog.Balloon, "image balloon suppressed (user is typing)")
 		return
 	}
 	g.showBalloonSprite(g.renderer().RenderImage(img))
@@ -777,7 +791,7 @@ func (g *Ghost) placeBalloon() {
 	}
 	x, y := g.balloonPos()
 	if err := bln.MoveTo(x, y); err != nil {
-		g.opts.Log(fmt.Sprintf("haunt: balloon follow failed: %v", err))
+		g.log.Warn(hlog.Balloon, "balloon follow failed: %v", err)
 	}
 }
 
@@ -806,8 +820,8 @@ func (g *Ghost) setExpression(pose string) {
 	}
 	if !g.shell.SetPose(pose) {
 		g.shellMu.Unlock()
-		g.opts.Log(fmt.Sprintf("haunt: expression %q is not one of this shell's poses %v",
-			pose, g.shell.Poses()))
+		g.log.Debug(hlog.Anim, "expression %q is not one of this shell's poses %v",
+			pose, g.shell.Poses())
 		return
 	}
 	sp := g.shell.Sprite()
@@ -822,6 +836,6 @@ func (g *Ghost) setExpression(pose string) {
 	// place — no flicker, and no re-derived input region — and only the
 	// layers the new pose actually changed.
 	if err := g.surface.RedrawRect(sp, damage); err != nil {
-		g.opts.Log(fmt.Sprintf("haunt: expression %q: %v", pose, err))
+		g.log.Warn(hlog.Anim, "expression %q: %v", pose, err)
 	}
 }

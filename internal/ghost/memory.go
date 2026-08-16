@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/aaronjauregui/haunt/internal/hlog"
 )
 
 // Long-term memory: everything the ghost hears and everything it writes
@@ -144,7 +146,7 @@ func (g *Ghost) remember(kind, text string) {
 	}
 	vec, err := g.aiSvc.Embed(context.Background(), text)
 	if err != nil {
-		g.opts.Log(fmt.Sprintf("haunt: memory: embedding failed: %v", err))
+		g.log.Warn(hlog.Memory, "embedding failed: %v", err)
 		return
 	}
 	entry, err := json.Marshal(memory{
@@ -159,11 +161,11 @@ func (g *Ghost) remember(kind, text string) {
 	}
 	slot := g.nextMemorySlot()
 	if err := g.store.Set(memKeyPrefix+strconv.Itoa(slot), string(entry)); err != nil {
-		g.opts.Log(fmt.Sprintf("haunt: memory: storing: %v", err))
+		g.log.Warn(hlog.Memory, "storing: %v", err)
 		return
 	}
 	if err := g.store.Set(memCursorKey, strconv.Itoa(slot+1)); err != nil {
-		g.opts.Log(fmt.Sprintf("haunt: memory: cursor: %v", err))
+		g.log.Warn(hlog.Memory, "cursor: %v", err)
 	}
 }
 
@@ -228,7 +230,7 @@ func (g *Ghost) reembedStale(ctx context.Context) {
 	if len(stale) == 0 {
 		return
 	}
-	g.opts.Log(fmt.Sprintf("haunt: memory: re-embedding %d entries for model %q", len(stale), model))
+	g.log.Info(hlog.Memory, "re-embedding %d entries for model %q", len(stale), model)
 
 	done := 0
 	for _, m := range stale {
@@ -240,7 +242,7 @@ func (g *Ghost) reembedStale(ctx context.Context) {
 		}
 		done++
 	}
-	g.opts.Log(fmt.Sprintf("haunt: memory: re-embedded %d/%d entries", done, len(stale)))
+	g.log.Info(hlog.Memory, "re-embedded %d/%d entries", done, len(stale))
 }
 
 // reembedOne rewrites a single entry's vector, reporting whether to
@@ -251,7 +253,7 @@ func (g *Ghost) reembedOne(ctx context.Context, m memory, model string) bool {
 
 	vec, err := g.aiSvc.Embed(ctx, m.Text)
 	if err != nil {
-		g.opts.Log(fmt.Sprintf("haunt: memory: re-embedding stopped: %v", err))
+		g.log.Warn(hlog.Memory, "re-embedding stopped: %v", err)
 		return false
 	}
 	m.Vec, m.Model = encodeVec(vec), model
@@ -260,7 +262,7 @@ func (g *Ghost) reembedOne(ctx context.Context, m memory, model string) bool {
 		return true // skip this one, keep going
 	}
 	if err := g.store.Set(m.key, string(entry)); err != nil {
-		g.opts.Log(fmt.Sprintf("haunt: memory: rewriting %s: %v", m.key, err))
+		g.log.Warn(hlog.Memory, "rewriting %s: %v", m.key, err)
 		return false
 	}
 	return true
@@ -279,7 +281,7 @@ func (g *Ghost) recall(text string, skip map[string]bool) []memory {
 	}
 	vec, err := g.aiSvc.Embed(context.Background(), text)
 	if err != nil {
-		g.opts.Log(fmt.Sprintf("haunt: memory: recall failed: %v", err))
+		g.log.Warn(hlog.Memory, "recall failed: %v", err)
 		return nil
 	}
 

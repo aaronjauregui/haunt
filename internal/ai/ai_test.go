@@ -1,6 +1,8 @@
 package ai
 
 import (
+	"github.com/aaronjauregui/haunt/internal/hlog"
+
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -199,29 +201,33 @@ func TestPromptTracing(t *testing.T) {
 		{Role: "system", Content: "you are a wry spirit"},
 		{Role: "user", Content: "hello ghost"},
 	}
-	newSvc := func(logPrompts bool, lines *[]string) *Service {
+	newSvc := func(logPrompts bool) (*Service, func() []string) {
+		// With the prompt topic off unless the switch is on, so this also
+		// checks that tracing stays off in the shipping configuration.
+		rec, lines := hlog.Recorder()
+		if !logPrompts {
+			rec, lines = hlog.RecorderAt(hlog.LevelInfo)
+		}
 		return NewService(&Config{
 			LLM:        LLMConfig{BaseURL: srv.URL + "/v1", Model: "fake"},
 			Budget:     BudgetConfig{LLMRequestsPerHour: 5, ImageRequestsPerHour: 5},
 			LogPrompts: logPrompts,
-		}, func(s string) { *lines = append(*lines, s) })
+		}, rec), lines
 	}
 
-	var quiet []string
-	s := newSvc(false, &quiet)
+	s, quiet := newSvc(false)
 	if _, err := s.Chat(context.Background(), msgs, nil, Options{}); err != nil {
 		t.Fatal(err)
 	}
-	if len(quiet) != 0 {
-		t.Errorf("tracing off still logged: %q", quiet)
+	if got := quiet(); len(got) != 0 {
+		t.Errorf("tracing off still logged: %q", got)
 	}
 
-	var loud []string
-	s = newSvc(true, &loud)
+	s, loud := newSvc(true)
 	if _, err := s.Chat(context.Background(), msgs, nil, Options{Silent: true, Tag: "imgprompt"}); err != nil {
 		t.Fatal(err)
 	}
-	joined := strings.Join(loud, "\n")
+	joined := strings.Join(loud(), "\n")
 	for _, want := range []string{
 		"model=fake", "silent", "tag=imgprompt", "temperature=0.2",
 		"[system] you are a wry spirit", "[user] hello ghost", "echo: hello ghost",
@@ -231,14 +237,18 @@ func TestPromptTracing(t *testing.T) {
 		}
 	}
 
-	// HAUNT_AI_DEBUG turns it on without touching the config.
-	var env []string
-	t.Setenv("HAUNT_AI_DEBUG", "1")
-	s = newSvc(false, &env)
+	// Asking for the prompt topic turns tracing on without touching the
+	// config. (That HAUNT_AI_DEBUG=1 still selects that topic is
+	// internal/hlog's business, and tested there.)
+	byTopic, viaTopic := hlog.RecorderAt(hlog.LevelInfo, hlog.Prompt)
+	s = NewService(&Config{
+		LLM:    LLMConfig{BaseURL: srv.URL + "/v1", Model: "fake"},
+		Budget: BudgetConfig{LLMRequestsPerHour: 5},
+	}, byTopic)
 	if _, err := s.Chat(context.Background(), msgs, nil, Options{}); err != nil {
 		t.Fatal(err)
 	}
-	if len(env) == 0 {
-		t.Error("HAUNT_AI_DEBUG=1 produced no trace")
+	if len(viaTopic()) == 0 {
+		t.Error("the prompt topic produced no trace")
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/aaronjauregui/haunt/internal/ai"
+	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/shell"
 )
 
@@ -72,13 +73,14 @@ func classifierGhost(t *testing.T, reply, mode string) (*Ghost, *int) {
 	t.Cleanup(srv.Close)
 
 	g := &Ghost{
-		opts:     Options{Log: func(string) {}},
+		opts:     Options{},
+		log:      hlog.Discard(),
 		manifest: &Manifest{Ghost: GhostSection{Capabilities: []string{"llm"}}},
 		shell:    shell.Builtin(64),
 		aiSvc: ai.NewService(&ai.Config{
 			LLM:                 ai.LLMConfig{BaseURL: srv.URL + "/v1", Model: "fake"},
 			ExpressionInference: mode,
-		}, func(string) {}),
+		}, hlog.Discard()),
 	}
 	return g, &calls
 }

@@ -1,11 +1,11 @@
 package ghost
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
 	"github.com/aaronjauregui/haunt/internal/desktop"
+	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/proto"
 )
 
@@ -32,10 +32,10 @@ func (g *Ghost) watchWindows() {
 		return
 	}
 	if g.desktop == nil || g.desktop.Mechanism() == "none" {
-		g.opts.Log("haunt: window awareness: no compositor IPC; nothing to watch")
+		g.log.Info(hlog.Screen, "window awareness: no compositor IPC; nothing to watch")
 		return
 	}
-	g.opts.Log(fmt.Sprintf("haunt: watching the focused window via %s", g.desktop.Mechanism()))
+	g.log.Info(hlog.Screen, "watching the focused window via %s", g.desktop.Mechanism())
 
 	var last desktop.Window
 	var complained bool
@@ -52,7 +52,7 @@ func (g *Ghost) watchWindows() {
 		if err != nil {
 			if !complained {
 				complained = true
-				g.opts.Log(fmt.Sprintf("haunt: window awareness: %v", err))
+				g.log.Warn(hlog.Screen, "window awareness: %v", err)
 			}
 			continue
 		}

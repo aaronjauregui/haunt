@@ -9,6 +9,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/proto"
 	"github.com/aaronjauregui/haunt/internal/quiet"
 )
@@ -163,11 +164,11 @@ type curiosity struct {
 	limit  int
 	spends []time.Time
 	store  Store
-	log    func(string)
+	log    *hlog.Logger
 	now    func() time.Time
 }
 
-func newCuriosity(limit int, store Store, log func(string)) *curiosity {
+func newCuriosity(limit int, store Store, log *hlog.Logger) *curiosity {
 	c := &curiosity{limit: limit, store: store, log: log, now: time.Now}
 	c.load()
 	return c
@@ -214,7 +215,7 @@ func (c *curiosity) persist() {
 		return
 	}
 	if err := c.store.Set(curiosityKey, string(b)); err != nil {
-		c.log(fmt.Sprintf("haunt: curiosity: persisting: %v", err))
+		c.log.Warn(hlog.Curiosity, "persisting the spend: %v", err)
 	}
 }
 
@@ -300,19 +301,19 @@ func (g *Ghost) allowInitiative(what string) bool {
 	// stated and could not enforce until the driver could see a fullscreen
 	// window.
 	if g.desktop != nil && g.desktop.Fullscreen() {
-		g.opts.Log(fmt.Sprintf("haunt: initiative: %s dropped (something is fullscreen)", what))
+		g.log.Debug(hlog.Curiosity, "initiative: %s dropped (something is fullscreen)", what)
 		return false
 	}
 	if g.curiosity == nil || g.curiosity.limit <= 0 {
-		g.opts.Log(fmt.Sprintf("haunt: initiative: %s dropped (curiosity disabled)", what))
+		g.log.Debug(hlog.Curiosity, "initiative: %s dropped (curiosity disabled)", what)
 		return false
 	}
 	ok, remaining := g.curiosity.spend()
 	if !ok {
-		g.opts.Log(fmt.Sprintf("haunt: initiative: %s dropped (daily curiosity spent)", what))
+		g.log.Debug(hlog.Curiosity, "initiative: %s dropped (daily curiosity spent)", what)
 		return false
 	}
 	g.openInitiative()
-	g.opts.Log(fmt.Sprintf("haunt: initiative: %s on the ghost's own account (%d left today)", what, remaining))
+	g.log.Debug(hlog.Curiosity, "initiative: %s on the ghost's own account (%d left today)", what, remaining)
 	return true
 }

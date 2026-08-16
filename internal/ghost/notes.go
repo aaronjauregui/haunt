@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/aaronjauregui/haunt/internal/hlog"
 )
 
 // notesKey holds the ghost's journal: self-authored observations that shape
@@ -40,7 +42,7 @@ func (g *Ghost) execNote(text string) {
 		return
 	}
 	if err := g.store.Set(notesKey, string(b)); err != nil {
-		g.opts.Log(fmt.Sprintf("haunt: saving note: %v", err))
+		g.log.Warn(hlog.Memory, "saving note: %v", err)
 		return
 	}
 	// Notes age out of the recency window after 20 more; the memory index

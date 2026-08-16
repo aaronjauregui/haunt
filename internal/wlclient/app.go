@@ -5,8 +5,6 @@ package wlclient
 
 import (
 	"fmt"
-	"log"
-	"os"
 	"sort"
 	"sync"
 
@@ -33,13 +31,6 @@ const (
 	btnLeft  = 0x110
 	btnRight = 0x111
 )
-
-// debugf logs pointer/protocol events when HAUNT_DEBUG is set.
-func debugf(format string, args ...any) {
-	if os.Getenv("HAUNT_DEBUG") != "" {
-		log.Printf(format, args...)
-	}
-}
 
 // App is a connected Wayland client with the globals Haunt needs.
 //
@@ -74,8 +65,10 @@ type App struct {
 	pointerFocus  *SpriteSurface
 	keyboardFocus *SpriteSurface
 
-	// EventLog, when set, receives a line per input event. Used by the PoC
-	// to expose protocol activity to tests.
+	// EventLog, when set, receives a line per input or surface event. The
+	// driver points it at its own log's wayland topic; the PoC uses it to
+	// expose protocol activity to tests. Nil means this costs nothing,
+	// which matters for a callback on the pointer motion path.
 	EventLog func(string)
 
 	// OnOutputsChanged fires when a screen appears or disappears, so a
@@ -84,7 +77,6 @@ type App struct {
 }
 
 func (a *App) logEvent(format string, args ...any) {
-	debugf(format, args...)
 	if a.EventLog != nil {
 		a.EventLog(fmt.Sprintf(format, args...))
 	}

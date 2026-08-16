@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/aaronjauregui/haunt/internal/bus"
+	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/proto"
 	"github.com/aaronjauregui/haunt/internal/textinput"
 )
@@ -16,11 +17,12 @@ func typingGhost(t *testing.T) (*Ghost, *bus.Bus) {
 	t.Helper()
 	b := bus.New(64)
 	g := &Ghost{
-		opts: Options{Log: func(string) {}},
+		opts: Options{},
+		log:  hlog.Discard(),
 		bus:  b,
 		done: make(chan struct{}),
 	}
-	g.curiosity = newCuriosity(0, &memStore{m: map[string]string{}}, g.opts.Log)
+	g.curiosity = newCuriosity(0, &memStore{m: map[string]string{}}, g.log)
 	t.Cleanup(func() { close(g.done) })
 	return g, b
 }

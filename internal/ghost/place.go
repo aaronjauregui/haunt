@@ -2,8 +2,8 @@ package ghost
 
 import (
 	"encoding/json"
-	"fmt"
 
+	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/wlclient"
 )
 
@@ -50,7 +50,7 @@ func (g *Ghost) savePlace(x, y int) {
 		return
 	}
 	if err := g.store.Set(placeKey, string(b)); err != nil {
-		g.opts.Log(fmt.Sprintf("haunt: saving position: %v", err))
+		g.log.Warn(hlog.Place, "saving position: %v", err)
 	}
 }
 
@@ -83,7 +83,7 @@ func (g *Ghost) startingPlaceOn(outs []wlclient.Output, optX, optY int, explicit
 		}
 		// The screen it was on is gone. Keep the ghost rather than the
 		// coordinates: an unplugged monitor should not lose the companion.
-		g.opts.Log(fmt.Sprintf("haunt: the screen %q is not connected; placing on the first one", p.Output))
+		g.log.Info(hlog.Place, "the screen %q is not connected; placing on the first one", p.Output)
 	}
 
 	if len(outs) == 0 {

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/aaronjauregui/haunt/internal/ai"
+	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/proto"
 )
 
@@ -142,7 +143,7 @@ func (g *Ghost) execChat(in proto.Intent, userDriven bool) {
 			err = fmt.Errorf("the model said nothing for %s — is the backend awake?",
 				g.firstTokenTimeout())
 		}
-		g.opts.Log(fmt.Sprintf("haunt: chat: %v", err))
+		g.log.Warn(hlog.AI, "chat: %v", err)
 		g.publishAIError(err.Error(), tag)
 		return
 	}
@@ -209,7 +210,7 @@ func (g *Ghost) execImagine(in proto.Intent, userDriven bool) {
 	// reported rather than silent: the user asked for a picture, so they
 	// should hear why there isn't one.
 	if g.desktop != nil && g.desktop.Fullscreen() {
-		g.opts.Log("haunt: imagine refused: something is fullscreen")
+		g.log.Info(hlog.AI, "imagine refused: something is fullscreen")
 		g.publishAIError("not while something is fullscreen — it would stutter", tag)
 		return
 	}
@@ -237,7 +238,7 @@ func (g *Ghost) execImagine(in proto.Intent, userDriven bool) {
 		data, err = g.aiSvc.GenerateImage(g.sessionContext(), prompt)
 		wait.Stop()
 		if err != nil {
-			g.opts.Log(fmt.Sprintf("haunt: imagine: %v", err))
+			g.log.Warn(hlog.AI, "imagine: %v", err)
 			g.publishAIError(err.Error(), tag)
 			return
 		}
@@ -288,7 +289,7 @@ func (g *Ghost) saveHistory(h []ai.Message) {
 		return
 	}
 	if err := g.store.Set(historyKey, string(b)); err != nil {
-		g.opts.Log(fmt.Sprintf("haunt: saving chat history: %v", err))
+		g.log.Warn(hlog.Store, "saving chat history: %v", err)
 	}
 }
 

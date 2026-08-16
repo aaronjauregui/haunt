@@ -69,7 +69,9 @@ system = "You are Wisp."
 	stateDir := filepath.Join(dir, "state")
 	cmd := exec.Command(bin, "run", "-x", "100", "-y", "100", "-idle-ms", "2500",
 		"-state", stateDir, "-record", record, gDir)
-	cmd.Env = append(c.Env(), "HAUNT_RUNTIME_DIR="+rt, "HAUNT_CONFIG_DIR="+cfgDir)
+	cmd.Env = append(c.Env(), "HAUNT_RUNTIME_DIR="+rt, "HAUNT_CONFIG_DIR="+cfgDir,
+		// Initiative accounting is debug output: this test is about it.
+		"HAUNT_DEBUG=curiosity")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -139,7 +141,8 @@ system = "You are Wisp."
 	record2 := filepath.Join(dir, "session2.jsonl")
 	cmd2 := exec.Command(bin, "run", "-x", "100", "-y", "100", "-idle-ms", "2500",
 		"-state", stateDir, "-record", record2, gDir)
-	cmd2.Env = append(c.Env(), "HAUNT_RUNTIME_DIR="+rt, "HAUNT_CONFIG_DIR="+cfgDir)
+	cmd2.Env = append(c.Env(), "HAUNT_RUNTIME_DIR="+rt, "HAUNT_CONFIG_DIR="+cfgDir,
+		"HAUNT_DEBUG=curiosity")
 	stdout2, err := cmd2.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)

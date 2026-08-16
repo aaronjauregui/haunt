@@ -14,6 +14,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/quiet"
 )
 
@@ -213,12 +214,13 @@ type Service struct {
 	llmBudget   *budget
 	imageBudget *budget
 	embedBudget *budget
-	log         func(string)
+	log         *hlog.Logger
 }
 
-// NewService builds a Service from config. log receives prompt traces when
+// NewService builds a Service from config. The logger receives prompt
+// traces on the prompt topic when
 // they are enabled; nil discards them.
-func NewService(cfg *Config, log func(string)) *Service {
+func NewService(cfg *Config, log *hlog.Logger) *Service {
 	return &Service{
 		cfg: cfg,
 		// Defaulted here as well as in LoadConfig, so a Config built
@@ -241,14 +243,16 @@ func orDefault(configured, fallback int) int {
 
 // logPrompts reports whether request tracing is on.
 func (s *Service) logPrompts() bool {
-	return s.log != nil && (s.cfg.LogPrompts || os.Getenv("HAUNT_AI_DEBUG") == "1")
+	// Either asked for as a topic, or by the standing config switch that
+	// predates topics and still means the same thing.
+	return s.log != nil && (s.cfg.LogPrompts || s.log.Enabled(hlog.Prompt, hlog.LevelDebug))
 }
 
 // trace emits one prompt trace. Only request content is traced; API keys
 // live in headers and are never part of it.
 func (s *Service) trace(format string, args ...any) {
 	if s.logPrompts() {
-		s.log("haunt: ai: " + fmt.Sprintf(format, args...))
+		s.log.Debug(hlog.Prompt, format, args...)
 	}
 }
 
@@ -259,7 +263,7 @@ func (s *Service) traceMessages(msgs []Message, opts Options) {
 		return
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "haunt: ai: chat → %s model=%s", s.cfg.LLM.BaseURL, s.cfg.LLM.Model)
+	fmt.Fprintf(&b, "chat → %s model=%s", s.cfg.LLM.BaseURL, s.cfg.LLM.Model)
 	if temp, ok := s.cfg.LLM.temperature(opts.Silent); ok {
 		fmt.Fprintf(&b, " temperature=%g", temp)
 	}
@@ -273,7 +277,7 @@ func (s *Service) traceMessages(msgs []Message, opts Options) {
 	for _, m := range msgs {
 		fmt.Fprintf(&b, "\n  [%s] %s", m.Role, m.Content)
 	}
-	s.log(b.String())
+	s.log.Debug(hlog.Prompt, "%s", b.String())
 }
 
 // Options describes one LLM call beyond its messages.
@@ -389,7 +393,7 @@ func (s *Service) traceImage(prompt string) {
 		backend = "openai"
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "haunt: ai: image → %s %s model=%s", backend, i.BaseURL, i.Model)
+	fmt.Fprintf(&b, "image → %s %s model=%s", backend, i.BaseURL, i.Model)
 	if backend == "comfyui" {
 		w, h := parseSize(i.Size, comfyDefaultSize)
 		steps, cfgScale, sampler, negative := comfyDefaults(i)
@@ -399,5 +403,5 @@ func (s *Service) traceImage(prompt string) {
 		fmt.Fprintf(&b, " size=%s", i.Size)
 	}
 	fmt.Fprintf(&b, "\n  [prompt] %s", prompt)
-	s.log(b.String())
+	s.log.Debug(hlog.Prompt, "%s", b.String())
 }

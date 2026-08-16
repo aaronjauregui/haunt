@@ -3,11 +3,11 @@ package ghost
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
 	"github.com/aaronjauregui/haunt/internal/balloon"
+	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/wlclient"
 )
 
@@ -174,7 +174,7 @@ func (g *Ghost) drawWaiting(text string, frame int, shown bool) bool {
 		if err := bln.Redraw(sp); err == nil {
 			return true
 		} else if !errors.Is(err, wlclient.ErrSizeChanged) {
-			g.opts.Log(fmt.Sprintf("haunt: waiting: redraw: %v", err))
+			g.log.Warn(hlog.Balloon, "waiting: redraw: %v", err)
 		}
 	}
 	g.showBalloonSprite(sp)

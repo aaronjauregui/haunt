@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/aaronjauregui/haunt/internal/bus"
+	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/shell"
 )
 
@@ -13,14 +14,15 @@ import (
 func animatedGhost(t *testing.T, reducedMotion bool) *Ghost {
 	t.Helper()
 	g := &Ghost{
-		opts:          Options{Log: func(string) {}},
+		opts:          Options{},
+		log:           hlog.Discard(),
 		manifest:      &Manifest{Ghost: GhostSection{Name: "test"}},
 		shell:         shell.Builtin(64),
 		bus:           bus.New(64),
 		done:          make(chan struct{}),
 		reducedMotion: reducedMotion,
 	}
-	g.curiosity = newCuriosity(0, &memStore{m: map[string]string{}}, g.opts.Log)
+	g.curiosity = newCuriosity(0, &memStore{m: map[string]string{}}, g.log)
 	g.startAnimation()
 	t.Cleanup(func() {
 		g.stopAnimation()

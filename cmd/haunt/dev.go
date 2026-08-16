@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/aaronjauregui/haunt/internal/ghost"
+	"github.com/aaronjauregui/haunt/internal/hlog"
 )
 
 // cmdDev runs a ghost and restarts it whenever its files change: edit the
@@ -41,7 +42,7 @@ func cmdDev(args []string) error {
 			runDone <- ghost.Run(runCtx, dir, ghost.Options{
 				X: *x, Y: *y,
 				StateDir: *state,
-				Log:      func(s string) { fmt.Fprintln(os.Stderr, s) },
+				Logger:   hlog.Open(os.Stderr),
 				OnReady:  func() { fmt.Println("READY") },
 			})
 		}()

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/aaronjauregui/haunt/internal/desktop"
+	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/testenv"
 )
 
@@ -33,7 +34,7 @@ func TestFullscreenDetected(t *testing.T) {
 		}
 	}
 
-	w := desktop.New(func(s string) { t.Log(s) })
+	w := desktop.New(hlog.Discard())
 	if w.Mechanism() != "sway" {
 		t.Fatalf("mechanism = %q, want sway", w.Mechanism())
 	}
@@ -112,7 +113,10 @@ system = "You are Wisp."
 	record := filepath.Join(dir, "session.jsonl")
 	cmd := exec.Command(bin, "run", "-x", "100", "-y", "100", "-idle-ms", "2500",
 		"-state", filepath.Join(dir, "state"), "-record", record, gDir)
-	cmd.Env = append(c.Env(), "HAUNT_RUNTIME_DIR="+rt, "HAUNT_CONFIG_DIR="+cfgDir)
+	cmd.Env = append(c.Env(), "HAUNT_RUNTIME_DIR="+rt, "HAUNT_CONFIG_DIR="+cfgDir,
+		// So that "the ghost stayed quiet" is a real assertion rather than
+		// one that passes because the line was filtered out.
+		"HAUNT_DEBUG=curiosity")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)

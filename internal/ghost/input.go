@@ -2,9 +2,9 @@ package ghost
 
 import (
 	"errors"
-	"fmt"
 	"time"
 
+	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/proto"
 	"github.com/aaronjauregui/haunt/internal/textinput"
 	"github.com/aaronjauregui/haunt/internal/wlclient"
@@ -96,7 +96,7 @@ func (g *Ghost) takeKeyboard(want bool) {
 		return
 	}
 	if err := g.app.TakeKeyboard(g.surface, want); err != nil {
-		g.opts.Log(fmt.Sprintf("haunt: input: keyboard focus: %v", err))
+		g.log.Warn(hlog.Input, "keyboard focus: %v", err)
 	}
 }
 
@@ -150,7 +150,7 @@ func (g *Ghost) drawInput() {
 		if err := bln.Redraw(sp); err == nil {
 			return
 		} else if !errors.Is(err, wlclient.ErrSizeChanged) {
-			g.opts.Log(fmt.Sprintf("haunt: input: redraw: %v", err))
+			g.log.Warn(hlog.Input, "redraw: %v", err)
 		}
 	}
 	g.showBalloonSprite(sp)

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/aaronjauregui/haunt/internal/ai"
+	"github.com/aaronjauregui/haunt/internal/hlog"
 )
 
 func TestVectorRoundTrip(t *testing.T) {
@@ -216,8 +217,9 @@ func testGhost(t *testing.T, store Store, embedURL, model string) *Ghost {
 	cfg := &ai.Config{Embed: ai.EmbedConfig{BaseURL: embedURL, Model: model}}
 	return &Ghost{
 		store:    store,
-		aiSvc:    ai.NewService(cfg, func(string) {}),
-		opts:     Options{Log: func(string) {}},
+		aiSvc:    ai.NewService(cfg, hlog.Discard()),
+		opts:     Options{},
+		log:      hlog.Discard(),
 		manifest: &Manifest{Ghost: GhostSection{Capabilities: []string{"llm"}}},
 	}
 }

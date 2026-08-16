@@ -6,6 +6,7 @@ import (
 
 	"github.com/aaronjauregui/haunt/internal/balloon"
 	"github.com/aaronjauregui/haunt/internal/bus"
+	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/quiet"
 )
 
@@ -24,7 +25,8 @@ func pagingGhost(t *testing.T) *Ghost {
 		t.Fatal(err)
 	}
 	return &Ghost{
-		opts:    Options{Log: func(string) {}},
+		opts:    Options{},
+		log:     hlog.Discard(),
 		blnRend: r,
 		quiet:   q,
 		bus:     bus.New(64),

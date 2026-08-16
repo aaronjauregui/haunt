@@ -1,6 +1,6 @@
 package ghost
 
-import "fmt"
+import "github.com/aaronjauregui/haunt/internal/hlog"
 
 // Paging. A reply longer than the balloon used to be unreadable: the
 // opening scrolled away while it streamed and there was no way back to it,
@@ -26,11 +26,11 @@ type paged struct {
 // does not fit.
 func (g *Ghost) showPaged(text string) {
 	if muted, why := g.quiet.Active(); muted {
-		g.opts.Log(fmt.Sprintf("haunt: balloon suppressed (%s)", why))
+		g.log.Debug(hlog.Balloon, "balloon suppressed (%s)", why)
 		return
 	}
 	if g.inputOpen() {
-		g.opts.Log("haunt: balloon suppressed (user is typing)")
+		g.log.Debug(hlog.Balloon, "balloon suppressed (user is typing)")
 		return
 	}
 	sp, pages := g.renderer().RenderPage(text, 0)

@@ -1,13 +1,13 @@
 package ghost
 
 import (
-	"fmt"
 	"hash/fnv"
 	"math/rand"
 	"sort"
 	"sync"
 	"time"
 
+	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/shell"
 )
 
@@ -76,7 +76,7 @@ func (g *Ghost) startAnimation() {
 	}
 
 	if g.reducedMotion {
-		g.opts.Log("haunt: reduced motion: idle animation disabled")
+		g.log.Info(hlog.Anim, "reduced motion: idle animation disabled")
 		return
 	}
 	for _, c := range g.shell.Clips() {
@@ -133,7 +133,7 @@ func (g *Ghost) playClip(name string) {
 	}
 	c, ok := g.shell.Clip(name)
 	if !ok {
-		g.opts.Log(fmt.Sprintf("haunt: no clip %q in this shell", name))
+		g.log.Debug(hlog.Anim, "no clip %q in this shell", name)
 		return
 	}
 
@@ -266,7 +266,7 @@ func (g *Ghost) repaintAnimation() {
 		return
 	}
 	if err := g.surface.RedrawRect(sp, damage); err != nil {
-		g.opts.Log(fmt.Sprintf("haunt: animation repaint: %v", err))
+		g.log.Warn(hlog.Anim, "animation repaint: %v", err)
 	}
 }
 

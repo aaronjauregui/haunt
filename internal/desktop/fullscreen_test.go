@@ -1,6 +1,8 @@
 package desktop
 
 import (
+	"github.com/aaronjauregui/haunt/internal/hlog"
+
 	"encoding/json"
 	"testing"
 )
@@ -71,15 +73,15 @@ func TestSwayTreeReading(t *testing.T) {
 func TestNoCompositorIsQuietlyFine(t *testing.T) {
 	t.Setenv("SWAYSOCK", "")
 	t.Setenv("HYPRLAND_INSTANCE_SIGNATURE", "")
-	var logged []string
-	w := New(func(s string) { logged = append(logged, s) })
+	rec, logged := hlog.Recorder()
+	w := New(rec)
 	if w.Mechanism() != "none" {
 		t.Errorf("mechanism = %q", w.Mechanism())
 	}
 	if w.Fullscreen() {
 		t.Error("reported fullscreen with no way to know")
 	}
-	if len(logged) == 0 {
+	if len(logged()) == 0 {
 		t.Error("said nothing about having no way to tell")
 	}
 }
@@ -88,15 +90,15 @@ func TestNoCompositorIsQuietlyFine(t *testing.T) {
 // answers false, and complains once rather than every two seconds.
 func TestBrokenSocketDoesNotSilenceTheGhost(t *testing.T) {
 	t.Setenv("SWAYSOCK", "/nonexistent/sway.sock")
-	var logged []string
-	w := New(func(s string) { logged = append(logged, s) })
+	rec, logged := hlog.Recorder()
+	w := New(rec)
 	for i := 0; i < 5; i++ {
 		if w.Fullscreen() {
 			t.Fatal("a dead socket reported fullscreen")
 		}
 		w.lastAt = w.lastAt.Add(-pollInterval) // expire the cache
 	}
-	if len(logged) != 1 {
-		t.Errorf("logged %d times, want exactly one complaint: %v", len(logged), logged)
+	if got := logged(); len(got) != 1 {
+		t.Errorf("logged %d times, want exactly one complaint: %v", len(got), got)
 	}
 }

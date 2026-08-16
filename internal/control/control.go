@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/proto"
 )
 
@@ -48,12 +49,12 @@ type Server struct {
 	ln      net.Listener
 	path    string
 	publish func(proto.Event) error
-	log     func(string)
+	log     *hlog.Logger
 }
 
 // Listen starts the control server for the named ghost. Stale sockets from
 // crashed sessions are replaced.
-func Listen(name string, publish func(proto.Event) error, log func(string)) (*Server, error) {
+func Listen(name string, publish func(proto.Event) error, log *hlog.Logger) (*Server, error) {
 	path, err := SocketPath(name)
 	if err != nil {
 		return nil, err
@@ -105,7 +106,7 @@ func (s *Server) serve(conn net.Conn) {
 			reply = "error: " + err.Error()
 		}
 		if reply != "ok" && s.log != nil {
-			s.log("haunt: control: " + reply)
+			s.log.Warn(hlog.Control, "%s", reply)
 		}
 		fmt.Fprintln(conn, reply)
 	}

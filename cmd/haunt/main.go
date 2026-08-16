@@ -14,6 +14,7 @@ import (
 	"syscall"
 
 	"github.com/aaronjauregui/haunt/internal/ghost"
+	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/library"
 )
 
@@ -103,6 +104,9 @@ func cmdRun(args []string) error {
 		return fmt.Errorf("run: at most one ghost directory or name expected")
 	}
 
+	// One logger for the session: level and topics from the user's config
+	// and the environment (see internal/hlog).
+	logger := hlog.Open(os.Stderr)
 	opts := ghost.Options{
 		X: *x, Y: *y,
 		Placed:        isSet(fs, "x") || isSet(fs, "y"),
@@ -110,7 +114,7 @@ func cmdRun(args []string) error {
 		RecordTo:      *record,
 		StateDir:      *state,
 		IdleTimeoutMS: uint32(*idleMS),
-		Log:           func(s string) { fmt.Fprintln(os.Stderr, s) },
+		Logger:        logger,
 		// Machine-readable readiness marker for scripts and tests.
 		OnReady: func() { fmt.Println("READY") },
 	}

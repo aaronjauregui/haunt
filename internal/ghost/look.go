@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/proto"
 )
 
@@ -63,7 +64,7 @@ func (g *Ghost) execLook(in proto.Intent) {
 		return
 	}
 	if g.ignoredApp(win.AppID) {
-		g.opts.Log(fmt.Sprintf("haunt: not looking at %s: it is on the ignore list", win.AppID))
+		g.log.Info(hlog.Screen, "not looking at %s: it is on the ignore list", win.AppID)
 		g.publishAIError("that application is on the ignore list", tag)
 		return
 	}
@@ -74,7 +75,7 @@ func (g *Ghost) execLook(in proto.Intent) {
 
 	png, err := captureWindow(win.X, win.Y, win.W, win.H)
 	if err != nil {
-		g.opts.Log(fmt.Sprintf("haunt: capture: %v", err))
+		g.log.Warn(hlog.Screen, "capture: %v", err)
 		g.publishAIError("cannot capture the screen: "+err.Error(), tag)
 		return
 	}
@@ -85,7 +86,7 @@ func (g *Ghost) execLook(in proto.Intent) {
 	}
 	answer, err := g.aiSvc.Look(context.Background(), question, png)
 	if err != nil {
-		g.opts.Log(fmt.Sprintf("haunt: look: %v", err))
+		g.log.Warn(hlog.Screen, "look: %v", err)
 		g.publishAIError(err.Error(), tag)
 		return
 	}

@@ -25,6 +25,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/aaronjauregui/haunt/internal/hlog"
 )
 
 // pollInterval is how long an answer is trusted. The question is asked
@@ -52,7 +54,7 @@ type Watcher struct {
 	askWindow func() (Window, error)
 	// what names the mechanism, for logs.
 	what string
-	log  func(string)
+	log  *hlog.Logger
 
 	mu       sync.Mutex
 	last     bool
@@ -61,9 +63,9 @@ type Watcher struct {
 }
 
 // New picks a mechanism from the environment. log may be nil.
-func New(log func(string)) *Watcher {
+func New(log *hlog.Logger) *Watcher {
 	if log == nil {
-		log = func(string) {}
+		log = hlog.Discard()
 	}
 	w := &Watcher{log: log}
 	switch {
@@ -73,7 +75,7 @@ func New(log func(string)) *Watcher {
 		w.ask, w.askWindow, w.what = hyprFullscreen, hyprWindow, "hyprland"
 	default:
 		w.what = "none"
-		log("haunt: no compositor IPC found; fullscreen awareness is off")
+		log.Info(hlog.Session, "no compositor IPC found; fullscreen awareness is off")
 	}
 	return w
 }
@@ -102,7 +104,7 @@ func (w *Watcher) Fullscreen() bool {
 		// not fill the journal.
 		w.failures++
 		if w.failures == 1 {
-			w.log(fmt.Sprintf("haunt: cannot ask %s about fullscreen windows: %v", w.what, err))
+			w.log.Warn(hlog.Session, "cannot ask %s about fullscreen windows: %v", w.what, err)
 		}
 		w.last = false
 		return false
