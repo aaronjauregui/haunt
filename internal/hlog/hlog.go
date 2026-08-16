@@ -119,21 +119,28 @@ var Topics = []Topic{
 	Screen, Memory, Store, Wayland, Place, Curiosity, Control,
 }
 
-// Logger writes lines that pass the level and topic filters.
+// Logger writes lines that pass the level and topic filters. Filters are
+// per logger; the destination is shared, so loggers derived with With write
+// interleaved lines rather than interleaved halves of lines.
 type Logger struct {
-	mu    sync.Mutex
-	w     io.Writer
+	out   *sink
 	level Level
-	// debug holds the topics whose debug lines are wanted. A nil map with
-	// all set means everything.
+	// debug holds the topics whose debug lines are wanted. all means
+	// everything, whatever the map says.
 	debug map[Topic]bool
 	all   bool
+}
+
+// sink is the shared destination and the lock that serialises writes to it.
+type sink struct {
+	mu sync.Mutex
+	w  io.Writer
 }
 
 // New returns a logger writing to w. debug lists the topics whose debug
 // output is wanted; the topic "all" enables every one.
 func New(w io.Writer, level Level, debug []Topic) *Logger {
-	l := &Logger{w: w, level: level, debug: map[Topic]bool{}}
+	l := &Logger{out: &sink{w: w}, level: level, debug: map[Topic]bool{}}
 	for _, t := range debug {
 		if t == "all" || t == "*" {
 			l.all = true
@@ -142,6 +149,30 @@ func New(w io.Writer, level Level, debug []Topic) *Logger {
 		l.debug[t] = true
 	}
 	return l
+}
+
+// With returns a logger that also writes the given debug topics, to the
+// same destination. It is for the switches that predate topics and mean
+// one specific kind of debug output — `[ai] log_prompts`, say — so that
+// asking for the output and being allowed to write it stay the same
+// decision. Without it a subsystem can be told "trace yourself" and then
+// have every line filtered out from under it.
+func (l *Logger) With(debug ...Topic) *Logger {
+	if l == nil {
+		return nil
+	}
+	out := &Logger{out: l.out, level: l.level, all: l.all, debug: map[Topic]bool{}}
+	for t := range l.debug {
+		out.debug[t] = true
+	}
+	for _, t := range debug {
+		if t == "all" || t == "*" {
+			out.all = true
+			continue
+		}
+		out.debug[t] = true
+	}
+	return out
 }
 
 // Discard is a logger that writes nothing, for tests that do not care.
@@ -179,9 +210,9 @@ func (l *Logger) log(t Topic, lv Level, format string, args ...any) {
 	default:
 		prefix = "haunt: "
 	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	fmt.Fprintln(l.w, prefix+msg)
+	l.out.mu.Lock()
+	defer l.out.mu.Unlock()
+	fmt.Fprintln(l.out.w, prefix+msg)
 }
 
 // Error reports something that broke.
@@ -203,9 +234,9 @@ func (l *Logger) Line(msg string) {
 	if l == nil {
 		return
 	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	fmt.Fprintln(l.w, msg)
+	l.out.mu.Lock()
+	defer l.out.mu.Unlock()
+	fmt.Fprintln(l.out.w, msg)
 }
 
 // Describe summarises the filters in force, for the one line worth printing

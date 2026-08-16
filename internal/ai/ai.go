@@ -221,6 +221,12 @@ type Service struct {
 // traces on the prompt topic when
 // they are enabled; nil discards them.
 func NewService(cfg *Config, log *hlog.Logger) *Service {
+	// The config switch is an older spelling of "enable the prompt topic",
+	// so make it one: otherwise tracing is decided twice, and the second
+	// decision — the topic filter on the way out — silently wins.
+	if cfg.LogPrompts {
+		log = log.With(hlog.Prompt)
+	}
 	return &Service{
 		cfg: cfg,
 		// Defaulted here as well as in LoadConfig, so a Config built
@@ -243,9 +249,7 @@ func orDefault(configured, fallback int) int {
 
 // logPrompts reports whether request tracing is on.
 func (s *Service) logPrompts() bool {
-	// Either asked for as a topic, or by the standing config switch that
-	// predates topics and still means the same thing.
-	return s.log != nil && (s.cfg.LogPrompts || s.log.Enabled(hlog.Prompt, hlog.LevelDebug))
+	return s.log.Enabled(hlog.Prompt, hlog.LevelDebug)
 }
 
 // trace emits one prompt trace. Only request content is traced; API keys

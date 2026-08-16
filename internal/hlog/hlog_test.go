@@ -176,3 +176,30 @@ func TestRecorderKeepsLines(t *testing.T) {
 		t.Errorf("recorded %q", got)
 	}
 }
+
+// A subsystem told to trace itself must be able to: asking for the output
+// and being allowed to write it have to be the same decision, or the filter
+// on the way out silently undoes the switch that turned it on.
+func TestWithAddsTopicsAndSharesTheDestination(t *testing.T) {
+	var buf bytes.Buffer
+	base := New(&buf, LevelInfo, nil)
+	derived := base.With(Prompt)
+
+	base.Debug(Prompt, "not asked for")
+	derived.Debug(Prompt, "traced")
+	base.Info(Session, "shared destination")
+
+	got := buf.String()
+	if strings.Contains(got, "not asked for") {
+		t.Errorf("the base logger wrote a topic it does not have:\n%s", got)
+	}
+	if !strings.Contains(got, "traced") {
+		t.Errorf("the derived logger's topic was filtered out:\n%s", got)
+	}
+	if !strings.Contains(got, "shared destination") {
+		t.Errorf("the two loggers are not writing to the same place:\n%s", got)
+	}
+	if derived.Enabled(Memory, LevelDebug) {
+		t.Error("With enabled more than it was given")
+	}
+}

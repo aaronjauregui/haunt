@@ -28,6 +28,11 @@ type inputState struct {
 	open   bool
 	caret  bool
 	stop   chan struct{}
+	// focused says the compositor has given *this* line the keyboard.
+	// Losing focus is how a line is abandoned, but a leave event that
+	// arrives before the matching enter belongs to the previous line, not
+	// this one — see onKeyboardFocus.
+	focused bool
 }
 
 // openInput starts a line of input, unless one is already open.
@@ -39,12 +44,14 @@ func (g *Ghost) openInput() {
 	}
 	g.input.open = true
 	g.input.caret = true
+	g.input.focused = false
 	g.input.editor.Reset()
 	g.input.stop = make(chan struct{})
 	stop := g.input.stop
 	g.inputMu.Unlock()
 
 	g.takeKeyboard(true)
+	g.log.Debug(hlog.Input, "input line opened")
 	g.drawInput()
 
 	// Blink on its own timer: a caret that only moves when you type looks
@@ -80,12 +87,45 @@ func (g *Ghost) closeInput() {
 		return
 	}
 	g.input.open = false
+	g.input.focused = false
 	close(g.input.stop)
 	g.input.editor.Reset()
 	g.inputMu.Unlock()
+	g.log.Debug(hlog.Input, "input line closed")
 
 	g.takeKeyboard(false)
 	g.hideBalloon()
+}
+
+// onKeyboardFocus reacts to the compositor handing the keyboard over or
+// taking it away. Losing it abandons the line: the user's attention has
+// moved on, and a line nobody can type into is a lie.
+//
+// The subtlety is *whose* loss it is. Closing a line releases keyboard
+// interactivity, which makes the compositor send a leave — and that leave
+// can arrive after the user has already right-clicked to open the next
+// line, because the round trip is not instant and a person with a mouse is
+// quicker than one might think. Acting on it then would tear down a line
+// opened a millisecond earlier, so a leave only counts once this line has
+// actually been given focus. Observed in a nested sway: open, click away,
+// open again, and the second line vanished the instant it appeared.
+func (g *Ghost) onKeyboardFocus(focused bool) {
+	g.inputMu.Lock()
+	open := g.input.open
+	if focused {
+		g.input.focused = true
+	}
+	stale := !focused && !g.input.focused
+	g.inputMu.Unlock()
+
+	if !open || focused {
+		return
+	}
+	if stale {
+		g.log.Debug(hlog.Input, "ignoring a keyboard leave for the previous line")
+		return
+	}
+	g.closeInput()
 }
 
 // takeKeyboard asks the compositor for (or gives up) keyboard focus. The

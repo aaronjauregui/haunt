@@ -159,3 +159,38 @@ func TestLosingFocusClosesTheLine(t *testing.T) {
 	// Closing twice is what happens when focus loss and a click race.
 	g.closeInput()
 }
+
+// A line closed and reopened quickly must survive the compositor's
+// paperwork. Closing one releases keyboard interactivity, which makes the
+// compositor send a leave; if the user has already right-clicked for the
+// next line by the time it arrives, acting on it tears down a line that was
+// opened a moment ago. Found by hand in a nested sway — open, click away,
+// open again, and the second line vanished the instant it appeared.
+func TestStaleKeyboardLeaveDoesNotCloseTheNextLine(t *testing.T) {
+	g, _ := typingGhost(t)
+
+	// A line, focused and then abandoned the ordinary way.
+	g.openInput()
+	g.onKeyboardFocus(true)
+	g.onKeyboardFocus(false)
+	if g.inputOpen() {
+		t.Fatal("losing the keyboard left the line open")
+	}
+
+	// The next line, opened before the previous one's leave lands.
+	g.openInput()
+	if !g.inputOpen() {
+		t.Fatal("the second line did not open")
+	}
+	g.onKeyboardFocus(false) // the straggler
+	if !g.inputOpen() {
+		t.Error("a leave meant for the previous line closed this one")
+	}
+
+	// And once this line really has the keyboard, losing it still closes.
+	g.onKeyboardFocus(true)
+	g.onKeyboardFocus(false)
+	if g.inputOpen() {
+		t.Error("the line survived losing focus it actually held")
+	}
+}

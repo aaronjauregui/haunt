@@ -379,14 +379,10 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	// quip on being poked must not be traded away for an input box.
 	g.surface.OnRightClick = g.openInput
 	g.surface.OnKey = g.onKey
-	g.surface.OnKeyboardFocus = func(focused bool) {
-		if !focused {
-			// The compositor gave the keyboard to something else: the
-			// user's attention has moved on, so the half-typed line goes
-			// with it.
-			g.closeInput()
-		}
-	}
+	// The compositor giving the keyboard away means the user's attention
+	// has moved on, so the half-typed line goes with it — but only if the
+	// line ever had focus in the first place (see onKeyboardFocus).
+	g.surface.OnKeyboardFocus = g.onKeyboardFocus
 	g.surface.OnDragEnd = func(x, y int) {
 		g.publish(proto.Event{Type: proto.EventDragEnd, X: x, Y: y, Region: g.shell.RegionAt(x, y)})
 		// Dragging is how a person says where they want it, so that is
