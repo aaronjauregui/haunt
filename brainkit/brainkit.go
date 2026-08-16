@@ -86,6 +86,16 @@ func (em *Emitter) Chat(text string) {
 	em.emit(Intent{Type: proto.IntentChat, Text: text})
 }
 
+// ChatWaiting is Chat with something to say while the model thinks. The
+// driver shows a waiting indicator of its own after half a second — every
+// ghost gets that, whether or not its author considered slow backends —
+// and puts these words beside it. "Thinking…" in one ghost's voice is
+// "hold on, hold on" in another's, which is why the words come from here
+// and the dots do not.
+func (em *Emitter) ChatWaiting(text, waiting string) {
+	em.emit(Intent{Type: proto.IntentChat, Text: text, Wait: waiting})
+}
+
 // Ask is Chat without the balloon: the reply never reaches the user and is
 // kept out of conversation history, arriving only as an ai_reply event whose
 // Tag is the tag given here. Use it to put the LLM to work inside the brain —
@@ -115,10 +125,22 @@ func (em *Emitter) Imagine(prompt string) {
 	em.emit(Intent{Type: proto.IntentImagine, Text: prompt})
 }
 
+// ImagineWaiting is Imagine with something to say while the picture is
+// being made — usually a longer wait than a reply, and on a local backend
+// a wait with the whole GPU busy behind it.
+func (em *Emitter) ImagineWaiting(prompt, waiting string) {
+	em.emit(Intent{Type: proto.IntentImagine, Text: prompt, Wait: waiting})
+}
+
 // ImagineFresh is Imagine that ignores the cache, so a repeated prompt
 // produces a new image — the "draw that again" gesture.
 func (em *Emitter) ImagineFresh(prompt string) {
 	em.emit(Intent{Type: proto.IntentImagine, Text: prompt, Fresh: true})
+}
+
+// ImagineFreshWaiting is ImagineFresh with words for the wait.
+func (em *Emitter) ImagineFreshWaiting(prompt, waiting string) {
+	em.emit(Intent{Type: proto.IntentImagine, Text: prompt, Fresh: true, Wait: waiting})
 }
 
 // SetExpression wears one of the poses the ghost's shell declares — the

@@ -132,6 +132,12 @@ type Intent struct {
 	// Fresh skips the generation cache for IntentImagine, so asking again
 	// for the same prompt produces a different image.
 	Fresh bool `json:"fresh,omitempty"`
+	// Wait is what the ghost says while an IntentChat or IntentImagine is
+	// still being answered — "thinking…", "let me look that up". The driver
+	// draws the waiting indicator itself, on its own delay, so a brain that
+	// supplies nothing still shows one; this is the character's words for
+	// it, which are the brain's business and nobody else's.
+	Wait string `json:"wait,omitempty"`
 }
 
 // EncodeEvents marshals events one-per-line (JSONL) for recordings.

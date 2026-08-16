@@ -237,6 +237,90 @@ func (r *Renderer) RenderInput(text string, caretOn bool) *sprite.Sprite {
 	return &sprite.Sprite{Img: img}
 }
 
+// WaitFrames is how many distinct frames RenderWaiting cycles through.
+const WaitFrames = 4
+
+// RenderWaiting paints the "still working on it" indicator: three dots with
+// the lit one travelling, and the ghost's own words for waiting beside them
+// when its brain supplied any.
+//
+// The dots are the driver's, deliberately — every ghost gets a signal that
+// it is thinking rather than broken, whether or not its author thought
+// about slow backends. The text is the brain's, because "thinking…" in one
+// ghost's voice is "hold on, hold on" in another's.
+//
+// The panel is a fixed size for a given text, so successive frames can be
+// written into the buffer the compositor already holds (SpriteSurface.Redraw)
+// instead of destroying and recreating a surface several times a second,
+// which is visible as flicker. Same reasoning as the input line.
+func (r *Renderer) RenderWaiting(text string, frame int) *sprite.Sprite {
+	t := r.theme
+	metrics := r.face.Metrics()
+	lineHeight := (metrics.Ascent + metrics.Descent).Ceil() + 2
+
+	// Dots sized off the font, so the indicator scales with everything else.
+	dot := max(lineHeight/5, 2)
+	gap := dot
+	dotsW := 3*dot + 2*gap
+
+	line := strings.TrimSpace(text)
+	textW := 0
+	if line != "" {
+		// One line only: a waiting indicator that wraps to a paragraph is a
+		// balloon, and the balloon is what we are waiting for.
+		for font.MeasureString(r.face, line).Ceil() > t.MaxWidth-2*t.Padding-dotsW-gap*2 && len(line) > 1 {
+			_, size := utf8.DecodeLastRuneInString(line)
+			line = line[:len(line)-size]
+		}
+		textW = font.MeasureString(r.face, line).Ceil() + gap*2
+	}
+
+	w := t.Padding*2 + dotsW + textW
+	h := t.Padding*2 + lineHeight
+	img := image.NewNRGBA(image.Rect(0, 0, w, h))
+	paintPanel(img, t)
+
+	if line != "" {
+		d := &font.Drawer{
+			Dst:  img,
+			Src:  image.NewUniform(t.Text),
+			Face: r.face,
+			Dot:  fixed.P(t.Padding, t.Padding+metrics.Ascent.Ceil()),
+		}
+		d.DrawString(line)
+	}
+
+	// The lit dot travels; frame 3 lights none, so the cycle reads as a
+	// pulse rather than a wheel.
+	cy := h / 2
+	x := w - t.Padding - dotsW
+	for i := 0; i < 3; i++ {
+		c := t.Text
+		if i != frame {
+			c.A = c.A / 3
+		}
+		fillDot(img, x+dot/2, cy, dot/2, c)
+		x += dot + gap
+	}
+	return &sprite.Sprite{Img: img}
+}
+
+// fillDot paints a filled circle, which is small enough that the naive loop
+// is the whole of the algorithm.
+func fillDot(img *image.NRGBA, cx, cy, rad int, c color.NRGBA) {
+	if rad < 1 {
+		rad = 1
+	}
+	for y := cy - rad; y <= cy+rad; y++ {
+		for x := cx - rad; x <= cx+rad; x++ {
+			dx, dy := x-cx, y-cy
+			if dx*dx+dy*dy <= rad*rad {
+				img.SetNRGBA(x, y, c)
+			}
+		}
+	}
+}
+
 // RenderImage paints an image inside a balloon panel, scaled down to fit
 // MaxWidth if needed (nearest-neighbor; panels are small).
 func (r *Renderer) RenderImage(src image.Image) *sprite.Sprite {

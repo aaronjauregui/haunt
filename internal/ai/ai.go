@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 
@@ -36,6 +37,15 @@ type Config struct {
 	// badly enough to be worse than the word table, so the default stays
 	// free and this is opt-in.
 	ExpressionInference string `toml:"expression_inference"`
+
+	// FirstTokenTimeout is how long a streaming chat may go without a
+	// single token before the driver gives up on it, in seconds (default
+	// 30). The deadline is on the first token rather than the whole reply:
+	// a long answer arriving steadily is a backend working, while silence
+	// is a backend that has wedged — and the ghost answers one request at a
+	// time, so waiting out an HTTP timeout costs it every request behind
+	// this one.
+	FirstTokenTimeout int `toml:"first_token_timeout"`
 
 	// LogPrompts dumps every request this layer sends — the full message
 	// array, the resolved image parameters — to the driver log. Off by
@@ -138,6 +148,12 @@ const (
 	defaultLLMPerHour   = 120
 	defaultImagePerHour = 12
 	defaultEmbedPerHour = 600
+
+	// defaultFirstTokenTimeout is generous enough for a local model being
+	// loaded from disk on the first request of the day, and short enough
+	// that a backend which will never answer is noticed while the person
+	// who asked is still there.
+	defaultFirstTokenTimeout = 30 * time.Second
 )
 
 // LoadConfig reads the [ai] section of the user config file.
@@ -298,6 +314,14 @@ func (s *Service) visionBaseURL() string {
 		return s.cfg.Vision.BaseURL
 	}
 	return s.cfg.LLM.BaseURL
+}
+
+// FirstTokenTimeout is how long to wait for a streaming reply to begin.
+func (s *Service) FirstTokenTimeout() time.Duration {
+	if s.cfg.FirstTokenTimeout > 0 {
+		return time.Duration(s.cfg.FirstTokenTimeout) * time.Second
+	}
+	return defaultFirstTokenTimeout
 }
 
 // LLMEnabled reports whether the user configured an LLM backend.

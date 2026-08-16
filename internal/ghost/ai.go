@@ -13,6 +13,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/aaronjauregui/haunt/internal/ai"
@@ -81,16 +83,49 @@ func (g *Ghost) execChat(in proto.Intent, userDriven bool) {
 	msgs = append(msgs, ai.Message{Role: "user", Content: text})
 
 	// The mouth moves for exactly as long as words are arriving — the whole
-	// reason the trigger is called `talk` and not `animate`.
+	// reason the trigger is called `talk` and not `animate`. It starts on
+	// the first token, not on the request: a mouth moving through a wait
+	// with nothing being said is how a slow backend comes to look like a
+	// broken ghost.
+	defer g.stopTalking()
+
+	// Until that first token there is nothing on screen to say the ghost is
+	// working, so the driver says it (waiting.go). Not for silent calls:
+	// those are the brain talking to itself, and the user is owed no
+	// account of them.
+	var wait *waiter
 	if !silent {
-		g.startTalking()
-		defer g.stopTalking()
+		wait = g.startWaiting(in.Wait)
 	}
+	defer wait.Stop()
+
+	// A backend that accepts the connection and then never answers would
+	// otherwise hold this ghost's single AI slot until the HTTP client's
+	// own timeout, minutes later, with every later request queued behind
+	// it. The deadline is on the *first* token rather than the whole reply,
+	// because a long answer streaming steadily is working and a long
+	// silence is not.
+	ctx, cancel := context.WithCancel(g.sessionContext())
+	defer cancel()
+	var timedOut atomic.Bool
+	deadline := time.AfterFunc(g.firstTokenTimeout(), func() {
+		timedOut.Store(true)
+		cancel()
+	})
+	defer deadline.Stop()
 
 	// Stream into the balloon, re-rendering at a gentle pace.
 	var acc string
+	var started sync.Once
 	last := time.Now()
 	onDelta := func(delta string) {
+		started.Do(func() {
+			deadline.Stop()
+			// Take the indicator down before the first words land, or they
+			// arrive under a balloon full of dots.
+			wait.Stop()
+			g.startTalking()
+		})
 		acc += delta
 		if time.Since(last) >= 120*time.Millisecond {
 			last = time.Now()
@@ -98,11 +133,15 @@ func (g *Ghost) execChat(in proto.Intent, userDriven bool) {
 		}
 	}
 	if silent {
-		onDelta = func(string) {}
+		onDelta = func(string) { started.Do(func() { deadline.Stop() }) }
 	}
-	full, err := g.aiSvc.Chat(context.Background(), msgs, onDelta,
+	full, err := g.aiSvc.Chat(ctx, msgs, onDelta,
 		ai.Options{Silent: silent, Tag: tag})
 	if err != nil {
+		if timedOut.Load() {
+			err = fmt.Errorf("the model said nothing for %s — is the backend awake?",
+				g.firstTokenTimeout())
+		}
 		g.opts.Log(fmt.Sprintf("haunt: chat: %v", err))
 		g.publishAIError(err.Error(), tag)
 		return
@@ -189,7 +228,15 @@ func (g *Ghost) execImagine(in proto.Intent, userDriven bool) {
 	cachePath := filepath.Join(g.cacheDir, hex.EncodeToString(key[:8])+".png")
 	data, err := os.ReadFile(cachePath)
 	if err != nil {
-		if data, err = g.aiSvc.GenerateImage(context.Background(), prompt); err != nil {
+		// A cache miss means a real generation, which on a local backend is
+		// tens of seconds of nothing. The indicator is the driver's job
+		// rather than the brain's precisely so a brain that never thought
+		// about it still shows one; a cache hit skips it, because there is
+		// nothing to wait for.
+		wait := g.startWaiting(in.Wait)
+		data, err = g.aiSvc.GenerateImage(g.sessionContext(), prompt)
+		wait.Stop()
+		if err != nil {
 			g.opts.Log(fmt.Sprintf("haunt: imagine: %v", err))
 			g.publishAIError(err.Error(), tag)
 			return

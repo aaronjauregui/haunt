@@ -109,6 +109,10 @@ type Ghost struct {
 	blnMu   sync.Mutex
 	bln     *wlclient.SpriteSurface
 	blnRend *balloon.Renderer
+	// blnWaiting says the balloon on screen is the driver's waiting
+	// indicator (see waiting.go) rather than anything the ghost said, so it
+	// can be replaced without taking away something the user is reading.
+	blnWaiting bool
 
 	bus     *bus.Bus
 	brain   brain.Runner
@@ -142,6 +146,16 @@ type Ghost struct {
 
 	recordF *os.File
 	done    chan struct{}
+	// stopping closes when the session begins tearing down, before the
+	// Wayland connection goes away. Anything that paints or waits on a
+	// model watches it: drawing into a closing compositor connection, or
+	// sitting on a request whose answer nobody will see, is how an orderly
+	// shutdown turns into a hang.
+	stopping chan struct{}
+	// runCtx is the session's context, so in-flight AI requests are
+	// cancelled when the ghost is asked to stop rather than held until the
+	// model gets round to answering.
+	runCtx context.Context
 }
 
 // Run loads and starts the ghost in dir, blocking until ctx is cancelled or
@@ -159,6 +173,8 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		opts:     opts,
 		timers:   map[string]*time.Timer{},
 		done:     make(chan struct{}),
+		stopping: make(chan struct{}),
+		runCtx:   ctx,
 	}
 	defer close(g.done)
 
@@ -484,8 +500,13 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		runErr = fmt.Errorf("wayland session: %w", err)
 	}
 
-	// Orderly shutdown: tell the brain, stop timers, drain deliveries, then
-	// close the brain so the shutdown event is not lost to a closed pipe.
+	// Orderly shutdown: stop painting and waiting first, then tell the
+	// brain, stop timers, drain deliveries, and close the brain last so the
+	// shutdown event is not lost to a closed pipe. The order matters: a
+	// balloon being animated into a connection that is about to close, or
+	// an AI request nobody is left to hear, will otherwise hold the whole
+	// teardown open.
+	close(g.stopping)
 	g.publish(proto.Event{Type: proto.EventShutdown})
 	g.timersMu.Lock()
 	for _, t := range g.timers {
@@ -729,6 +750,7 @@ func (g *Ghost) showBalloonSprite(sp *sprite.Sprite) {
 	}
 	g.blnMu.Lock()
 	g.bln = bln
+	g.blnWaiting = false
 	g.blnMu.Unlock()
 }
 
@@ -763,6 +785,7 @@ func (g *Ghost) hideBalloon() {
 	g.blnMu.Lock()
 	bln := g.bln
 	g.bln = nil
+	g.blnWaiting = false
 	g.blnMu.Unlock()
 	if bln != nil {
 		bln.Destroy()

@@ -36,6 +36,14 @@ const rewriteTag = "imgprompt"
 // lookTag labels a look the user asked for out loud.
 const lookTag = "asked"
 
+// What this ghost says while it waits. The driver draws the indicator; the
+// words beside it are the character's, and these are deliberately plain —
+// a default brain has no idea whose voice it is speaking in.
+const (
+	thinkingText = "thinking…"
+	paintingText = "painting…"
+)
+
 const rewriteInstruction = `Rewrite this picture request as a prompt for an image generator: ` +
 	`a comma-separated list of concrete visual tags covering subject, setting, ` +
 	`lighting, composition and art style. Answer with the tags only — no ` +
@@ -162,8 +170,11 @@ func (b *Brain) OnEvent(e brainkit.Event, emit *brainkit.Emitter) {
 			b.lastPrompt = cleanPrompt(e.Text, b.lastRequest)
 			b.prompts[b.lastRequest] = b.lastPrompt
 			emit.Remember(promptKeyPrefix+b.lastRequest, b.lastPrompt)
-			emit.Say("Painting…")
-			emit.Imagine(b.lastPrompt)
+			// Out of the way first: the driver's waiting indicator gives
+			// precedence to a balloon already on screen, so leaving
+			// "Composing…" up would leave it up for the whole generation.
+			emit.HideSay()
+			emit.ImagineWaiting(b.lastPrompt, paintingText)
 			return
 		}
 		// The driver already streamed it to the balloon; linger a while.
@@ -176,8 +187,8 @@ func (b *Brain) OnEvent(e brainkit.Event, emit *brainkit.Emitter) {
 		if e.Tag == rewriteTag && b.lastRequest != "" {
 			// The rewrite is a nicety; paint the user's words instead.
 			b.lastPrompt = b.lastRequest
-			emit.Say("Painting…")
-			emit.Imagine(b.lastPrompt)
+			emit.HideSay()
+			emit.ImagineWaiting(b.lastPrompt, paintingText)
 			return
 		}
 		emit.Say("(that didn't work: " + e.Text + ")")
@@ -199,15 +210,13 @@ func (b *Brain) onMessage(text string, emit *brainkit.Emitter) {
 			emit.SetTimer("hush", 5000)
 			return
 		}
-		emit.Say("Again, differently…")
-		emit.ImagineFresh(b.lastPrompt)
+		emit.ImagineFreshWaiting(b.lastPrompt, "Again, differently…")
 		return
 	case "look":
 		// The answer comes back as ai_look and goes in the journal, not the
-		// balloon — but this time the user asked, so say that it happened.
-		emit.Say("Having a look…")
+		// balloon. The driver shows that a look is happening — looking is
+		// required to be visible — so there is nothing to say here.
 		emit.Look(lookTag, "")
-		emit.SetTimer("hush", 5000)
 		return
 	}
 	if request, ok := strings.CutPrefix(text, "draw "); ok {
@@ -217,8 +226,7 @@ func (b *Brain) onMessage(text string, emit *brainkit.Emitter) {
 		// a fresh generation.
 		if prompt, seen := b.prompts[request]; seen {
 			b.lastPrompt = prompt
-			emit.Say("Painting…")
-			emit.Imagine(prompt)
+			emit.ImagineWaiting(prompt, paintingText)
 			return
 		}
 		emit.Say("Composing…")
@@ -231,7 +239,7 @@ func (b *Brain) onMessage(text string, emit *brainkit.Emitter) {
 		emit.SetTimer("hush", 5000)
 		return
 	}
-	emit.Chat(text)
+	emit.ChatWaiting(text, thinkingText)
 }
 
 // nextPoke returns the next poke reply in rotation.

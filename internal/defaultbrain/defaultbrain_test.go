@@ -71,6 +71,35 @@ func TestBootGreetsAndChats(t *testing.T) {
 	}
 }
 
+// The driver draws the waiting indicator, but the words beside it are the
+// character's — so the brain has to supply them.
+func TestWaitingWordsRideAlongWithTheRequest(t *testing.T) {
+	intents := run(t, proto.Event{Type: proto.EventMessage, Text: "hello there"})
+	chats := only(intents, proto.IntentChat)
+	if len(chats) != 1 || chats[0].Wait == "" {
+		t.Errorf("chat = %+v, want something to say while the model thinks", chats)
+	}
+
+	intents = run(t,
+		proto.Event{Type: proto.EventBoot, KV: map[string]string{
+			promptKeyPrefix + "a sunset": "sunset, warm light",
+		}},
+		proto.Event{Type: proto.EventMessage, Text: "draw a sunset"},
+		proto.Event{Type: proto.EventMessage, Text: "draw again"},
+	)
+	for _, i := range only(intents, proto.IntentImagine) {
+		if i.Wait == "" {
+			t.Errorf("imagine = %+v, want something to say while it paints", i)
+		}
+	}
+	// And nothing said the old way — only the boot greeting. A plain
+	// balloon would sit there for its hush timer and, being something to
+	// read, would hold the indicator off for the whole generation.
+	if says := only(intents, proto.IntentSay); len(says) != 1 {
+		t.Errorf("drawing said %+v as ordinary balloons; only the greeting should be there", says)
+	}
+}
+
 // A poke is answered locally: a click must not cost a language-model call,
 // or clicking the ghost would be both slow and billable.
 func TestClickIsAnsweredWithoutTheModel(t *testing.T) {

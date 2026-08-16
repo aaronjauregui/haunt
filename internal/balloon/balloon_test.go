@@ -277,3 +277,59 @@ func TestScaledRendering(t *testing.T) {
 		t.Errorf("scale 0 became %v", zero.Scale())
 	}
 }
+
+// The dots animate several times a second, and the only way to do that
+// without flicker is to rewrite the pixels of the buffer the compositor
+// already holds — which requires every frame to be the same size. See
+// SpriteSurface.Redraw.
+func TestWaitingFramesAreTheSameSize(t *testing.T) {
+	r, err := NewRenderer(DefaultTheme())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"", "thinking…"} {
+		w0, h0 := r.RenderWaiting(text, 0).Size()
+		for f := 1; f < WaitFrames; f++ {
+			w, h := r.RenderWaiting(text, f).Size()
+			if w != w0 || h != h0 {
+				t.Errorf("text %q frame %d is %dx%d, frame 0 is %dx%d", text, f, w, h, w0, h0)
+			}
+		}
+	}
+}
+
+// Frames have to differ, or the indicator is a still picture of three dots
+// and says nothing about whether anything is still happening.
+func TestWaitingFramesDiffer(t *testing.T) {
+	r, err := NewRenderer(DefaultTheme())
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := r.RenderWaiting("", 0)
+	b := r.RenderWaiting("", 1)
+	same := true
+	for i := range a.Img.Pix {
+		if a.Img.Pix[i] != b.Img.Pix[i] {
+			same = false
+			break
+		}
+	}
+	if same {
+		t.Error("consecutive waiting frames are identical")
+	}
+}
+
+// The indicator stays one line: a wait that wraps to a paragraph is a
+// balloon, and the balloon is the thing being waited for.
+func TestWaitingStaysOneLine(t *testing.T) {
+	th := DefaultTheme()
+	r, err := NewRenderer(th)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, h := r.RenderWaiting(strings.Repeat("thinking very hard indeed ", 20), 0).Size()
+	_, short := r.RenderWaiting("x", 0).Size()
+	if h != short {
+		t.Errorf("a long wait line grew the panel to %d (short line is %d)", h, short)
+	}
+}
