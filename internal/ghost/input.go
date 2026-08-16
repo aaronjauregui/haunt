@@ -133,10 +133,11 @@ func (g *Ghost) drawInput() {
 	g.inputMu.Lock()
 	open, text, caret := g.input.open, g.input.editor.Text(), g.input.caret
 	g.inputMu.Unlock()
-	if !open || g.blnRend == nil {
+	rend := g.renderer()
+	if !open || rend == nil {
 		return
 	}
-	sp := g.blnRend.RenderInput(text, caret)
+	sp := rend.RenderInput(text, caret)
 
 	// Repaint the existing panel rather than swapping surfaces: an input
 	// line redraws on every keystroke and twice a second for the caret, and

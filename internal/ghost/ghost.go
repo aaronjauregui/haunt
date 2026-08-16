@@ -9,6 +9,7 @@ import (
 	"image"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -98,11 +99,16 @@ type Ghost struct {
 
 	anim          *animator
 	reducedMotion bool
-	blnRend       *balloon.Renderer
 	blnTheme      balloon.Theme
 
-	blnMu sync.Mutex
-	bln   *wlclient.SpriteSurface
+	// blnMu guards the balloon surface and the renderer drawing into it.
+	// The renderer is replaced whenever the ghost lands on a screen with a
+	// different scale — on the dispatch goroutine — while dialogue, the
+	// input line and page turns all render from goroutines of their own, so
+	// it is read through renderer() rather than off the field.
+	blnMu   sync.Mutex
+	bln     *wlclient.SpriteSurface
+	blnRend *balloon.Renderer
 
 	bus     *bus.Bus
 	brain   brain.Runner
@@ -233,6 +239,8 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	if g.blnRend, err = balloon.NewRendererScaled(theme, g.surface.Scale()); err != nil {
 		return err
 	}
+	// No lock needed here and nowhere else: this is before the dispatch
+	// goroutine exists.
 	// A ghost dragged to a 200% screen needs its text redrawn at that
 	// screen's resolution, not stretched from the old one.
 	g.surface.OnScaleChanged = func(scale float64) {
@@ -448,7 +456,10 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				dispatchErr <- fmt.Errorf("dispatch panic: %v", r)
+				// With the stack: a panic in here is reported as the
+				// session ending, and "dispatch panic: slice bounds out of
+				// range" on its own is not enough to find anything.
+				dispatchErr <- fmt.Errorf("dispatch panic: %v\n%s", r, debug.Stack())
 			}
 		}()
 		for {
@@ -671,6 +682,16 @@ func (g *Ghost) balloonPos() (int32, int32) {
 	return x + w + 12, y
 }
 
+// renderer returns the balloon renderer for the scale the ghost is
+// currently on. Read under the lock: the dispatch goroutine swaps it when
+// the compositor announces a different scale, and every other goroutine
+// that draws would otherwise be reading a field being written.
+func (g *Ghost) renderer() *balloon.Renderer {
+	g.blnMu.Lock()
+	defer g.blnMu.Unlock()
+	return g.blnRend
+}
+
 // showBalloon renders text and places it beside the sprite. During quiet
 // hours it drops the balloon; the driver enforces this, not the ghost.
 func (g *Ghost) showBalloon(text string) {
@@ -683,7 +704,7 @@ func (g *Ghost) showBalloon(text string) {
 		g.opts.Log("haunt: balloon suppressed (user is typing)")
 		return
 	}
-	g.showBalloonSprite(g.blnRend.Render(text))
+	g.showBalloonSprite(g.renderer().Render(text))
 }
 
 // showBalloonSprite puts a rendered panel on screen beside the ghost. It
@@ -696,7 +717,7 @@ func (g *Ghost) showBalloonSprite(sp *sprite.Sprite) {
 	}
 	x, y := g.balloonPos()
 	w, h := sp.Size()
-	lw, lh := g.blnRend.LogicalSize(w, h)
+	lw, lh := g.renderer().LogicalSize(w, h)
 	bln, err := g.app.CreateSpriteOpts(sp, x, y, wlclient.SurfaceOptions{
 		PassThrough: true,
 		LogicalW:    int32(lw),
@@ -721,7 +742,7 @@ func (g *Ghost) showImageBalloon(img image.Image) {
 		g.opts.Log("haunt: image balloon suppressed (user is typing)")
 		return
 	}
-	g.showBalloonSprite(g.blnRend.RenderImage(img))
+	g.showBalloonSprite(g.renderer().RenderImage(img))
 }
 
 // placeBalloon re-anchors the balloon to the sprite's current position.

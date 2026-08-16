@@ -33,7 +33,7 @@ func (g *Ghost) showPaged(text string) {
 		g.opts.Log("haunt: balloon suppressed (user is typing)")
 		return
 	}
-	sp, pages := g.blnRend.RenderPage(text, 0)
+	sp, pages := g.renderer().RenderPage(text, 0)
 
 	g.pageMu.Lock()
 	if pages > 1 {
@@ -68,7 +68,7 @@ func (g *Ghost) turnPage() bool {
 		g.hideBalloon()
 		return true
 	}
-	sp, _ := g.blnRend.RenderPage(text, page)
+	sp, _ := g.renderer().RenderPage(text, page)
 	g.showBalloonSprite(sp)
 	return true
 }
