@@ -32,10 +32,23 @@ model = "nomic-embed-text"
 backend = "comfyui"
 base_url = "http://localhost:8188"
 model = "your-checkpoint.safetensors"
+
+[ai.vision]                               # optional: it can look at a window
+model = "qwen2.5vl:7b"
 ```
 
+Any OpenAI-compatible endpoint works, which is nearly all of them; for a
+vendor that speaks its own format, point `base_url` at a router like
+LiteLLM. Cloud keys are named, not stored — set `api_key_env = "..."` and
+the driver reads that variable from its own environment.
+
 Everything AI is opt-in twice — the ghost asks for a capability, you grant
-it — and the driver holds the keys and the budgets, never the ghost.
+it — and the driver holds the keys and the budgets, never the ghost. That
+matters most for the two awareness capabilities: `window` lets a ghost see
+which application you have focused and its title, and `screen` lets it
+capture that window and show it to a vision model. Both are refused unless
+granted, never fire for apps on `[awareness] ignore` (password managers and
+the like, by default), and never run while something is fullscreen.
 
 ## Live with it
 
