@@ -45,6 +45,43 @@ var usLayout = map[uint32][2]rune{
 	KeySpace: {' ', ' '},
 }
 
+// scancodes is usLayout read backwards: character to the key that produces
+// it, and whether shift is held. Built from the same table so the two can
+// never disagree — which matters because the only user is the test harness,
+// typing at a ghost through a virtual keyboard to check that what comes out
+// the other end is what was typed.
+var scancodes = func() map[rune]struct {
+	code  uint32
+	shift bool
+} {
+	m := map[rune]struct {
+		code  uint32
+		shift bool
+	}{}
+	for code, pair := range usLayout {
+		if _, seen := m[pair[0]]; !seen {
+			m[pair[0]] = struct {
+				code  uint32
+				shift bool
+			}{code, false}
+		}
+		if _, seen := m[pair[1]]; !seen {
+			m[pair[1]] = struct {
+				code  uint32
+				shift bool
+			}{code, true}
+		}
+	}
+	return m
+}()
+
+// Scancode is Rune inverted: the key that produces r, and whether shift is
+// held to get it.
+func Scancode(r rune) (code uint32, shift bool, ok bool) {
+	k, ok := scancodes[r]
+	return k.code, k.shift, ok
+}
+
 // Rune returns the character a scancode produces, and whether it produces
 // one at all.
 func Rune(code uint32, shift bool) (rune, bool) {

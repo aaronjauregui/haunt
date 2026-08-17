@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="virtual_keyboard_unstable_v1">
+
+  <description summary="virtual keyboard protocol, as used by the test harness">
+    This describes zwp_virtual_keyboard_unstable_v1 well enough to generate a
+    client for it. It is used by internal/testenv to give the headless
+    compositor a keyboard: without one the test seat advertises no keyboard
+    capability at all, and nothing about typing at a ghost — or about
+    keyboard focus, which is where two real bugs have lived — can be
+    exercised under test.
+
+    Written for this repository rather than copied from wlr-protocols, which
+    is not available on an offline build machine, and deliberately minimal:
+    only what the harness sends. If the upstream file is ever vendored here,
+    prefer it, regenerate, and delete this note. The wire format is the same
+    either way — a mismatch would be rejected by the compositor rather than
+    silently mis-parsed, which is what makes writing this out safe.
+  </description>
+
+  <interface name="zwp_virtual_keyboard_v1" version="1">
+    <description summary="virtual keyboard">
+      A virtual keyboard device, whose key events are handled by the
+      compositor as though they came from a physical keyboard on the seat.
+
+      The keymap must be sent before any key event, or the compositor raises
+      a protocol error.
+    </description>
+
+    <enum name="error">
+      <entry name="no_keymap" value="0" summary="no keymap was set"/>
+    </enum>
+
+    <request name="keymap">
+      <description summary="keyboard mapping">
+        Provide a file descriptor to the compositor which can be
+        memory-mapped to hold the keymap description. Format is one of the
+        wl_keyboard keymap formats: 1 is xkb_v1.
+      </description>
+      <arg name="format" type="uint" summary="keymap format"/>
+      <arg name="fd" type="fd" summary="keymap file descriptor"/>
+      <arg name="size" type="uint" summary="keymap size, in bytes"/>
+    </request>
+
+    <request name="key">
+      <description summary="key event">
+        A key was pressed or released. Keycodes are raw evdev codes, not
+        offset by 8 as in the X11 convention, and state is one of the
+        wl_keyboard key states: 0 released, 1 pressed.
+      </description>
+      <arg name="time" type="uint" summary="timestamp with millisecond granularity"/>
+      <arg name="key" type="uint" summary="key that produced the event"/>
+      <arg name="state" type="uint" summary="physical state of the key"/>
+    </request>
+
+    <request name="modifiers">
+      <description summary="modifier state">
+        Notify the compositor that the modifier and/or group state has
+        changed, in the same terms wl_keyboard uses.
+      </description>
+      <arg name="mods_depressed" type="uint" summary="depressed modifiers"/>
+      <arg name="mods_latched" type="uint" summary="latched modifiers"/>
+      <arg name="mods_locked" type="uint" summary="locked modifiers"/>
+      <arg name="group" type="uint" summary="keyboard layout"/>
+    </request>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the virtual keyboard keyboard object"/>
+    </request>
+  </interface>
+
+  <interface name="zwp_virtual_keyboard_manager_v1" version="1">
+    <description summary="virtual keyboard manager">
+      A global interface for creating virtual keyboards on a seat.
+    </description>
+
+    <enum name="error">
+      <entry name="unauthorized" value="0" summary="client not authorized to use the interface"/>
+    </enum>
+
+    <request name="create_virtual_keyboard">
+      <description summary="create a new virtual keyboard">
+        Creates a new virtual keyboard associated with the seat.
+      </description>
+      <arg name="seat" type="object" interface="wl_seat"/>
+      <arg name="id" type="new_id" interface="zwp_virtual_keyboard_v1"/>
+    </request>
+  </interface>
+</protocol>
