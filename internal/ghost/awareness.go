@@ -48,6 +48,14 @@ func (g *Ghost) watchWindows() {
 		case <-t.C:
 		}
 
+		// Checked every poll rather than once: a person who withdraws the
+		// window capability while the ghost is running means now, and this
+		// is the loop that would otherwise keep looking.
+		if !g.capabilityActive("window") {
+			g.log.Info(hlog.Screen, "window awareness stopped: the capability was withdrawn")
+			return
+		}
+
 		win, err := g.desktop.ActiveWindow()
 		if err != nil {
 			if !complained {

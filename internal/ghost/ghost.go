@@ -418,7 +418,7 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		// Through g.publishExternal, not the bus directly: `haunt say` is a
 		// person addressing the ghost, and the reply must not be charged to
 		// the ghost's own initiative.
-		ctl, err := control.Listen(m.Ghost.Name, g.publishExternal, log)
+		ctl, err := control.Listen(m.Ghost.Name, g.publishFromControl, log)
 		if err != nil {
 			return err
 		}
@@ -537,6 +537,9 @@ func Run(ctx context.Context, dir string, opts Options) error {
 // capabilityActive reports whether a capability is both declared by the
 // manifest and granted by the user.
 func (g *Ghost) capabilityActive(cap string) bool {
+	if g.manifest == nil {
+		return false
+	}
 	declared := false
 	for _, c := range g.manifest.Ghost.Capabilities {
 		if c == cap {
@@ -581,6 +584,23 @@ func (g *Ghost) publishExternal(e proto.Event) error {
 		g.endResponding()
 	}
 	return g.bus.Publish(e)
+}
+
+// publishFromControl is the control socket's way in. The socket is opened
+// once, at startup, but the permission it stands for can be withdrawn while
+// the ghost is running — so the capability is checked per event, and
+// `haunt say` is told why it was refused rather than left wondering.
+//
+// The asymmetry is deliberate and worth knowing: revoking takes effect at
+// once, while a ghost that *started* with `message` withheld has no socket
+// to open and needs a restart to gain it. Everything else — llm, imagine,
+// window, screen, tell — is checked at the moment it is used and so changes
+// in both directions immediately.
+func (g *Ghost) publishFromControl(e proto.Event) error {
+	if !g.capabilityActive("message") {
+		return fmt.Errorf("the message capability is not granted")
+	}
+	return g.publishExternal(e)
 }
 
 // execIntent runs on the brain's intent-reader goroutine. Wayland calls are

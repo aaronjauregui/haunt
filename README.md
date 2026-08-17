@@ -50,6 +50,12 @@ capture that window and show it to a vision model. Both are refused unless
 granted, never fire for apps on `[awareness] ignore` (password managers and
 the like, by default), and never run while something is fullscreen.
 
+`haunt perms` shows what a ghost asked for and what it has, and takes it
+back:
+
+    haunt perms                 # what it asked for, what it has
+    haunt perms revoke window   # stops within seconds, no restart
+
 ## Live with it
 
     make install-user
@@ -93,6 +99,7 @@ is cropped to what it covers so animation stays cheap.
 | `haunt dev <dir>` | run with hot reload |
 | `haunt say <text>` | talk to it from a script |
 | `haunt history` / `haunt journal` | what was said / what it chose to remember |
+| `haunt perms [grant\|revoke <cap>]` | what it may do — revocable while it runs |
 | `haunt shush` / `unshush` | quiet hours, now |
 | `haunt shell init <art.ora>` | build a shell from a layered drawing |
 | `haunt new`, `pack`, `install`, `ls`, `switch`, `rm` | authoring and packages |

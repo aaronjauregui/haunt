@@ -12,6 +12,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/aaronjauregui/haunt/internal/ghost"
@@ -34,6 +35,8 @@ func main() {
 		err = cmdNew(os.Args[2:])
 	case "shell":
 		err = cmdShell(os.Args[2:])
+	case "perms":
+		err = cmdPerms(os.Args[2:])
 	case "dev":
 		err = cmdDev(os.Args[2:])
 	case "say":
@@ -90,6 +93,7 @@ func usage() {
   haunt pack [-o FILE] <ghost-dir>
   haunt install [-yes] <file.haunt>
   haunt ls | rm <name> | switch <name>
+  haunt perms [name] | perms grant|revoke <capability> [name]
   haunt shush [duration] | unshush
   haunt journal [name | -state DIR]
   haunt history [-n N] [name | -state DIR]`)
@@ -125,6 +129,7 @@ func cmdRun(args []string) error {
 
 	// The target is a directory (dev mode: declared capabilities granted),
 	// or an installed ghost name / the current ghost (grants apply).
+	var watch *library.GrantWatch
 	target := fs.Arg(0)
 	dir := target
 	if info, err := os.Stat(target); target == "" || err != nil || !info.IsDir() {
@@ -137,14 +142,30 @@ func cmdRun(args []string) error {
 		if dir, err = library.PkgDir(name); err != nil {
 			return err
 		}
-		grants, err := library.LoadGrants(name)
+		// Watched rather than loaded once: `haunt perms revoke` must take
+		// effect on the ghost that is already running, and the capability
+		// check is per-intent already.
+		watch, err = library.Watch(name)
 		if err != nil {
 			return err
 		}
-		opts.Granted = grants.Granted
+		watch.OnChange = func(granted, revoked []string) {
+			if len(granted) > 0 {
+				logger.Info(hlog.Session, "granted: %s", strings.Join(granted, ", "))
+			}
+			if len(revoked) > 0 {
+				logger.Info(hlog.Session, "revoked: %s — refused from now on", strings.Join(revoked, ", "))
+			}
+		}
+		opts.Granted = watch.Granted
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if watch != nil {
+		// Followed in the background so a change is noticed while the ghost
+		// is idle, not at whatever moment it next checks something.
+		go watch.Follow(ctx.Done())
+	}
 	return ghost.Run(ctx, dir, opts)
 }
