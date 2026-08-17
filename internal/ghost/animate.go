@@ -123,7 +123,9 @@ func (g *Ghost) scheduleClip(c shell.Clip) {
 		return
 	}
 	wait := d[0] + time.Duration(g.anim.rng.Int63n(int64(d[1]-d[0])))
-	g.anim.pending[c.Name] = time.AfterFunc(wait, func() { g.playClip(c.Name) })
+	g.anim.pending[c.Name] = time.AfterFunc(wait, func() {
+		g.guard(hlog.Anim, "clip "+c.Name, func() { g.playClip(c.Name) })
+	})
 }
 
 // playClip starts (or restarts) a clip by name.
@@ -173,7 +175,9 @@ func (g *Ghost) advanceClip(name string) {
 		if r.clip.Animates() && wake > sampleInterval {
 			wake = sampleInterval
 		}
-		r.timer = time.AfterFunc(wake, func() { g.advanceClip(name) })
+		r.timer = time.AfterFunc(wake, func() {
+			g.guard(hlog.Anim, "clip "+name, func() { g.advanceClip(name) })
+		})
 	}
 	trigger := r.clip.Trigger
 	g.anim.mu.Unlock()
@@ -191,7 +195,9 @@ func (g *Ghost) advanceClip(name string) {
 		trigger == shell.TriggerRarely
 	if idle && g.desktop != nil && g.desktop.Fullscreen() {
 		g.anim.mu.Lock()
-		g.anim.pending[name] = time.AfterFunc(15*time.Second, func() { g.playClip(name) })
+		g.anim.pending[name] = time.AfterFunc(15*time.Second, func() {
+			g.guard(hlog.Anim, "clip "+name, func() { g.playClip(name) })
+		})
 		g.anim.mu.Unlock()
 		return
 	}

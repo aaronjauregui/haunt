@@ -52,6 +52,7 @@ func (g *Ghost) execNote(text string) {
 	// cursor to one writer.
 	if g.memoryEnabled() {
 		go func() {
+			defer g.recoverPanic(hlog.Memory, "journalling")
 			g.aiMu.Lock()
 			defer g.aiMu.Unlock()
 			g.remember("note", text)

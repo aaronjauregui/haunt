@@ -24,9 +24,19 @@ type Bus struct {
 	recorder io.Writer
 	closed   bool
 
+	// recent is the last few events, kept for crash reports. A panic is
+	// only half a story without what the ghost was being asked to do at
+	// the time, and a recording is not always running.
+	recent []proto.Event
+
 	// now is replaceable for deterministic tests.
 	now func() time.Time
 }
+
+// recentKept is how many events the ring holds: enough to see the gesture
+// that led somewhere bad, short enough that dumping it is not its own
+// legibility problem.
+const recentKept = 12
 
 // New creates a bus. buffer is the consumer channel depth; events beyond it
 // block the publisher, which is the backpressure we want.
@@ -35,6 +45,13 @@ func New(buffer int) *Bus {
 		out: make(chan proto.Event, buffer),
 		now: time.Now,
 	}
+}
+
+// Recent returns the last few events published, oldest first.
+func (b *Bus) Recent() []proto.Event {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]proto.Event(nil), b.recent...)
 }
 
 // Events is the consumer side: the brain host reads from this.
@@ -59,6 +76,14 @@ func (b *Bus) Publish(e proto.Event) error {
 	b.seq++
 	e.Seq = b.seq
 	e.Time = b.now()
+	// The KV snapshot rides on the boot event and is the ghost's whole
+	// store; a crash report is not the place for it.
+	crumb := e
+	crumb.KV = nil
+	b.recent = append(b.recent, crumb)
+	if len(b.recent) > recentKept {
+		b.recent = b.recent[len(b.recent)-recentKept:]
+	}
 	rec := b.recorder
 	if rec != nil {
 		line, err := json.Marshal(e)

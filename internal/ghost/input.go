@@ -57,6 +57,7 @@ func (g *Ghost) openInput() {
 	// Blink on its own timer: a caret that only moves when you type looks
 	// like a frozen ghost.
 	go func() {
+		defer g.recoverPanic(hlog.Input, "the caret")
 		t := time.NewTicker(caretBlink)
 		defer t.Stop()
 		for {

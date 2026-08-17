@@ -148,7 +148,9 @@ type Ghost struct {
 	timersMu sync.Mutex
 	timers   map[string]*time.Timer
 
-	log     *hlog.Logger
+	log *hlog.Logger
+	// intents remembers the last one executed, for crash reports.
+	intents intentLog
 	recordF *os.File
 	done    chan struct{}
 	// stopping closes when the session begins tearing down, before the
@@ -400,6 +402,7 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	deliveryDone := make(chan struct{})
 	go func() {
 		defer close(deliveryDone)
+		defer g.recoverPanic(hlog.Brain, "event delivery")
 		for e := range g.bus.Events() {
 			if err := g.brain.Deliver(e); err != nil {
 				log.Error(hlog.Brain, "brain delivery failed: %v", err)
@@ -466,7 +469,7 @@ func Run(ctx context.Context, dir string, opts Options) error {
 
 	// Watching the focused window, if the ghost asked for that and the user
 	// agreed to it.
-	go g.watchWindows()
+	g.go_(hlog.Screen, "window awareness", g.watchWindows)
 
 	// Idle animation: blinking and the like, on the shell's own schedule.
 	g.startAnimation()
@@ -475,17 +478,17 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	// Repair the memory index if the embedding model changed since it was
 	// written. In the background: it is a long job on a large index, and
 	// the ghost should be talking meanwhile.
-	go g.reembedStale(ctx)
+	g.go_(hlog.Memory, "re-embedding", func() { g.reembedStale(ctx) })
 
 	// Wayland event loop until cancelled.
 	dispatchErr := make(chan error, 1)
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				// With the stack: a panic in here is reported as the
-				// session ending, and "dispatch panic: slice bounds out of
-				// range" on its own is not enough to find anything.
-				dispatchErr <- fmt.Errorf("dispatch panic: %v\n%s", r, debug.Stack())
+				// With the stack and the breadcrumbs: a panic in here ends
+				// the session, and "slice bounds out of range" on its own
+				// is not enough to find anything.
+				dispatchErr <- g.crashReport("the compositor dispatch loop", r, debug.Stack())
 			}
 		}()
 		for {
@@ -584,6 +587,10 @@ func (g *Ghost) publishExternal(e proto.Event) error {
 // safe here: go-wayland requests are locked writes to the socket, and the
 // dispatch loop only reads events.
 func (g *Ghost) execIntent(in proto.Intent) {
+	// Remembered before it runs, so a panic reports the intent that caused
+	// it rather than the one before.
+	g.noteIntent(in)
+	defer g.recoverPanic(hlog.Brain, "intent "+string(in.Type))
 	switch in.Type {
 	case proto.IntentSay:
 		// Speaking up unasked is the interruption the budget exists to
@@ -640,21 +647,21 @@ func (g *Ghost) execIntent(in proto.Intent) {
 		userDriven := g.respondingToUser()
 		// Own goroutine: a slow backend must not block other intents.
 		// aiMu keeps one request in flight per ghost.
-		go func() {
+		g.go_(hlog.AI, "chat", func() {
 			g.aiMu.Lock()
 			defer g.aiMu.Unlock()
 			g.execChat(in, userDriven)
-		}()
+		})
 	case proto.IntentImagine:
 		if !g.allowInitiative("imagine") {
 			return
 		}
 		userDriven := g.respondingToUser()
-		go func() {
+		g.go_(hlog.AI, "imagine", func() {
 			g.aiMu.Lock()
 			defer g.aiMu.Unlock()
 			g.execImagine(in, userDriven)
-		}()
+		})
 	case proto.IntentSetExpression:
 		g.setExpression(in.Name)
 	case proto.IntentPlayClip:
@@ -695,6 +702,7 @@ func (g *Ghost) setTimer(name string, d time.Duration) {
 		t.Stop()
 	}
 	g.timers[name] = time.AfterFunc(d, func() {
+		defer g.recoverPanic(hlog.Brain, "timer "+name)
 		g.timersMu.Lock()
 		delete(g.timers, name)
 		g.timersMu.Unlock()

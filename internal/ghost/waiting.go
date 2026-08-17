@@ -80,6 +80,7 @@ func (g *Ghost) startWaiting(text string) *waiter {
 	w := &waiter{stop: make(chan struct{}), done: make(chan struct{})}
 	go func() {
 		defer close(w.done)
+		defer g.recoverPanic(hlog.Balloon, "the waiting indicator")
 		select {
 		case <-w.stop:
 			return
