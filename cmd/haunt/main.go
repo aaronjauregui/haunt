@@ -2,6 +2,7 @@
 //
 //	haunt run <ghost-dir>   run a ghost (requires a layer-shell compositor)
 //	haunt new <name>        scaffold a new ghost project (art + persona)
+//	haunt shell init <ora>  build a shell from a layered drawing
 package main
 
 import (
@@ -31,6 +32,8 @@ func main() {
 		err = cmdRun(os.Args[2:])
 	case "new":
 		err = cmdNew(os.Args[2:])
+	case "shell":
+		err = cmdShell(os.Args[2:])
 	case "dev":
 		err = cmdDev(os.Args[2:])
 	case "say":
@@ -82,6 +85,7 @@ func usage() {
   haunt dev [-x N] [-y N] [-state DIR] <ghost-dir>
   haunt say [-ghost NAME] <text>
   haunt new [-brain] <name>
+  haunt shell init [-C dir] [-write] <art.ora>
   haunt keygen
   haunt pack [-o FILE] <ghost-dir>
   haunt install [-yes] <file.haunt>

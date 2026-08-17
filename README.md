@@ -75,6 +75,16 @@ with a Makefile that builds it to WASM. Brains are stdio programs — events
 in, intents out — and the same source builds as a sandboxed WASM module or
 a native process. `examples/whisper` is one.
 
+For the art, draw in layers and export a `.ora` (Krita, GIMP, MyPaint and
+Pencil2D all write it):
+
+    haunt shell init -write mycompanion.ora
+
+Groups become variants — an `eyes` group holding `open` and `closed` is a
+layer the ghost can blink with — the visible layer in each group is the
+default, hidden top-level layers are left out as sketches, and every layer
+is cropped to what it covers so animation stays cheap.
+
 ## Commands
 
 | | |
@@ -84,6 +94,7 @@ a native process. `examples/whisper` is one.
 | `haunt say <text>` | talk to it from a script |
 | `haunt history` / `haunt journal` | what was said / what it chose to remember |
 | `haunt shush` / `unshush` | quiet hours, now |
+| `haunt shell init <art.ora>` | build a shell from a layered drawing |
 | `haunt new`, `pack`, `install`, `ls`, `switch`, `rm` | authoring and packages |
 
 ## Building
