@@ -177,3 +177,48 @@ func TestUnansweredMenuExpires(t *testing.T) {
 		t.Error("the menu is still up after expiring")
 	}
 }
+
+// A question is one balloon among many, and anything else the ghost says
+// replaces it — so it has to be *closed*, not merely painted over. A menu
+// whose panel is gone but whose state is open holds the keyboard and waits
+// for an answer nobody can give. Found by taking a screenshot two seconds
+// after opening a menu and finding an empty rectangle: the brain's `hush`
+// timer had fired an ordinary hide_say.
+func TestSomethingElseSaidClosesTheQuestion(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		act  func(g *Ghost)
+	}{
+		{"hide_say", func(g *Ghost) { g.execIntent(proto.Intent{Type: proto.IntentHideSay}) }},
+		{"another line", func(g *Ghost) {
+			g.execIntent(proto.Intent{Type: proto.IntentSay, Text: "never mind"})
+		}},
+		{"a streamed reply", func(g *Ghost) { g.showBalloon("as I was saying") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g, b := choosingGhost(t)
+			offer(g)
+			// A person is in the conversation, so the ghost is allowed to
+			// say the thing that replaces the question (initiative is
+			// disabled in this test ghost, and a refused say would replace
+			// nothing).
+			g.markPrompted()
+			tc.act(g)
+
+			if g.choiceOpen() {
+				t.Error("the question is still listening with nothing on screen")
+			}
+			// And the brain is told, because from its side the question
+			// went unanswered.
+			var dismissed bool
+			for _, e := range drain(b) {
+				if e.Type == proto.EventChoice && e.Name == "" {
+					dismissed = true
+				}
+			}
+			if !dismissed {
+				t.Error("no dismissal reached the brain")
+			}
+		})
+	}
+}

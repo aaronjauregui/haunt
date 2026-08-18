@@ -635,6 +635,11 @@ func (g *Ghost) execIntent(in proto.Intent) {
 			g.showChoices(in)
 			return
 		}
+		// Anything else the ghost says replaces the question, so the
+		// question has to be closed properly rather than just painted
+		// over: a menu whose balloon is gone but whose state is open would
+		// hold the keyboard and wait for an answer nobody can give.
+		g.dismissChoices()
 		// Scripted dialogue gets the free tier of expression inference. A
 		// brain that also sets an expression runs after this and wins.
 		g.inferExpression(in.Text, false)
@@ -647,6 +652,10 @@ func (g *Ghost) execIntent(in proto.Intent) {
 	case proto.IntentHideSay:
 		g.stopTalking()
 		g.clearPaging()
+		// Including a question: a brain putting the balloon away has
+		// withdrawn whatever was in it. (This is how a stale `hush` timer
+		// used to make a menu invisible while it was still listening.)
+		g.dismissChoices()
 		g.hideBalloon()
 	case proto.IntentMove:
 		if err := g.surface.MoveTo(int32(in.X), int32(in.Y)); err != nil {
@@ -775,6 +784,10 @@ func (g *Ghost) showBalloon(text string) {
 		g.log.Debug(hlog.Balloon, "balloon suppressed (%s)", why)
 		return
 	}
+	// A reply arriving over a question closes the question: the balloon is
+	// one surface, and a menu whose panel has been painted over would still
+	// be holding the keyboard, waiting.
+	g.dismissChoices()
 	// Never paint over a line the user is in the middle of typing.
 	if g.inputOpen() {
 		g.log.Debug(hlog.Balloon, "balloon suppressed (user is typing)")
@@ -811,6 +824,8 @@ func (g *Ghost) showBalloonSprite(sp *sprite.Sprite) {
 
 // showImageBalloon renders an image into a balloon panel beside the sprite.
 func (g *Ghost) showImageBalloon(img image.Image) {
+	// A picture replaces a question, and replacing it means closing it.
+	g.dismissChoices()
 	if muted, why := g.quiet.Active(); muted {
 		g.log.Debug(hlog.Balloon, "image balloon suppressed (%s)", why)
 		return
