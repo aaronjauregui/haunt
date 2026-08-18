@@ -222,3 +222,40 @@ func TestSomethingElseSaidClosesTheQuestion(t *testing.T) {
 		})
 	}
 }
+
+// A line's lifetime is timed from when it appears, and a line that has
+// already been replaced is left alone. Both halves matter: the first is why
+// a slow reply is readable at all, the second is why an old line's timer
+// cannot erase a new one.
+func TestLingerHidesOnlyTheLineItWasFor(t *testing.T) {
+	g, _ := choosingGhost(t)
+	g.markPrompted()
+
+	// A line, and a hide scheduled for it.
+	g.execIntent(proto.Intent{Type: proto.IntentSay, Text: "first", LingerMS: 30})
+	first := g.balloonGen()
+
+	// Something newer arrives before the linger expires.
+	g.execIntent(proto.Intent{Type: proto.IntentSay, Text: "second"})
+	second := g.balloonGen()
+	if second == first {
+		t.Fatal("the second line did not replace the first")
+	}
+
+	time.Sleep(120 * time.Millisecond)
+	if got := g.balloonGen(); got != second {
+		t.Errorf("balloon generation = %d, want the second line (%d) still up: the "+
+			"first line's timer took away a line that was not its own", got, second)
+	}
+
+	// And a line whose own linger expires does go away.
+	g.execIntent(proto.Intent{Type: proto.IntentSay, Text: "third", LingerMS: 30})
+	gen := g.balloonGen()
+	deadline := time.Now().Add(2 * time.Second)
+	for g.balloonGen() == gen && g.blnShowing() {
+		if time.Now().After(deadline) {
+			t.Fatal("the line never lingered its way off screen")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}

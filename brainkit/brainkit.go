@@ -62,6 +62,21 @@ func (em *Emitter) Offer(tag, text string, options ...string) {
 	em.emit(Intent{Type: proto.IntentSay, Text: text, Tag: tag, Choices: options})
 }
 
+// SayFor shows text and puts it away after ms milliseconds — but only if it
+// is still the line on screen. Prefer this to Say plus a timer: a timer
+// scheduled to hide *this* line fires later and hides whatever has arrived
+// meanwhile, which on a slow model is the reply the person was waiting for.
+// The driver can time it correctly because it knows what is on screen.
+func (em *Emitter) SayFor(text string, ms int) {
+	em.emit(Intent{Type: proto.IntentSay, Text: text, LingerMS: ms})
+}
+
+// Send emits an intent directly, for combinations these helpers do not
+// cover — a chat that carries both waiting words and a linger, say. The
+// driver validates whatever arrives, so this is an escape hatch rather than
+// a back door.
+func (em *Emitter) Send(i Intent) { em.emit(i) }
+
 // HideSay dismisses the balloon.
 func (em *Emitter) HideSay() { em.emit(Intent{Type: proto.IntentHideSay}) }
 

@@ -159,6 +159,12 @@ func (g *Ghost) execChat(in proto.Intent, userDriven bool) {
 	// arrived; now that it is all here, show it from the beginning and let
 	// the reader page through the rest.
 	g.showPaged(full)
+	// Timed from when the reply *landed*, not from when it was asked for.
+	// A brain scheduling this itself cannot know how long the model took,
+	// which is how a slow answer used to vanish the instant it appeared.
+	if in.LingerMS > 0 {
+		g.lingerBalloon(g.balloonGen(), time.Duration(in.LingerMS)*time.Millisecond)
+	}
 
 	turns := g.manifest.Persona.HistoryTurns
 	if turns <= 0 {
@@ -253,6 +259,9 @@ func (g *Ghost) execImagine(in proto.Intent, userDriven bool) {
 		return
 	}
 	g.showImageBalloon(img)
+	if in.LingerMS > 0 {
+		g.lingerBalloon(g.balloonGen(), time.Duration(in.LingerMS)*time.Millisecond)
+	}
 	g.publishAIResult(proto.Event{Type: proto.EventAIImage, Name: cachePath, Tag: tag}, userDriven)
 }
 

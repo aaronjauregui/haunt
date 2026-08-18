@@ -113,6 +113,12 @@ type Ghost struct {
 	blnMu   sync.Mutex
 	bln     *wlclient.SpriteSurface
 	blnRend *balloon.Renderer
+	// blnGen counts balloons shown, so a scheduled "hide this line" can
+	// tell whether the line is still the one on screen. blnUp says whether
+	// anything is showing at all — both are bookkeeping, kept even when
+	// there is no compositor, because the linger logic acts on them.
+	blnGen uint64
+	blnUp  bool
 	// blnWaiting says the balloon on screen is the driver's waiting
 	// indicator (see waiting.go) rather than anything the ghost said, so it
 	// can be replaced without taking away something the user is reading.
@@ -649,6 +655,9 @@ func (g *Ghost) execIntent(in proto.Intent) {
 		// And the mouth moves for about as long as the line would take to
 		// say, since there is no stream to follow here.
 		g.talkFor(in.Text)
+		if in.LingerMS > 0 {
+			g.lingerBalloon(g.balloonGen(), time.Duration(in.LingerMS)*time.Millisecond)
+		}
 	case proto.IntentHideSay:
 		g.stopTalking()
 		g.clearPaging()
@@ -801,6 +810,12 @@ func (g *Ghost) showBalloon(text string) {
 // because the input line itself must appear regardless of both.
 func (g *Ghost) showBalloonSprite(sp *sprite.Sprite) {
 	g.hideBalloon()
+	// Counted before the surface exists: this is "which line is current",
+	// which is a fact about the conversation rather than about Wayland.
+	g.blnMu.Lock()
+	g.blnGen++
+	g.blnUp = true
+	g.blnMu.Unlock()
 	if g.surface == nil {
 		return // no compositor: tests drive balloons without a screen
 	}
@@ -820,6 +835,45 @@ func (g *Ghost) showBalloonSprite(sp *sprite.Sprite) {
 	g.bln = bln
 	g.blnWaiting = false
 	g.blnMu.Unlock()
+}
+
+// blnShowing reports whether a balloon is up. Without a compositor there is
+// no surface to create, so this is bookkeeping only — which is exactly what
+// the linger logic acts on.
+func (g *Ghost) blnShowing() bool {
+	g.blnMu.Lock()
+	defer g.blnMu.Unlock()
+	return g.blnUp
+}
+
+// balloonGen is which balloon is on screen, for callers that will want to
+// know later whether it is still the same one.
+func (g *Ghost) balloonGen() uint64 {
+	g.blnMu.Lock()
+	defer g.blnMu.Unlock()
+	return g.blnGen
+}
+
+// lingerBalloon takes the current balloon down after d — but only if it is
+// still the current balloon. A brain that scheduled its own hide would
+// otherwise erase whatever arrived in the meantime, which on a slow model
+// is exactly the reply the person was waiting for.
+func (g *Ghost) lingerBalloon(gen uint64, d time.Duration) {
+	time.AfterFunc(d, func() {
+		g.guard(hlog.Balloon, "the balloon's linger", func() {
+			select {
+			case <-g.done:
+				return
+			default:
+			}
+			if g.balloonGen() != gen {
+				g.log.Debug(hlog.Balloon, "linger expired on a line that had already been replaced")
+				return
+			}
+			g.log.Debug(hlog.Balloon, "line lingered its time; putting it away")
+			g.hideBalloon()
+		})
+	})
 }
 
 // showImageBalloon renders an image into a balloon panel beside the sprite.
@@ -856,6 +910,7 @@ func (g *Ghost) hideBalloon() {
 	bln := g.bln
 	g.bln = nil
 	g.blnWaiting = false
+	g.blnUp = false
 	g.blnMu.Unlock()
 	if bln != nil {
 		bln.Destroy()

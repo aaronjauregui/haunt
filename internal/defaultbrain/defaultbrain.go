@@ -58,6 +58,25 @@ const helpText = "Talk to me and I'll answer. `draw <something>` paints a pictur
 	"`draw again` repaints it differently, `remember <fact>` keeps something " +
 	"in mind, `look` glances at your screen."
 
+// How long each kind of line stays up. The driver times these from the
+// moment the line appears and drops them if something newer has arrived —
+// which a timer set by this brain could not do, since it cannot know how
+// long a model will take. That mattered: a `hush` scheduled beside a quip
+// used to hide the reply that landed thirty seconds later.
+// pokesPerMenu is how many interactions pass before the ghost offers to
+// explain itself again.
+const pokesPerMenu = 3
+
+const (
+	lingerGreeting = 6000
+	lingerPoke     = 4000
+	lingerHelp     = 15000
+	lingerNote     = 5000
+	lingerReply    = 12000
+	lingerImage    = 20000
+	lingerError    = 8000
+)
+
 // The menu, for the same reason: a person who has just met a ghost should
 // be able to find out what it does by clicking it, not by knowing to type
 // the word "help". This is also the one path through the built-in brain
@@ -102,14 +121,17 @@ type Brain struct {
 	// pokeN rotates the poke replies, so a second click is not the first
 	// one again.
 	pokeN int
-	// pokes counts them, so a person who keeps clicking is offered the menu
-	// rather than another quip.
+	// pokes counts interactions since the last menu, so a person who keeps
+	// clicking is offered one rather than another quip.
 	pokes int
 }
 
 // offerMenu asks what the person wants, in a balloon they can click or
 // answer with the number keys.
 func (b *Brain) offerMenu(emit *brainkit.Emitter) {
+	// Counted from here, so the next menu is three interactions away
+	// whatever happened before this one.
+	b.pokes = 0
 	options := []string{menuHelp, menuLook}
 	if b.lastPrompt != "" {
 		options = append(options, menuDrawMore)
@@ -125,13 +147,12 @@ func (b *Brain) onChoice(picked string, emit *brainkit.Emitter) {
 	case "":
 		return
 	case menuHelp:
-		emit.Say(helpText)
-		emit.SetTimer("hush", 15000)
+		emit.SayFor(helpText, lingerHelp)
 	case menuLook:
 		emit.Look(lookTag, "")
 	case menuDrawMore:
 		if b.lastPrompt != "" {
-			emit.ImagineFreshWaiting(b.lastPrompt, "Again, differently…")
+			emit.Send(brainkit.Intent{Type: "imagine", Text: b.lastPrompt, Fresh: true, Wait: "Again, differently…", LingerMS: lingerImage})
 		}
 	case menuNothing:
 		emit.HideSay()
@@ -160,28 +181,25 @@ func (b *Brain) OnEvent(e brainkit.Event, emit *brainkit.Emitter) {
 		// Boot opens only a couple of seconds of free speech, so the
 		// greeting is said rather than generated: a model that took ten
 		// seconds to answer would arrive after the ghost had gone quiet.
-		emit.Say("…oh, you're here.")
-		emit.SetTimer("hush", 6000)
-
-	case "timer":
-		if e.Name == "hush" {
-			emit.HideSay()
-		}
+		emit.SayFor("…oh, you're here.", lingerGreeting)
 
 	case "click":
-		// Poked twice in quick succession: the second one is someone
-		// looking for something rather than saying hello, so offer the menu
-		// instead of another quip. Clicking is the only gesture a new user
-		// is sure to try.
+		// Every third interaction offers the menu instead of a quip:
+		// clicking is the only gesture a new user is sure to try, and
+		// "type the word help" is a secret.
 		b.pokes++
-		if b.pokes%3 == 0 {
+		if b.pokes >= pokesPerMenu {
 			b.offerMenu(emit)
 			return
 		}
-		emit.Say(b.nextPoke())
-		emit.SetTimer("hush", 4000)
+		emit.SayFor(b.nextPoke(), lingerPoke)
 
 	case "choice":
+		// Dismissing a menu counts as an interaction too. The click that
+		// waves a menu away never reaches this brain — the driver spends it
+		// on the dismissal — so without this the rhythm drifts and a person
+		// clicking three times gets nothing.
+		b.pokes++
 		b.onChoice(e.Name, emit)
 
 	case "window":
@@ -232,25 +250,24 @@ func (b *Brain) OnEvent(e brainkit.Event, emit *brainkit.Emitter) {
 			// precedence to a balloon already on screen, so leaving
 			// "Composing…" up would leave it up for the whole generation.
 			emit.HideSay()
-			emit.ImagineWaiting(b.lastPrompt, paintingText)
+			emit.Send(brainkit.Intent{Type: "imagine", Text: b.lastPrompt, Wait: paintingText, LingerMS: lingerImage})
 			return
 		}
-		// The driver already streamed it to the balloon; linger a while.
-		emit.SetTimer("hush", 12000)
+		// The driver streamed it to the balloon and is timing how long it
+		// stays; nothing left to do.
 
 	case "ai_image":
-		emit.SetTimer("hush", 20000)
+		// Likewise: the linger rode along with the request.
 
 	case "ai_error":
 		if e.Tag == rewriteTag && b.lastRequest != "" {
 			// The rewrite is a nicety; paint the user's words instead.
 			b.lastPrompt = b.lastRequest
 			emit.HideSay()
-			emit.ImagineWaiting(b.lastPrompt, paintingText)
+			emit.Send(brainkit.Intent{Type: "imagine", Text: b.lastPrompt, Wait: paintingText, LingerMS: lingerImage})
 			return
 		}
-		emit.Say("(that didn't work: " + e.Text + ")")
-		emit.SetTimer("hush", 8000)
+		emit.SayFor("(that didn't work: "+e.Text+")", lingerError)
 	}
 }
 
@@ -263,11 +280,10 @@ func (b *Brain) onMessage(text string, emit *brainkit.Emitter) {
 		return
 	case "draw again", "again":
 		if b.lastPrompt == "" {
-			emit.Say("Draw what? Ask me for something first.")
-			emit.SetTimer("hush", 5000)
+			emit.SayFor("Draw what? Ask me for something first.", lingerNote)
 			return
 		}
-		emit.ImagineFreshWaiting(b.lastPrompt, "Again, differently…")
+		emit.Send(brainkit.Intent{Type: "imagine", Text: b.lastPrompt, Fresh: true, Wait: "Again, differently…", LingerMS: lingerImage})
 		return
 	case "look":
 		// The answer comes back as ai_look and goes in the journal, not the
@@ -283,7 +299,7 @@ func (b *Brain) onMessage(text string, emit *brainkit.Emitter) {
 		// a fresh generation.
 		if prompt, seen := b.prompts[request]; seen {
 			b.lastPrompt = prompt
-			emit.ImagineWaiting(prompt, paintingText)
+			emit.Send(brainkit.Intent{Type: "imagine", Text: prompt, Wait: paintingText, LingerMS: lingerImage})
 			return
 		}
 		emit.Say("Composing…")
@@ -292,11 +308,18 @@ func (b *Brain) onMessage(text string, emit *brainkit.Emitter) {
 	}
 	if fact, ok := strings.CutPrefix(text, "remember "); ok {
 		emit.Note(fact)
-		emit.Say("Noted, I'll keep that in mind.")
-		emit.SetTimer("hush", 5000)
+		emit.SayFor("Noted, I'll keep that in mind.", lingerNote)
 		return
 	}
-	emit.ChatWaiting(text, thinkingText)
+	// The reply's lifetime travels with the request, so the driver can time
+	// it from when the answer arrives rather than from when it was asked
+	// for.
+	emit.Send(brainkit.Intent{
+		Type:     "chat",
+		Text:     text,
+		Wait:     thinkingText,
+		LingerMS: lingerReply,
+	})
 }
 
 // nextPoke returns the next poke reply in rotation.

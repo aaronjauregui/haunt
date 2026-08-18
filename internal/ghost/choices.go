@@ -130,10 +130,16 @@ func (g *Ghost) drawChoices() {
 // when dragged: a menu that slid away as you reached for an option would be
 // a cruel joke.
 func (g *Ghost) showChoiceSprite(sp *sprite.Sprite) {
+	g.hideBalloon()
+	// A question is a line like any other as far as the balloon's
+	// bookkeeping goes: an older line's linger must not take it away.
+	g.blnMu.Lock()
+	g.blnGen++
+	g.blnUp = true
+	g.blnMu.Unlock()
 	if g.surface == nil || g.app == nil {
 		return // tests drive the state machine without a screen
 	}
-	g.hideBalloon()
 	x, y := g.balloonPos()
 	w, h := sp.Size()
 	lw, lh := g.renderer().LogicalSize(w, h)

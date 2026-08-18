@@ -341,3 +341,65 @@ func TestRepeatedPokesOfferTheMenu(t *testing.T) {
 		t.Errorf("the third poke was another quip: %+v", says[2])
 	}
 }
+
+// The rhythm has to survive a menu being waved away. The click that
+// dismisses one never reaches the brain — the driver spends it on the
+// dismissal — so counting only clicks made the menu arrive at unpredictable
+// moments, which from the outside looks like "it only ever worked once".
+func TestTheMenuComesBackAfterBeingDismissed(t *testing.T) {
+	click := proto.Event{Type: proto.EventClick}
+	dismiss := proto.Event{Type: proto.EventChoice, Tag: menuTag}
+
+	menus := func(intents []proto.Intent) int {
+		n := 0
+		for _, in := range only(intents, proto.IntentSay) {
+			if len(in.Choices) > 0 {
+				n++
+			}
+		}
+		return n
+	}
+
+	// Three clicks, a dismissal, then two more clicks: the second menu is
+	// three interactions after the first, counting the dismissal.
+	intents := run(t, click, click, click, dismiss, click, click)
+	if got := menus(intents); got != 2 {
+		t.Errorf("offered %d menus over two rounds of three interactions", got)
+	}
+
+	// And it keeps coming: no amount of clicking leaves a person stuck with
+	// quips forever.
+	var many []proto.Event
+	for i := 0; i < 4; i++ {
+		many = append(many, click, click, click, dismiss)
+	}
+	if got := menus(run(t, many...)); got < 3 {
+		t.Errorf("offered %d menus over twelve clicks and four dismissals", got)
+	}
+}
+
+// Lines carry their own lifetime now, so the driver can time them from when
+// they appear. A brain-side timer could not: it does not know how long a
+// model will take, which is how a slow reply used to be erased by a hush
+// scheduled beside a quip half a minute earlier.
+func TestLinesCarryTheirOwnLifetime(t *testing.T) {
+	intents := run(t,
+		proto.Event{Type: proto.EventBoot},
+		proto.Event{Type: proto.EventClick},
+		proto.Event{Type: proto.EventMessage, Text: "hello"},
+	)
+	for _, in := range intents {
+		if in.Type == proto.IntentSetTimer {
+			t.Errorf("the brain is still scheduling its own hide: %+v", in)
+		}
+	}
+	for _, in := range only(intents, proto.IntentSay) {
+		if len(in.Choices) == 0 && in.LingerMS == 0 {
+			t.Errorf("line %q stays up forever", in.Text)
+		}
+	}
+	chats := only(intents, proto.IntentChat)
+	if len(chats) != 1 || chats[0].LingerMS == 0 {
+		t.Errorf("chat = %+v, want the reply's lifetime riding along", chats)
+	}
+}

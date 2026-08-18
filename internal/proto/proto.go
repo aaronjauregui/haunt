@@ -148,6 +148,16 @@ type Intent struct {
 	// Fresh skips the generation cache for IntentImagine, so asking again
 	// for the same prompt produces a different image.
 	Fresh bool `json:"fresh,omitempty"`
+	// LingerMS hides what this intent puts on screen after the given delay,
+	// and only if it is still the thing on screen. It is the fix for a bug
+	// every brain would otherwise write: a timer set to hide *this* line
+	// fires later and hides whatever arrived meanwhile — which, when a
+	// model is slow, is the reply the person was waiting for.
+	//
+	// The driver can get this right because it knows what is on the screen
+	// and the brain does not. Zero means the line stays until something
+	// replaces it.
+	LingerMS int `json:"linger_ms,omitempty"`
 	// Wait is what the ghost says while an IntentChat or IntentImagine is
 	// still being answered — "thinking…", "let me look that up". The driver
 	// draws the waiting indicator itself, on its own delay, so a brain that
