@@ -79,6 +79,25 @@ func ollamaAnswers(t *testing.T, model string) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
+// ollamaEmbeds is the same question for the embeddings endpoint, which can
+// wedge on its own: observed answering chat in milliseconds while
+// /v1/embeddings never replied at all. A live memory test has nothing to
+// say about the code in that state, so it skips rather than spending its
+// timeout.
+func ollamaEmbeds(t *testing.T, model string) bool {
+	t.Helper()
+	body := fmt.Sprintf(`{"model":%q,"input":"hello"}`, model)
+	client := &http.Client{Timeout: 25 * time.Second}
+	resp, err := client.Post(ollamaURL+"/v1/embeddings", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Logf("ollama is not completing embedding requests: %v", err)
+		return false
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	return resp.StatusCode == http.StatusOK
+}
+
 // TestOllamaGhost runs wisp against a real local Ollama server: a live LLM
 // reply must stream back and reach the session record. Skips when Ollama is
 // unavailable, so CI without it stays green.
@@ -232,6 +251,9 @@ func TestOllamaMemory(t *testing.T) {
 	}
 	if !ollamaAnswers(t, model) {
 		t.Skip("local Ollama is not completing requests; skipping live memory test")
+	}
+	if !ollamaEmbeds(t, embedModel) {
+		t.Skip("ollama is not completing embedding requests; skipping live memory test")
 	}
 	c := testenv.StartT(t)
 

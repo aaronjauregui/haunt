@@ -48,13 +48,11 @@ func (g *Ghost) execNote(text string) {
 	// Notes age out of the recency window after 20 more; the memory index
 	// is how one from a year ago can still surface. Off the intent path —
 	// unlike chat, execNote runs inline, and an embedding backend that
-	// hangs must not take the intent loop with it. aiMu keeps the ring
-	// cursor to one writer.
+	// hangs must not take the intent loop with it. remember takes memory's
+	// own lock, which keeps the ring cursor to one writer.
 	if g.memoryEnabled() {
 		go func() {
 			defer g.recoverPanic(hlog.Memory, "journalling")
-			g.aiMu.Lock()
-			defer g.aiMu.Unlock()
 			g.remember("note", text)
 		}()
 	}

@@ -130,6 +130,21 @@ func (g *Ghost) memoryEnabled() bool {
 	return g.aiSvc != nil && g.aiSvc.EmbedEnabled() && g.capabilityActive("llm")
 }
 
+// embedTimeout bounds an embedding call. Memory is best-effort by design —
+// a missing embedding backend must never cost the ghost its voice — and a
+// backend that *hangs* rather than failing is the same thing by another
+// route: without a deadline, one wedged embeddings endpoint holds the
+// ghost's single AI slot and it goes quiet altogether. Observed against a
+// live Ollama whose chat endpoint answered in milliseconds while its
+// embeddings endpoint never answered at all.
+const embedTimeout = 10 * time.Second
+
+// embedContext bounds an embedding call and follows the session, so
+// shutting the ghost down does not wait for one either.
+func (g *Ghost) embedContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(g.sessionContext(), embedTimeout)
+}
+
 // remember embeds text and stores it. Failures are logged and swallowed:
 // memory is an enhancement, and a missing embedding backend must never cost
 // the ghost its voice.
@@ -144,7 +159,14 @@ func (g *Ghost) remember(kind, text string) {
 	if len(text) > maxMemoryChars {
 		text = text[:maxMemoryChars]
 	}
-	vec, err := g.aiSvc.Embed(context.Background(), text)
+	// One memory write at a time, in memory's own slot rather than the
+	// conversation's.
+	g.memMu.Lock()
+	defer g.memMu.Unlock()
+
+	ctx, cancel := g.embedContext()
+	defer cancel()
+	vec, err := g.aiSvc.Embed(ctx, text)
 	if err != nil {
 		g.log.Warn(hlog.Memory, "embedding failed: %v", err)
 		return
@@ -213,7 +235,8 @@ func (g *Ghost) loadMemories() []memory {
 // source text is stored alongside every vector precisely so this is
 // possible.
 //
-// Runs in the background after boot, one entry at a time under aiMu, so it
+// Runs in the background after boot, one entry at a time in memory's own
+// slot (memMu), so it
 // interleaves with conversation rather than blocking it. Failures leave the
 // entry stale for the next run to retry.
 func (g *Ghost) reembedStale(ctx context.Context) {
@@ -246,10 +269,11 @@ func (g *Ghost) reembedStale(ctx context.Context) {
 }
 
 // reembedOne rewrites a single entry's vector, reporting whether to
-// continue. aiMu is taken per entry so a long migration yields to chat.
+// continue. memMu is taken per entry, so a long migration interleaves with
+// conversation instead of standing in front of it.
 func (g *Ghost) reembedOne(ctx context.Context, m memory, model string) bool {
-	g.aiMu.Lock()
-	defer g.aiMu.Unlock()
+	g.memMu.Lock()
+	defer g.memMu.Unlock()
 
 	vec, err := g.aiSvc.Embed(ctx, m.Text)
 	if err != nil {
@@ -279,7 +303,9 @@ func (g *Ghost) recall(text string, skip map[string]bool) []memory {
 	if len(mems) == 0 {
 		return nil
 	}
-	vec, err := g.aiSvc.Embed(context.Background(), text)
+	ctx, cancel := g.embedContext()
+	defer cancel()
+	vec, err := g.aiSvc.Embed(ctx, text)
 	if err != nil {
 		g.log.Warn(hlog.Memory, "recall failed: %v", err)
 		return nil

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -125,4 +126,87 @@ system = "You are Wisp."
 func balloonVisibleAfter(t *testing.T, c *testenv.Compositor, dir string, x, y int) bool {
 	t.Helper()
 	return balloonInShot(shot(t, c, filepath.Join(dir, "reply-poll.png")), x, y)
+}
+
+// TestWedgedEmbeddingsDoNotSwallowTheReply: memory is an enhancement, and
+// an embedding backend that hangs rather than failing must not cost the
+// ghost its voice. It did: remembering an exchange happened before the
+// reply reached the brain, so a live Ollama whose chat endpoint answered in
+// milliseconds while its embeddings endpoint never answered at all left the
+// ghost apparently mute — the words were on screen, but no ai_reply event
+// ever arrived, and the next request queued behind the stuck one forever.
+func TestWedgedEmbeddingsDoNotSwallowTheReply(t *testing.T) {
+	c := testenv.StartT(t)
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		if strings.Contains(r.URL.Path, "embeddings") {
+			<-r.Context().Done() // the wedge
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"a reply\"}}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer backend.Close()
+
+	dir := t.TempDir()
+	rt := filepath.Join(dir, "run")
+	cfgDir := filepath.Join(dir, "config")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := fmt.Sprintf("[ai.llm]\nbase_url = %q\nmodel = \"fake\"\n\n[ai.embed]\nmodel = \"fake-embed\"\n", backend.URL+"/v1")
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	bin := filepath.Join(dir, "haunt")
+	build(t, bin, ".")
+	gDir := filepath.Join(dir, "wisp")
+	writeGhost(t, gDir, `[ghost]
+name = "wisp"
+capabilities = ["message", "llm"]
+
+[persona]
+system = "You are Wisp."
+`)
+	record := filepath.Join(dir, "session.jsonl")
+	cmd := exec.Command(bin, "run", "-x", "100", "-y", "100",
+		"-state", filepath.Join(dir, "state"), "-record", record, gDir)
+	cmd.Env = append(c.Env(), "HAUNT_RUNTIME_DIR="+rt, "HAUNT_CONFIG_DIR="+cfgDir, "HAUNT_DEBUG=memory")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr := &syncBuffer{}
+	cmd.Stderr = stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cmd.Process.Signal(syscall.SIGTERM)
+		cmd.Wait()
+		if t.Failed() {
+			t.Logf("ghost stderr:\n%s", stderr.String())
+		}
+	})
+	waitFor(t, stdout, "READY")
+
+	env := append(os.Environ(), "HAUNT_RUNTIME_DIR="+rt)
+	say := func(text string) {
+		t.Helper()
+		sc := exec.Command(bin, "say", "-ghost", "wisp", text)
+		sc.Env = env
+		if out, err := sc.CombinedOutput(); err != nil {
+			t.Fatalf("say %q: %v: %s", text, err, out)
+		}
+	}
+
+	// The reply reaches the brain even though the memory write is stuck.
+	say("first question")
+	waitRecordContains(t, record, `"type":"ai_reply"`)
+
+	// And the ghost is not deaf afterwards: the stuck embedding must not
+	// hold the one AI slot the ghost has.
+	say("second question")
+	waitRecordCount(t, record, `"type":"ai_reply"`, 2)
 }

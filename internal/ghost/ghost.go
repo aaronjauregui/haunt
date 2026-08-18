@@ -133,6 +133,11 @@ type Ghost struct {
 	aiSvc    *ai.Service
 	cacheDir string
 	aiMu     sync.Mutex // one AI request at a time per ghost
+	// memMu is memory's own slot. Embedding used to queue behind aiMu with
+	// conversation, which is the wrong way round: writing down what was
+	// just said must never delay saying the next thing, and a wedged
+	// embeddings endpoint must not make the ghost mute.
+	memMu sync.Mutex
 
 	// Typed input (see input.go).
 	inputMu sync.Mutex

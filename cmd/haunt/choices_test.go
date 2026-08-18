@@ -141,6 +141,117 @@ wasm = "brain.wasm"
 	})
 }
 
+// A second menu has to survive being opened. Asking for the keyboard makes
+// the compositor release whoever held it, and that leave arrives after the
+// new menu is up — which dismissed it within milliseconds, so from the
+// outside the menu simply stopped appearing after the first time.
+//
+// The earlier end-to-end test missed this because it only ever opened one
+// menu from a ghost that had never held the keyboard. This one opens three
+// in a row, which is what a person clicking at a ghost actually does.
+func TestMenusKeepComingBack(t *testing.T) {
+	c := testenv.StartT(t)
+	dir := t.TempDir()
+	rt := filepath.Join(dir, "run")
+	bin := filepath.Join(dir, "haunt")
+	build(t, bin, ".")
+
+	gDir := filepath.Join(dir, "chooser")
+	writeGhost(t, gDir, `[ghost]
+name = "chooser"
+capabilities = ["message"]
+
+[brain]
+wasm = "brain.wasm"
+`)
+	build(t, filepath.Join(gDir, "brain.wasm"), "./testdata/chooser", "GOOS=wasip1", "GOARCH=wasm")
+
+	// A keyboard on the seat is what makes the bug possible at all: no
+	// keyboard, no focus to lose, no stale leave.
+	kb, err := c.NewKeyboard()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer kb.Close()
+
+	const spriteX, spriteY = 200, 200
+	cmd := exec.Command(bin, "run", "-x", "200", "-y", "200", "-state", filepath.Join(dir, "state"), gDir)
+	cmd.Env = append(c.Env(), "HAUNT_RUNTIME_DIR="+rt, "HAUNT_DEBUG=balloon")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr := &syncBuffer{}
+	cmd.Stderr = stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cmd.Process.Signal(syscall.SIGTERM)
+		cmd.Wait()
+		if t.Failed() {
+			t.Logf("ghost stderr:\n%s", stderr.String())
+		}
+	})
+	waitFor(t, stdout, "READY")
+
+	env := append(os.Environ(), "HAUNT_RUNTIME_DIR="+rt)
+	ask := func() {
+		t.Helper()
+		sc := exec.Command(bin, "say", "-ghost", "chooser", "menu please")
+		sc.Env = env
+		if out, err := sc.CombinedOutput(); err != nil {
+			t.Fatalf("say: %v: %s", err, out)
+		}
+	}
+
+	// Three menus in a row, each answered from the keyboard. Every one of
+	// them has to still be on screen a moment after it was offered.
+	for i := 1; i <= 3; i++ {
+		before := strings.Count(stderr.String(), "choices offered")
+		ask()
+		deadline := time.Now().Add(10 * time.Second)
+		for strings.Count(stderr.String(), "choices offered") == before {
+			if time.Now().After(deadline) {
+				t.Fatalf("menu %d was never offered:\n%s", i, stderr.String())
+			}
+			wait100ms()
+		}
+
+		// The moment that used to kill it: the previous holder's release
+		// lands here.
+		time.Sleep(700 * time.Millisecond)
+		if !balloonVisible(t, c, dir, spriteX, spriteY) {
+			t.Fatalf("menu %d vanished as soon as it appeared:\n%s", i, stderr.String())
+		}
+		// Every menu here is answered, so a dismissal at all means one was
+		// taken away by something the user did not do — which is exactly
+		// the bug: a stale keyboard leave waving the menu off.
+		if got := strings.Count(stderr.String(), "choices dismissed"); got != 0 {
+			t.Fatalf("menu %d: something dismissed a menu nobody dismissed (%d so far):\n%s",
+				i, got, stderr.String())
+		}
+
+		// Answer it, which releases the keyboard and sets up the next one.
+		if err := kb.Key(2); err != nil { // the "1" key
+			t.Fatal(err)
+		}
+		waitRecordish(t, stderr, "choice taken", i)
+	}
+}
+
+// waitRecordish waits for the nth occurrence of a log line.
+func waitRecordish(t *testing.T, buf *syncBuffer, want string, n int) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for strings.Count(buf.String(), want) < n {
+		if time.Now().After(deadline) {
+			t.Fatalf("saw %d of %q, want %d:\n%s", strings.Count(buf.String(), want), want, n, buf.String())
+		}
+		wait100ms()
+	}
+}
+
 // The menu takes clicks, which no other balloon does — and it must not
 // wander off when one of them lands slightly askew.
 func TestMenuBalloonDoesNotDrag(t *testing.T) {

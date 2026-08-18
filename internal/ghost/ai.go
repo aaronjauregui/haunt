@@ -185,16 +185,26 @@ func (g *Ghost) execChat(in proto.Intent, userDriven bool) {
 	}
 	g.saveHistory(history)
 
+	// The brain hears the reply before memory is written. Remembering means
+	// embedding, which is a call to a backend that can be slow or wedged,
+	// and nothing about a *past* exchange should stand between a person and
+	// the answer they are waiting for. (It did: a live Ollama whose
+	// embeddings endpoint had stopped answering swallowed every reply.)
+	g.publishAIResult(proto.Event{Type: proto.EventAIReply, Text: full, Tag: tag}, userDriven)
+
 	// The exchange leaves the history window eventually; this is what
 	// outlives it. Labelled, because recall pastes it into a prompt months
 	// later where two bare lines would be ambiguous about who said what.
+	//
+	// On its own goroutine, and deliberately outside the lock this chat
+	// holds: writing down what was just said must not delay saying the next
+	// thing. The ghost held one AI slot for everything, so a slow
+	// embeddings endpoint used to make it mute for as long as it took.
+	note := "The user said: " + text + "\nYou answered: " + full
 	if in.SelfPrompt {
-		g.remember("exchange", "Unprompted, you said: "+full)
-	} else {
-		g.remember("exchange", "The user said: "+text+"\nYou answered: "+full)
+		note = "Unprompted, you said: " + full
 	}
-
-	g.publishAIResult(proto.Event{Type: proto.EventAIReply, Text: full, Tag: tag}, userDriven)
+	g.go_(hlog.Memory, "remembering an exchange", func() { g.remember("exchange", note) })
 }
 
 // execImagine handles an imagine intent: generate (or reuse from cache) an

@@ -111,11 +111,14 @@ func (g *Ghost) closeInput() {
 // actually been given focus. Observed in a nested sway: open, click away,
 // open again, and the second line vanished the instant it appeared.
 func (g *Ghost) onKeyboardFocus(focused bool) {
-	// A menu is dismissed by attention moving elsewhere, like a line. It
-	// has no stale-leave problem of its own: it is opened by the brain
-	// rather than by a click, so there is no rhythm of close-and-reopen.
-	if !focused && g.choiceOpen() {
-		g.dismissChoices()
+	// A menu is dismissed by attention moving elsewhere, like a line — and
+	// it has the same stale-leave problem, for the same reason: taking the
+	// keyboard makes the compositor release whoever held it before, and
+	// that leave can arrive after this menu is already up.
+	if g.choiceOpen() {
+		if g.choiceFocus(focused) {
+			g.dismissChoices()
+		}
 		return
 	}
 	g.inputMu.Lock()

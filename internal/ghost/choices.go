@@ -49,7 +49,11 @@ type choiceState struct {
 	// does not move it: a menu that reshuffled itself under the cursor
 	// would be a menu you cannot trust.
 	highlight int
-	surface   *wlclient.SpriteSurface
+	// focused says the compositor has given *this* menu the keyboard. A
+	// leave that arrives before the matching enter belongs to whatever held
+	// it before — see onKeyboardFocus.
+	focused bool
+	surface *wlclient.SpriteSurface
 	// expiry takes an unanswered question down after a while.
 	expiry *time.Timer
 }
@@ -78,6 +82,7 @@ func (g *Ghost) showChoices(in proto.Intent) {
 		options:   options,
 		tag:       in.Tag,
 		highlight: -1,
+		focused:   false,
 	}
 	g.choiceMu.Unlock()
 
@@ -295,6 +300,29 @@ func (g *Ghost) dismissChoices() {
 	g.closeChoices()
 	g.log.Debug(hlog.Balloon, "choices dismissed")
 	g.publishExternal(proto.Event{Type: proto.EventChoice, Tag: tag})
+}
+
+// choiceFocus records the compositor handing the keyboard to a menu or
+// taking it away, reporting whether a loss should end the menu.
+//
+// The subtlety is the same one the input line hit, and the comment that
+// used to be here claimed a menu could not hit it — wrongly. Opening a menu
+// asks for the keyboard, and the compositor answers a *previous* holder's
+// release with a leave that can arrive after the new menu is already up:
+// offered, leave, dismissed, enter, all inside a few milliseconds, which
+// from the outside is a menu that never appears at all. A leave only counts
+// once this menu has actually been given focus.
+func (g *Ghost) choiceFocus(focused bool) (endsIt bool) {
+	g.choiceMu.Lock()
+	defer g.choiceMu.Unlock()
+	if !g.choice.open {
+		return false
+	}
+	if focused {
+		g.choice.focused = true
+		return false
+	}
+	return g.choice.focused
 }
 
 // closeChoices takes the menu off screen and gives the keyboard back.

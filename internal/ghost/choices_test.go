@@ -259,3 +259,49 @@ func TestLingerHidesOnlyTheLineItWasFor(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// Opening a menu asks for the keyboard, which makes the compositor release
+// whoever had it — and that leave can arrive after the menu is already up.
+// Acting on it dismissed the menu inside a few milliseconds: offered,
+// leave, dismissed, enter, which from the outside is a menu that never
+// appears. Reported from a demo as "choices are dismissed as soon as they
+// are called", with the log to prove it.
+//
+// This is the input line's stale-leave bug a second time, in the one place
+// a comment had claimed it could not happen.
+func TestStaleKeyboardLeaveDoesNotDismissAMenu(t *testing.T) {
+	g, b := choosingGhost(t)
+
+	// A previous menu, answered: that is what leaves the keyboard to be
+	// released a moment later.
+	offer(g)
+	g.onKeyboardFocus(true)
+	g.answerChoice(0)
+
+	// The next menu, opened before the previous release has landed.
+	offer(g)
+	if !g.choiceOpen() {
+		t.Fatal("the second menu did not open")
+	}
+	g.onKeyboardFocus(false) // the straggler
+	if !g.choiceOpen() {
+		t.Fatal("a leave meant for the previous menu dismissed this one")
+	}
+
+	// Once this menu really has the keyboard, losing it still dismisses —
+	// attention moving elsewhere is a real answer.
+	g.onKeyboardFocus(true)
+	g.onKeyboardFocus(false)
+	if g.choiceOpen() {
+		t.Error("the menu survived losing focus it actually held")
+	}
+	var dismissed bool
+	for _, e := range drain(b) {
+		if e.Type == proto.EventChoice && e.Name == "" {
+			dismissed = true
+		}
+	}
+	if !dismissed {
+		t.Error("the brain was never told the question went unanswered")
+	}
+}
