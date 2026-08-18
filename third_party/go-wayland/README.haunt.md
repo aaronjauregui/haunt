@@ -15,8 +15,8 @@ rapidly clicking the sprite while the brain swaps balloons).
 
 ## The patch
 
-Only `client/context.go` and `client/request.go` are modified, marked with
-`HAUNT PATCH` comments:
+`client/context.go`, `client/request.go` and `client/client.go` are
+modified, marked with `HAUNT PATCH` comments:
 
 - `Context.objectsMu` (RWMutex) guards the proxy table in
   Register/Unregister/GetProxy/Dispatch. Dispatch looks up the sender under
@@ -24,6 +24,15 @@ Only `client/context.go` and `client/request.go` are modified, marked with
   requests that take the write lock.
 - `Context.writeMu` serializes `WriteMsg`, so concurrent request writers
   cannot interleave bytes on the socket.
+- Event decoding asserts object arguments with a comma-ok rather than a
+  plain type assertion (11 sites in `client.go`, all of the form
+  `e.X = ctx.GetProxy(id).(*T)`). An event can name an object the client
+  has already destroyed — the destroy request and the event crossed on the
+  wire — and the proxy table has forgotten it, so upstream panics on a nil
+  proxy. A client must not die because it tidied up a moment before the
+  server said something about it. Reproduced by a balloon that takes
+  pointer input: destroying it while the pointer is inside earns a
+  `wl_pointer.leave` for a dead surface, every time.
 
 Everything else is byte-for-byte upstream. If upstream ever gains its own
 locking, drop this directory and the replace directive.

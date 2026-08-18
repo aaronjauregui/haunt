@@ -58,6 +58,18 @@ const helpText = "Talk to me and I'll answer. `draw <something>` paints a pictur
 	"`draw again` repaints it differently, `remember <fact>` keeps something " +
 	"in mind, `look` glances at your screen."
 
+// The menu, for the same reason: a person who has just met a ghost should
+// be able to find out what it does by clicking it, not by knowing to type
+// the word "help". This is also the one path through the built-in brain
+// that needs no language model at all.
+const (
+	menuTag      = "menu"
+	menuHelp     = "What can you do?"
+	menuLook     = "Have a look at my screen"
+	menuDrawMore = "Draw that again"
+	menuNothing  = "Nothing, thanks"
+)
+
 // pokes are what the ghost says when poked. Answered locally and instantly:
 // a click is a small gesture, and billing a language model for every one of
 // them would be both slow and expensive.
@@ -90,6 +102,40 @@ type Brain struct {
 	// pokeN rotates the poke replies, so a second click is not the first
 	// one again.
 	pokeN int
+	// pokes counts them, so a person who keeps clicking is offered the menu
+	// rather than another quip.
+	pokes int
+}
+
+// offerMenu asks what the person wants, in a balloon they can click or
+// answer with the number keys.
+func (b *Brain) offerMenu(emit *brainkit.Emitter) {
+	options := []string{menuHelp, menuLook}
+	if b.lastPrompt != "" {
+		options = append(options, menuDrawMore)
+	}
+	options = append(options, menuNothing)
+	emit.Offer(menuTag, "What would you like?", options...)
+}
+
+// onChoice acts on a menu pick. An empty name is a dismissal — the user
+// turned away, which is an answer and not an error.
+func (b *Brain) onChoice(picked string, emit *brainkit.Emitter) {
+	switch picked {
+	case "":
+		return
+	case menuHelp:
+		emit.Say(helpText)
+		emit.SetTimer("hush", 15000)
+	case menuLook:
+		emit.Look(lookTag, "")
+	case menuDrawMore:
+		if b.lastPrompt != "" {
+			emit.ImagineFreshWaiting(b.lastPrompt, "Again, differently…")
+		}
+	case menuNothing:
+		emit.HideSay()
+	}
 }
 
 // New returns a fresh built-in brain.
@@ -123,8 +169,20 @@ func (b *Brain) OnEvent(e brainkit.Event, emit *brainkit.Emitter) {
 		}
 
 	case "click":
+		// Poked twice in quick succession: the second one is someone
+		// looking for something rather than saying hello, so offer the menu
+		// instead of another quip. Clicking is the only gesture a new user
+		// is sure to try.
+		b.pokes++
+		if b.pokes%3 == 0 {
+			b.offerMenu(emit)
+			return
+		}
 		emit.Say(b.nextPoke())
 		emit.SetTimer("hush", 4000)
+
+	case "choice":
+		b.onChoice(e.Name, emit)
 
 	case "window":
 		// Titles carry more than they look like they do — file names,
@@ -201,8 +259,7 @@ func (b *Brain) OnEvent(e brainkit.Event, emit *brainkit.Emitter) {
 func (b *Brain) onMessage(text string, emit *brainkit.Emitter) {
 	switch strings.ToLower(text) {
 	case "help", "?":
-		emit.Say(helpText)
-		emit.SetTimer("hush", 15000)
+		b.offerMenu(emit)
 		return
 	case "draw again", "again":
 		if b.lastPrompt == "" {

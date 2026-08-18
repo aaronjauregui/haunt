@@ -48,6 +48,20 @@ func (em *Emitter) emit(i Intent) {
 // Say shows text in the ghost's balloon.
 func (em *Emitter) Say(text string) { em.emit(Intent{Type: proto.IntentSay, Text: text}) }
 
+// Offer puts a question in the balloon: the text, then the options, which
+// the user can click or answer with the number keys. The pick comes back as
+// a `choice` event whose Name is the option and whose Tag is the one given
+// here; an empty Name means the question was dismissed, which a brain
+// waiting on an answer has to handle or it waits forever.
+//
+// Menus are how classic ukagaka ghosts are mostly operated. They are also
+// the only way to ask a question that needs no language model behind it,
+// and the only interaction in the driver that works without a mouse.
+// (Not to be confused with Ask, which puts the *model* to work silently.)
+func (em *Emitter) Offer(tag, text string, options ...string) {
+	em.emit(Intent{Type: proto.IntentSay, Text: text, Tag: tag, Choices: options})
+}
+
 // HideSay dismisses the balloon.
 func (em *Emitter) HideSay() { em.emit(Intent{Type: proto.IntentHideSay}) }
 

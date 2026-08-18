@@ -341,6 +341,9 @@ func (a *App) WatchIdle(timeoutMS uint32, onIdle, onResume func()) (bool, error)
 func (a *App) initPointer(p *client.Pointer) {
 	p.SetEnterHandler(func(e client.PointerEnterEvent) {
 		if e.Surface == nil {
+			return // an event about a surface we have already destroyed
+		}
+		if e.Surface == nil {
 			return
 		}
 		a.mu.Lock()
@@ -369,7 +372,7 @@ func (a *App) initPointer(p *client.Pointer) {
 		}
 		a.logEvent("motion local=(%.0f,%.0f) dragging=%v pos=(%d,%d)", e.SurfaceX, e.SurfaceY, s.dragging, s.X, s.Y)
 		s.pointerX, s.pointerY = e.SurfaceX, e.SurfaceY
-		if s.dragging {
+		if s.dragging && !s.opts.Fixed {
 			// Surface-local coordinates keep their pre-drag base while the
 			// surface moves under a stationary pointer (sway does not rebase
 			// mid-drag), so position from the drag origin, not incrementally.
@@ -416,13 +419,24 @@ func (a *App) initPointer(p *client.Pointer) {
 		const statePressed = 1
 		a.logEvent("button state=%d at local=(%.0f,%.0f) pos=(%d,%d)", e.State, s.pointerX, s.pointerY, s.X, s.Y)
 		if e.State == statePressed {
+			// A fixed surface still reports the click; it just does not
+			// travel with the pointer while the button is down. Dragging is
+			// tracked either way, because a click is a press and a release
+			// with no movement between them.
 			s.dragging = true
+			s.pressX, s.pressY = s.pointerX, s.pointerY
 			s.grabX, s.grabY = s.pointerX, s.pointerY
 			s.dragOriginX, s.dragOriginY = s.X, s.Y
 		} else {
 			wasDragging := s.dragging
 			s.dragging = false
 			moved := s.X != s.dragOriginX || s.Y != s.dragOriginY
+			if s.opts.Fixed {
+				// It never moved, so "moved" has to mean the pointer did.
+				// A few pixels of hand-shake is still a click.
+				const slop = 4
+				moved = abs(s.pointerX-s.pressX) > slop || abs(s.pointerY-s.pressY) > slop
+			}
 			switch {
 			case wasDragging && moved && s.OnDragEnd != nil:
 				x, y := int(s.X), int(s.Y)
@@ -451,6 +465,9 @@ func (a *App) initPointer(p *client.Pointer) {
 // the pointer ones, so a callback may issue requests without deadlocking.
 func (a *App) initKeyboard(k *client.Keyboard) {
 	k.SetEnterHandler(func(e client.KeyboardEnterEvent) {
+		if e.Surface == nil {
+			return
+		}
 		a.mu.Lock()
 		s := a.surfaces[e.Surface.ID()]
 		a.keyboardFocus = s
@@ -506,4 +523,12 @@ func (a *App) TakeKeyboard(s *SpriteSurface, want bool) error {
 		return err
 	}
 	return s.wlSurface.Commit()
+}
+
+// abs is math.Abs without the import, for pointer slop.
+func abs(f float64) float64 {
+	if f < 0 {
+		return -f
+	}
+	return f
 }

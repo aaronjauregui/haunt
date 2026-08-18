@@ -132,6 +132,10 @@ type Ghost struct {
 	inputMu sync.Mutex
 	input   inputState
 
+	// An open menu, if the brain asked a question (see choices.go).
+	choiceMu sync.Mutex
+	choice   choiceState
+
 	// awareness is what the ghost may notice about the screen.
 	awareness AwarenessConfig
 
@@ -370,6 +374,12 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		// clicking off an input box does anywhere else — and does it first,
 		// so the brain's reaction is not suppressed as "user is typing".
 		g.closeInput()
+		// Turning away from a question is an answer of its own, and the
+		// brain has to hear it or it waits forever.
+		if g.choiceOpen() {
+			g.dismissChoices()
+			return
+		}
 		// A balloon with more to read has first claim on the click.
 		if g.turnPage() {
 			return
@@ -616,6 +626,13 @@ func (g *Ghost) execIntent(in proto.Intent) {
 		// Speaking up unasked is the interruption the budget exists to
 		// ration, whether the words came from a model or a table.
 		if !g.allowInitiative("say") {
+			return
+		}
+		if len(in.Choices) > 0 {
+			// A question, not a remark: it stays up until it is answered,
+			// and the answer comes back as an event.
+			g.inferExpression(in.Text, false)
+			g.showChoices(in)
 			return
 		}
 		// Scripted dialogue gets the free tier of expression inference. A

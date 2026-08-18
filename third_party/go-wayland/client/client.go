@@ -2532,7 +2532,14 @@ func (i *DataDevice) Dispatch(opcode uint32, fd int, data []byte) {
 		}
 		var e DataDeviceDataOfferEvent
 		l := 0
-		e.Id = i.Context().GetProxy(Uint32(data[l : l+4])).(*DataOffer)
+		// HAUNT PATCH: a comma-ok assertion, not a plain one: an event may name an
+		// object we have already destroyed — the request and the event
+		// crossed on the wire — and the proxy table has forgotten it.
+		// Upstream panics here; a client must not die because it tidied
+		// up a moment before the server said something about it.
+		if p, ok := i.Context().GetProxy(Uint32(data[l : l+4])).(*DataOffer); ok {
+			e.Id = p
+		}
 		l += 4
 
 		i.dataOfferHandler(e)
@@ -2544,13 +2551,27 @@ func (i *DataDevice) Dispatch(opcode uint32, fd int, data []byte) {
 		l := 0
 		e.Serial = Uint32(data[l : l+4])
 		l += 4
-		e.Surface = i.Context().GetProxy(Uint32(data[l : l+4])).(*Surface)
+		// HAUNT PATCH: a comma-ok assertion, not a plain one: an event may name an
+		// object we have already destroyed — the request and the event
+		// crossed on the wire — and the proxy table has forgotten it.
+		// Upstream panics here; a client must not die because it tidied
+		// up a moment before the server said something about it.
+		if p, ok := i.Context().GetProxy(Uint32(data[l : l+4])).(*Surface); ok {
+			e.Surface = p
+		}
 		l += 4
 		e.X = Fixed(data[l : l+4])
 		l += 4
 		e.Y = Fixed(data[l : l+4])
 		l += 4
-		e.Id = i.Context().GetProxy(Uint32(data[l : l+4])).(*DataOffer)
+		// HAUNT PATCH: a comma-ok assertion, not a plain one: an event may name an
+		// object we have already destroyed — the request and the event
+		// crossed on the wire — and the proxy table has forgotten it.
+		// Upstream panics here; a client must not die because it tidied
+		// up a moment before the server said something about it.
+		if p, ok := i.Context().GetProxy(Uint32(data[l : l+4])).(*DataOffer); ok {
+			e.Id = p
+		}
 		l += 4
 
 		i.enterHandler(e)
@@ -2588,7 +2609,14 @@ func (i *DataDevice) Dispatch(opcode uint32, fd int, data []byte) {
 		}
 		var e DataDeviceSelectionEvent
 		l := 0
-		e.Id = i.Context().GetProxy(Uint32(data[l : l+4])).(*DataOffer)
+		// HAUNT PATCH: a comma-ok assertion, not a plain one: an event may name an
+		// object we have already destroyed — the request and the event
+		// crossed on the wire — and the proxy table has forgotten it.
+		// Upstream panics here; a client must not die because it tidied
+		// up a moment before the server said something about it.
+		if p, ok := i.Context().GetProxy(Uint32(data[l : l+4])).(*DataOffer); ok {
+			e.Id = p
+		}
 		l += 4
 
 		i.selectionHandler(e)
@@ -4196,7 +4224,14 @@ func (i *Surface) Dispatch(opcode uint32, fd int, data []byte) {
 		}
 		var e SurfaceEnterEvent
 		l := 0
-		e.Output = i.Context().GetProxy(Uint32(data[l : l+4])).(*Output)
+		// HAUNT PATCH: a comma-ok assertion, not a plain one: an event may name an
+		// object we have already destroyed — the request and the event
+		// crossed on the wire — and the proxy table has forgotten it.
+		// Upstream panics here; a client must not die because it tidied
+		// up a moment before the server said something about it.
+		if p, ok := i.Context().GetProxy(Uint32(data[l : l+4])).(*Output); ok {
+			e.Output = p
+		}
 		l += 4
 
 		i.enterHandler(e)
@@ -4206,7 +4241,14 @@ func (i *Surface) Dispatch(opcode uint32, fd int, data []byte) {
 		}
 		var e SurfaceLeaveEvent
 		l := 0
-		e.Output = i.Context().GetProxy(Uint32(data[l : l+4])).(*Output)
+		// HAUNT PATCH: a comma-ok assertion, not a plain one: an event may name an
+		// object we have already destroyed — the request and the event
+		// crossed on the wire — and the proxy table has forgotten it.
+		// Upstream panics here; a client must not die because it tidied
+		// up a moment before the server said something about it.
+		if p, ok := i.Context().GetProxy(Uint32(data[l : l+4])).(*Output); ok {
+			e.Output = p
+		}
 		l += 4
 
 		i.leaveHandler(e)
@@ -5112,7 +5154,14 @@ func (i *Pointer) Dispatch(opcode uint32, fd int, data []byte) {
 		l := 0
 		e.Serial = Uint32(data[l : l+4])
 		l += 4
-		e.Surface = i.Context().GetProxy(Uint32(data[l : l+4])).(*Surface)
+		// HAUNT PATCH: a comma-ok assertion, not a plain one: an event may name an
+		// object we have already destroyed — the request and the event
+		// crossed on the wire — and the proxy table has forgotten it.
+		// Upstream panics here; a client must not die because it tidied
+		// up a moment before the server said something about it.
+		if p, ok := i.Context().GetProxy(Uint32(data[l : l+4])).(*Surface); ok {
+			e.Surface = p
+		}
 		l += 4
 		e.SurfaceX = Fixed(data[l : l+4])
 		l += 4
@@ -5128,7 +5177,14 @@ func (i *Pointer) Dispatch(opcode uint32, fd int, data []byte) {
 		l := 0
 		e.Serial = Uint32(data[l : l+4])
 		l += 4
-		e.Surface = i.Context().GetProxy(Uint32(data[l : l+4])).(*Surface)
+		// HAUNT PATCH: a comma-ok assertion, not a plain one: an event may name an
+		// object we have already destroyed — the request and the event
+		// crossed on the wire — and the proxy table has forgotten it.
+		// Upstream panics here; a client must not die because it tidied
+		// up a moment before the server said something about it.
+		if p, ok := i.Context().GetProxy(Uint32(data[l : l+4])).(*Surface); ok {
+			e.Surface = p
+		}
 		l += 4
 
 		i.leaveHandler(e)
@@ -5501,7 +5557,14 @@ func (i *Keyboard) Dispatch(opcode uint32, fd int, data []byte) {
 		l := 0
 		e.Serial = Uint32(data[l : l+4])
 		l += 4
-		e.Surface = i.Context().GetProxy(Uint32(data[l : l+4])).(*Surface)
+		// HAUNT PATCH: a comma-ok assertion, not a plain one: an event may name an
+		// object we have already destroyed — the request and the event
+		// crossed on the wire — and the proxy table has forgotten it.
+		// Upstream panics here; a client must not die because it tidied
+		// up a moment before the server said something about it.
+		if p, ok := i.Context().GetProxy(Uint32(data[l : l+4])).(*Surface); ok {
+			e.Surface = p
+		}
 		l += 4
 		keysLen := int(Uint32(data[l : l+4]))
 		l += 4
@@ -5518,7 +5581,14 @@ func (i *Keyboard) Dispatch(opcode uint32, fd int, data []byte) {
 		l := 0
 		e.Serial = Uint32(data[l : l+4])
 		l += 4
-		e.Surface = i.Context().GetProxy(Uint32(data[l : l+4])).(*Surface)
+		// HAUNT PATCH: a comma-ok assertion, not a plain one: an event may name an
+		// object we have already destroyed — the request and the event
+		// crossed on the wire — and the proxy table has forgotten it.
+		// Upstream panics here; a client must not die because it tidied
+		// up a moment before the server said something about it.
+		if p, ok := i.Context().GetProxy(Uint32(data[l : l+4])).(*Surface); ok {
+			e.Surface = p
+		}
 		l += 4
 
 		i.leaveHandler(e)
@@ -5798,7 +5868,14 @@ func (i *Touch) Dispatch(opcode uint32, fd int, data []byte) {
 		l += 4
 		e.Time = Uint32(data[l : l+4])
 		l += 4
-		e.Surface = i.Context().GetProxy(Uint32(data[l : l+4])).(*Surface)
+		// HAUNT PATCH: a comma-ok assertion, not a plain one: an event may name an
+		// object we have already destroyed — the request and the event
+		// crossed on the wire — and the proxy table has forgotten it.
+		// Upstream panics here; a client must not die because it tidied
+		// up a moment before the server said something about it.
+		if p, ok := i.Context().GetProxy(Uint32(data[l : l+4])).(*Surface); ok {
+			e.Surface = p
+		}
 		l += 4
 		e.Id = int32(Uint32(data[l : l+4]))
 		l += 4

@@ -8,6 +8,7 @@ package proto
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -48,6 +49,12 @@ const (
 	// EventAILook answers a look intent: Text is what the vision model
 	// said, Name the application it was shown.
 	EventAILook EventType = "ai_look"
+
+	// EventChoice answers a say intent that offered choices: Name is the
+	// option the user picked, and Tag echoes the intent's. An empty Name
+	// means the menu was dismissed without choosing — a brain waiting on an
+	// answer has to hear that too, or it waits forever.
+	EventChoice EventType = "choice"
 )
 
 // Event is one occurrence delivered to a brain.
@@ -129,6 +136,15 @@ type Intent struct {
 	// that speaks first slowly fills its own memory with utterances it
 	// attributes to a user who never made them.
 	SelfPrompt bool `json:"self_prompt,omitempty"`
+	// Choices turn an IntentSay into a question: the balloon shows the text
+	// and then these options, and the one the user picks comes back as an
+	// EventChoice carrying the intent's Tag.
+	//
+	// Menus are how classic ukagaka ghosts are mostly *operated*; without
+	// them the only ways to address a ghost are clicking it and typing free
+	// text at it. They are also where consent belongs — asked in the moment,
+	// about a thing the person can see.
+	Choices []string `json:"choices,omitempty"`
 	// Fresh skips the generation cache for IntentImagine, so asking again
 	// for the same prompt produces a different image.
 	Fresh bool `json:"fresh,omitempty"`
@@ -154,12 +170,27 @@ func EncodeEvents(events []Event) ([]byte, error) {
 	return out, nil
 }
 
+// maxChoices is how many options a balloon will offer. Nine, because the
+// keyboard path picks by digit and there is no tenth digit.
+const maxChoices = 9
+
 // Validate rejects intents the driver must not execute.
 func (i *Intent) Validate() error {
 	switch i.Type {
 	case IntentSay:
 		if i.Text == "" {
 			return fmt.Errorf("say intent with empty text")
+		}
+		// A menu of one is a statement, and a menu of twenty is a wall: the
+		// balloon has to fit on a screen beside a ghost, and the keyboard
+		// path selects by digit.
+		if len(i.Choices) > maxChoices {
+			return fmt.Errorf("say intent with %d choices; at most %d fit in a balloon", len(i.Choices), maxChoices)
+		}
+		for n, c := range i.Choices {
+			if strings.TrimSpace(c) == "" {
+				return fmt.Errorf("say intent with an empty choice at position %d", n+1)
+			}
 		}
 	case IntentSetTimer:
 		if i.Name == "" {

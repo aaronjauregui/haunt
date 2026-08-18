@@ -64,6 +64,7 @@ type SpriteSurface struct {
 	opts       SurfaceOptions
 
 	pointerX, pointerY       float64
+	pressX, pressY           float64
 	grabX, grabY             float64
 	dragOriginX, dragOriginY int32
 	dragging                 bool
@@ -72,8 +73,12 @@ type SpriteSurface struct {
 // SurfaceOptions control how a sprite surface behaves.
 type SurfaceOptions struct {
 	// PassThrough gives the surface an empty input region: all pointer
-	// input falls through to whatever is beneath (used by balloons).
+	// input falls through to whatever is beneath (the usual balloon).
 	PassThrough bool
+	// Fixed takes clicks but never moves: a menu the user is choosing from
+	// should not slide across the screen because they pressed a little
+	// sideways. The ghost's own sprite is the draggable one.
+	Fixed bool
 	// Output pins the surface to a named screen. Empty lets the compositor
 	// choose, which is the right default for a first run and the wrong one
 	// for a ghost that was somewhere specific yesterday.

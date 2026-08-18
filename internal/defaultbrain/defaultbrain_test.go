@@ -281,14 +281,63 @@ func TestLookIsJournalledNotAnnounced(t *testing.T) {
 }
 
 // The user cannot read the source of a brain nobody wrote, so it explains
-// itself when asked.
-func TestHelpListsWhatItAnswersTo(t *testing.T) {
+// itself — as a menu, since a person who has just met a ghost is more
+// likely to click it than to know the word "help".
+func TestHelpOffersAMenu(t *testing.T) {
 	intents := run(t, proto.Event{Type: proto.EventMessage, Text: "Help"})
 	says := only(intents, proto.IntentSay)
-	if len(says) != 1 || !strings.Contains(says[0].Text, "draw") {
-		t.Errorf("help said %+v", says)
+	if len(says) != 1 || len(says[0].Choices) < 2 {
+		t.Fatalf("help said %+v, want a question with options", says)
+	}
+	if says[0].Tag == "" {
+		t.Error("the menu carries no tag, so its answer cannot be told apart")
 	}
 	if got := only(intents, proto.IntentChat); len(got) != 0 {
 		t.Errorf("help went to the model: %+v", got)
+	}
+
+	// And picking from it does what it says.
+	intents = run(t,
+		proto.Event{Type: proto.EventMessage, Text: "help"},
+		proto.Event{Type: proto.EventChoice, Name: menuHelp, Tag: menuTag},
+	)
+	var explained bool
+	for _, s := range only(intents, proto.IntentSay) {
+		if strings.Contains(s.Text, "draw") {
+			explained = true
+		}
+	}
+	if !explained {
+		t.Errorf("choosing %q explained nothing: %+v", menuHelp, intents)
+	}
+}
+
+// Dismissing a menu is an answer, not an error: the brain must do nothing
+// and certainly must not keep asking.
+func TestDismissedMenuIsLetGo(t *testing.T) {
+	intents := run(t,
+		proto.Event{Type: proto.EventMessage, Text: "help"},
+		proto.Event{Type: proto.EventChoice, Tag: menuTag}, // no name: dismissed
+	)
+	// One say: the menu itself. Nothing after it.
+	if says := only(intents, proto.IntentSay); len(says) != 1 {
+		t.Errorf("a dismissal produced %+v", says)
+	}
+}
+
+// Clicking is the one gesture every new user tries, so a few pokes in a row
+// offer the menu rather than a third quip.
+func TestRepeatedPokesOfferTheMenu(t *testing.T) {
+	intents := run(t,
+		proto.Event{Type: proto.EventClick},
+		proto.Event{Type: proto.EventClick},
+		proto.Event{Type: proto.EventClick},
+	)
+	says := only(intents, proto.IntentSay)
+	if len(says) != 3 {
+		t.Fatalf("three pokes said %+v", says)
+	}
+	if len(says[2].Choices) == 0 {
+		t.Errorf("the third poke was another quip: %+v", says[2])
 	}
 }

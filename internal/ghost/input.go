@@ -111,6 +111,13 @@ func (g *Ghost) closeInput() {
 // actually been given focus. Observed in a nested sway: open, click away,
 // open again, and the second line vanished the instant it appeared.
 func (g *Ghost) onKeyboardFocus(focused bool) {
+	// A menu is dismissed by attention moving elsewhere, like a line. It
+	// has no stale-leave problem of its own: it is opened by the brain
+	// rather than by a click, so there is no rhythm of close-and-reopen.
+	if !focused && g.choiceOpen() {
+		g.dismissChoices()
+		return
+	}
 	g.inputMu.Lock()
 	open := g.input.open
 	if focused {
@@ -145,6 +152,11 @@ func (g *Ghost) takeKeyboard(want bool) {
 // as a message — indistinguishable from `haunt say`, and prompted, so the
 // reply is never billed to the ghost's curiosity budget.
 func (g *Ghost) onKey(code uint32, down bool) {
+	// A menu holds the keyboard while it is up: digits pick a row, arrows
+	// move, Enter takes it, Escape dismisses.
+	if g.onChoiceKey(code, down) {
+		return
+	}
 	g.inputMu.Lock()
 	if !g.input.open {
 		g.inputMu.Unlock()
