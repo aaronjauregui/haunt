@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aaronjauregui/haunt/internal/proto"
 )
@@ -41,6 +42,11 @@ func run(t *testing.T, events ...proto.Event) []proto.Intent {
 	}
 	return intents
 }
+
+// base is a fixed instant for click timing: the bus stamps every event, so
+// a brain can measure a double-click without a clock of its own — and a
+// recorded session replays identically.
+var base = time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
 
 // only returns the intents of one type.
 func only(intents []proto.Intent, typ proto.IntentType) []proto.Intent {
@@ -325,56 +331,79 @@ func TestDismissedMenuIsLetGo(t *testing.T) {
 	}
 }
 
-// Clicking is the one gesture every new user tries, so a few pokes in a row
-// offer the menu rather than a third quip.
-func TestRepeatedPokesOfferTheMenu(t *testing.T) {
-	intents := run(t,
-		proto.Event{Type: proto.EventClick},
-		proto.Event{Type: proto.EventClick},
-		proto.Event{Type: proto.EventClick},
-	)
-	says := only(intents, proto.IntentSay)
-	if len(says) != 3 {
-		t.Fatalf("three pokes said %+v", says)
+// Two pokes in quick succession are a request for the menu; pokes on their
+// own are just pokes. A counter used to do this job and was unpredictable
+// in the hand — the click that waves a menu away never reaches the brain,
+// so the rhythm drifted. A double-click is a gesture someone performs on
+// purpose and can repeat at will.
+func TestDoubleClickAsksForTheMenu(t *testing.T) {
+	at := func(ms int) proto.Event {
+		return proto.Event{Type: proto.EventClick, Time: base.Add(time.Duration(ms) * time.Millisecond)}
 	}
-	if len(says[2].Choices) == 0 {
-		t.Errorf("the third poke was another quip: %+v", says[2])
+	tally := func(intents []proto.Intent) (menus, quips int) {
+		for _, in := range only(intents, proto.IntentSay) {
+			if len(in.Choices) > 0 {
+				menus++
+			} else {
+				quips++
+			}
+		}
+		return menus, quips
+	}
+
+	// Slow pokes are pokes.
+	if m, q := tally(run(t, at(0), at(2000), at(4000))); m != 0 || q != 3 {
+		t.Errorf("three slow pokes gave %d menus and %d quips", m, q)
+	}
+
+	// Two close together are a question.
+	if m, _ := tally(run(t, at(0), at(200))); m != 1 {
+		t.Errorf("a double-click gave %d menus", m)
+	}
+
+	// A third click starts a fresh pair rather than re-opening the menu
+	// that is already up.
+	if m, _ := tally(run(t, at(0), at(150), at(300))); m != 1 {
+		t.Errorf("a triple click gave %d menus, want 1", m)
+	}
+
+	// And it works again afterwards, however the last one ended — the part
+	// that made the menu feel like a one-off.
+	intents := run(t,
+		at(0), at(150), // menu
+		proto.Event{Type: proto.EventChoice, Tag: menuTag}, // waved away
+		at(3000), at(3150), // menu again
+		proto.Event{Type: proto.EventChoice, Name: menuNothing, Tag: menuTag},
+		at(6000), at(6150), // and again
+	)
+	if m, _ := tally(intents); m != 3 {
+		t.Errorf("three double-clicks over a session gave %d menus", m)
 	}
 }
 
-// The rhythm has to survive a menu being waved away. The click that
-// dismisses one never reaches the brain — the driver spends it on the
-// dismissal — so counting only clicks made the menu arrive at unpredictable
-// moments, which from the outside looks like "it only ever worked once".
-func TestTheMenuComesBackAfterBeingDismissed(t *testing.T) {
-	click := proto.Event{Type: proto.EventClick}
-	dismiss := proto.Event{Type: proto.EventChoice, Tag: menuTag}
-
-	menus := func(intents []proto.Intent) int {
-		n := 0
-		for _, in := range only(intents, proto.IntentSay) {
-			if len(in.Choices) > 0 {
-				n++
-			}
+// A gesture nobody mentions is a gesture nobody performs, so the ghost
+// introduces itself — once.
+func TestFirstMeetingExplainsTheGesture(t *testing.T) {
+	first := run(t, proto.Event{Type: proto.EventBoot})
+	says := only(first, proto.IntentSay)
+	if len(says) != 1 || !strings.Contains(says[0].Text, "ouble-click") {
+		t.Errorf("first greeting = %+v, want the gesture mentioned", says)
+	}
+	var remembered string
+	for _, in := range only(first, proto.IntentKVSet) {
+		if in.Name == metKey {
+			remembered = in.Value
 		}
-		return n
+	}
+	if remembered == "" {
+		t.Fatal("the ghost did not remember having introduced itself")
 	}
 
-	// Three clicks, a dismissal, then two more clicks: the second menu is
-	// three interactions after the first, counting the dismissal.
-	intents := run(t, click, click, click, dismiss, click, click)
-	if got := menus(intents); got != 2 {
-		t.Errorf("offered %d menus over two rounds of three interactions", got)
-	}
-
-	// And it keeps coming: no amount of clicking leaves a person stuck with
-	// quips forever.
-	var many []proto.Event
-	for i := 0; i < 4; i++ {
-		many = append(many, click, click, click, dismiss)
-	}
-	if got := menus(run(t, many...)); got < 3 {
-		t.Errorf("offered %d menus over twelve clicks and four dismissals", got)
+	// Next time it just says hello.
+	again := run(t, proto.Event{Type: proto.EventBoot, KV: map[string]string{metKey: remembered}})
+	says = only(again, proto.IntentSay)
+	if len(says) != 1 || strings.Contains(says[0].Text, "ouble-click") {
+		t.Errorf("second greeting = %+v, want no lecture", says)
 	}
 }
 

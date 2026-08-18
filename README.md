@@ -17,7 +17,8 @@ its reasoning.
     make demo        # a scripted ghost, in a nested sway window
     make demo-ai     # one that talks to your LLM
 
-Poke it, drag it, right-click to type at it. `make demo-ai` needs an
+Poke it, drag it, double-click for a menu, right-click to type at it. A
+menu can be answered with the mouse or with the number keys. `make demo-ai` needs an
 OpenAI-compatible endpoint in `~/.config/haunt/config.toml`:
 
 ```toml

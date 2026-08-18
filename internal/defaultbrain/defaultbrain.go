@@ -17,6 +17,7 @@ package defaultbrain
 import (
 	"io"
 	"strings"
+	"time"
 
 	"github.com/aaronjauregui/haunt/brainkit"
 )
@@ -25,6 +26,10 @@ import (
 // shares a keyspace with whatever the ghost's author writes by hand, so it
 // keeps to one prefix and leaves the rest alone.
 const KeyPrefix = "default/"
+
+// metKey records that this ghost has introduced itself, so it only explains
+// the double-click to someone who has not seen it before.
+const metKey = KeyPrefix + "met"
 
 // promptKeyPrefix remembers request → rewritten image prompt.
 const promptKeyPrefix = KeyPrefix + "prompt/"
@@ -63,9 +68,17 @@ const helpText = "Talk to me and I'll answer. `draw <something>` paints a pictur
 // which a timer set by this brain could not do, since it cannot know how
 // long a model will take. That mattered: a `hush` scheduled beside a quip
 // used to hide the reply that landed thirty seconds later.
-// pokesPerMenu is how many interactions pass before the ghost offers to
-// explain itself again.
-const pokesPerMenu = 3
+// doubleClick is how close two pokes must be to mean "show me the menu".
+//
+// A counter was the first attempt — every third poke offered one — and it
+// was unpredictable in the hand: the click that waves a menu away never
+// reaches this brain, so the rhythm drifted and the menu arrived at moments
+// nobody had asked for. A double-click is a gesture a person performs on
+// purpose and can repeat at will, which is the whole difference.
+//
+// Timed from the events' own timestamps, which the bus stamps on the way
+// in: the brain needs no clock, and a recorded session replays identically.
+const doubleClick = 700 * time.Millisecond
 
 const (
 	lingerGreeting = 6000
@@ -121,17 +134,14 @@ type Brain struct {
 	// pokeN rotates the poke replies, so a second click is not the first
 	// one again.
 	pokeN int
-	// pokes counts interactions since the last menu, so a person who keeps
-	// clicking is offered one rather than another quip.
-	pokes int
+	// lastPoke is when the ghost was last clicked, for spotting the second
+	// click of a double.
+	lastPoke time.Time
 }
 
 // offerMenu asks what the person wants, in a balloon they can click or
 // answer with the number keys.
 func (b *Brain) offerMenu(emit *brainkit.Emitter) {
-	// Counted from here, so the next menu is three interactions away
-	// whatever happened before this one.
-	b.pokes = 0
 	options := []string{menuHelp, menuLook}
 	if b.lastPrompt != "" {
 		options = append(options, menuDrawMore)
@@ -181,25 +191,32 @@ func (b *Brain) OnEvent(e brainkit.Event, emit *brainkit.Emitter) {
 		// Boot opens only a couple of seconds of free speech, so the
 		// greeting is said rather than generated: a model that took ten
 		// seconds to answer would arrive after the ghost had gone quiet.
-		emit.SayFor("…oh, you're here.", lingerGreeting)
+		//
+		// The first time, it says how to find the menu. A gesture nobody
+		// mentions is a gesture nobody performs, and this is the only place
+		// a ghost gets to introduce itself.
+		if _, met := e.KV[metKey]; met {
+			emit.SayFor("…oh, you're here.", lingerGreeting)
+		} else {
+			emit.SayFor("…oh, hello. Double-click me if you want the menu.", lingerGreeting)
+			emit.Remember(metKey, "yes")
+		}
 
 	case "click":
-		// Every third interaction offers the menu instead of a quip:
-		// clicking is the only gesture a new user is sure to try, and
+		// Two pokes in quick succession mean "show me what you can do".
+		// Clicking is the only gesture a new user is sure to try, and
 		// "type the word help" is a secret.
-		b.pokes++
-		if b.pokes >= pokesPerMenu {
+		if !b.lastPoke.IsZero() && e.Time.Sub(b.lastPoke) <= doubleClick {
+			// Cleared, so a third click starts a fresh pair rather than
+			// re-opening the menu that is already up.
+			b.lastPoke = time.Time{}
 			b.offerMenu(emit)
 			return
 		}
+		b.lastPoke = e.Time
 		emit.SayFor(b.nextPoke(), lingerPoke)
 
 	case "choice":
-		// Dismissing a menu counts as an interaction too. The click that
-		// waves a menu away never reaches this brain — the driver spends it
-		// on the dismissal — so without this the rhythm drifts and a person
-		// clicking three times gets nothing.
-		b.pokes++
 		b.onChoice(e.Name, emit)
 
 	case "window":
