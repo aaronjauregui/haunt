@@ -158,6 +158,22 @@ func cmdRun(args []string) error {
 			}
 		}
 		opts.Granted = watch.Granted
+		opts.Refused = watch.Refused
+		// Consent asked for in the balloon is written where `haunt perms`
+		// reads it: one place records what this ghost may do, however the
+		// question was put.
+		opts.Consent = func(cap string, allowed bool) error {
+			grants, err := library.LoadGrants(name)
+			if err != nil {
+				return err
+			}
+			if allowed {
+				grants.Allow(cap)
+			} else {
+				grants.Refuse(cap)
+			}
+			return library.SaveGrants(name, grants)
+		}
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

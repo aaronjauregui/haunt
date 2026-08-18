@@ -73,6 +73,15 @@ type Options struct {
 	// declares. Nil means dev mode: everything declared is granted, with a
 	// log line. Capabilities not in the manifest are never active.
 	Granted func(cap string) bool
+	// Consent records an answer to a permission asked for in the moment:
+	// allowed writes the grant, refused records that the person does not
+	// want to be asked again. Nil means the driver never asks and an
+	// ungranted capability is simply refused, which is what a dev-directory
+	// run and the tests want.
+	Consent func(cap string, allowed bool) error
+	// Refused reports a standing "never ask me about this again", so the
+	// question is not raised a second time. Nil means nothing was refused.
+	Refused func(cap string) bool
 	// IdleTimeoutMS overrides the inactivity threshold for idle events
 	// (default 2 minutes).
 	IdleTimeoutMS uint32
@@ -155,6 +164,11 @@ type Ghost struct {
 	initMu          sync.Mutex
 	promptedUntil   time.Time
 	initiativeUntil time.Time
+
+	// asked tracks in-the-moment consent questions, so a refusal is
+	// respected for a while and the same question is never on screen twice
+	// (see consent.go).
+	asked askedFor
 
 	// autoGranted tracks which dev-mode grants have been logged, so the
 	// notice appears once per capability rather than once per check.
@@ -579,7 +593,9 @@ func (g *Ghost) capabilityActive(cap string) bool {
 		}
 		return true
 	}
-	return g.opts.Granted(cap)
+	// A capability allowed in the balloon a moment ago counts, until the
+	// grants file it was written to has been re-read (see consent.go).
+	return g.opts.Granted(cap) || g.asked.justAllowed(cap)
 }
 
 func (g *Ghost) publish(e proto.Event) {
@@ -708,6 +724,13 @@ func (g *Ghost) execIntent(in proto.Intent) {
 		// Own goroutine: a slow backend must not block other intents.
 		// aiMu keeps one request in flight per ghost.
 		g.go_(hlog.AI, "chat", func() {
+			// Consent first, and before the lock: the question waits on a
+			// person, and holding the ghost's one AI slot while they think
+			// would leave it deaf to everything else meanwhile.
+			if !g.ensureCapability("llm") {
+				g.publishAIError("llm capability not granted", in.Tag)
+				return
+			}
 			g.aiMu.Lock()
 			defer g.aiMu.Unlock()
 			g.execChat(in, userDriven)
@@ -718,6 +741,10 @@ func (g *Ghost) execIntent(in proto.Intent) {
 		}
 		userDriven := g.respondingToUser()
 		g.go_(hlog.AI, "imagine", func() {
+			if !g.ensureCapability("imagine") {
+				g.publishAIError("imagine capability not granted", in.Tag)
+				return
+			}
 			g.aiMu.Lock()
 			defer g.aiMu.Unlock()
 			g.execImagine(in, userDriven)
@@ -728,11 +755,15 @@ func (g *Ghost) execIntent(in proto.Intent) {
 		g.playClip(in.Name)
 	case proto.IntentLook:
 		// Own goroutine: capture plus a vision request is seconds of work.
-		go func() {
+		g.go_(hlog.Screen, "look", func() {
+			if !g.ensureCapability("screen") {
+				g.publishAIError("screen capability not granted", in.Tag)
+				return
+			}
 			g.aiMu.Lock()
 			defer g.aiMu.Unlock()
 			g.execLook(in)
-		}()
+		})
 	case proto.IntentNote:
 		g.execNote(in.Text)
 	case proto.IntentTell:

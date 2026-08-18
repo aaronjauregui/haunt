@@ -85,6 +85,15 @@ func (w *GrantWatch) Granted(cap string) bool {
 	return w.grants.Granted(cap)
 }
 
+// Refused reports a standing "never ask me about this again", reloading
+// like Granted does.
+func (w *GrantWatch) Refused(cap string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.refreshLocked()
+	return w.grants.IsRefused(cap)
+}
+
 // Grants returns the capabilities currently granted.
 func (w *GrantWatch) Grants() []string {
 	w.mu.Lock()

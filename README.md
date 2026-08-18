@@ -44,7 +44,10 @@ LiteLLM. Cloud keys are named, not stored — set `api_key_env = "..."` and
 the driver reads that variable from its own environment.
 
 Everything AI is opt-in twice — the ghost asks for a capability, you grant
-it — and the driver holds the keys and the budgets, never the ghost. That
+it — and the driver holds the keys and the budgets, never the ghost.
+Anything you withhold at install is asked for again the first time it is
+actually needed, in the ghost's balloon, about the thing happening right
+then; "never ask again" is an answer it remembers. That
 matters most for the two awareness capabilities: `window` lets a ghost see
 which application you have focused and its title, and `screen` lets it
 capture that window and show it to a vision model. Both are refused unless

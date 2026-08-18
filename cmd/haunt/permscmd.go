@@ -81,7 +81,13 @@ func permsList(name string) error {
 		if grants.Granted(c) {
 			mark = "yes"
 		}
-		fmt.Printf("  [%s] %-13s %s\n", mark, c, ghost.KnownCapabilities[c])
+		note := ""
+		if grants.IsRefused(c) {
+			// Worth saying: this is the difference between "not yet" and
+			// "the ghost has been told to stop asking".
+			note = "  (refused — it will not ask again)"
+		}
+		fmt.Printf("  [%s] %-13s %s%s\n", mark, c, ghost.KnownCapabilities[c], note)
 	}
 
 	// Grants the manifest no longer asks for: an update can drop a
@@ -139,7 +145,7 @@ func permsSet(args []string, grant bool) error {
 		return err
 	}
 	had := grants.Granted(cap)
-	if grant && had {
+	if grant && had && !grants.IsRefused(cap) {
 		fmt.Printf("%s already has %s\n", name, cap)
 		return nil
 	}
@@ -148,15 +154,13 @@ func permsSet(args []string, grant bool) error {
 		return nil
 	}
 	if grant {
-		grants.Capabilities = append(grants.Capabilities, cap)
+		// Granting also clears a standing refusal: saying yes here is also
+		// saying the ghost may ask about this again.
+		grants.Allow(cap)
 	} else {
-		var kept []string
-		for _, c := range grants.Capabilities {
-			if c != cap {
-				kept = append(kept, c)
-			}
-		}
-		grants.Capabilities = kept
+		// Revoking is not the same as "never ask me again" — that answer
+		// belongs to the person being asked, in the balloon.
+		grants.Withdraw(cap)
 	}
 	if err := library.SaveGrants(name, grants); err != nil {
 		return err

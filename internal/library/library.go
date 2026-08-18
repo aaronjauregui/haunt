@@ -56,6 +56,54 @@ type Grants struct {
 	AuthorKey string `toml:"author_key"`
 	// Capabilities the user has granted.
 	Capabilities []string `toml:"capabilities"`
+	// Refused are capabilities the user has said no to for good, when the
+	// ghost asked in the moment. Without somewhere to write that down, "no"
+	// means "ask me again in a minute", which is how a companion becomes a
+	// nuisance.
+	Refused []string `toml:"refused"`
+}
+
+// Refused reports whether the user has told this ghost to stop asking.
+func (g *Grants) IsRefused(cap string) bool {
+	for _, c := range g.Refused {
+		if c == cap {
+			return true
+		}
+	}
+	return false
+}
+
+// Allow grants a capability and clears any standing refusal: saying yes is
+// also saying "you may ask about this again".
+func (g *Grants) Allow(cap string) {
+	if !g.Granted(cap) {
+		g.Capabilities = append(g.Capabilities, cap)
+	}
+	g.Refused = without(g.Refused, cap)
+}
+
+// Refuse records a refusal and withdraws the grant if there was one.
+func (g *Grants) Refuse(cap string) {
+	g.Capabilities = without(g.Capabilities, cap)
+	if !g.IsRefused(cap) {
+		g.Refused = append(g.Refused, cap)
+	}
+}
+
+// Withdraw removes a grant without recording a refusal — `haunt perms
+// revoke`, which says nothing about being asked again.
+func (g *Grants) Withdraw(cap string) {
+	g.Capabilities = without(g.Capabilities, cap)
+}
+
+func without(list []string, s string) []string {
+	var out []string
+	for _, v := range list {
+		if v != s {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // Granted reports whether cap is in the grant list.

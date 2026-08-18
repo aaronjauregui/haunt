@@ -35,10 +35,7 @@ const lookQuestion = "In one sentence, what is the person doing in this window? 
 // execLook captures the focused window and asks the vision model about it.
 func (g *Ghost) execLook(in proto.Intent) {
 	tag := in.Tag
-	if !g.capabilityActive("screen") {
-		g.publishAIError("screen capability not granted", tag)
-		return
-	}
+	// The capability was settled before the lock (see consent.go).
 	if g.aiSvc == nil || !g.aiSvc.VisionEnabled() {
 		g.publishAIError("no vision model configured in the haunt config", tag)
 		return

@@ -56,14 +56,45 @@ type choiceState struct {
 	surface *wlclient.SpriteSurface
 	// expiry takes an unanswered question down after a while.
 	expiry *time.Timer
+	// reply, when set, means the question is the *driver's* rather than the
+	// brain's: the answer goes here instead of to the brain, because a
+	// consent question is not something a ghost gets to overhear the answer
+	// to. Buffered, so answering never blocks on a listener that gave up.
+	reply chan string
+}
+
+// ask puts the driver's own question on screen and waits for the answer,
+// which arrives as the option's text or "" if it was dismissed or timed
+// out. The brain never sees it: the driver asks about the driver's
+// business — consent, chiefly — and a ghost has no need to know how the
+// person answered a question about whether to trust it.
+func (g *Ghost) ask(text string, options ...string) string {
+	reply := make(chan string, 1)
+	if !g.showChoicesWithReply(proto.Intent{Text: text, Choices: options}, reply) {
+		return ""
+	}
+	select {
+	case answer := <-reply:
+		return answer
+	case <-g.done:
+		return ""
+	case <-g.stoppingC():
+		return ""
+	}
 }
 
 // showChoices puts a question on screen. It replaces whatever balloon was
 // there, because a question is what the ghost is saying now.
 func (g *Ghost) showChoices(in proto.Intent) {
+	g.showChoicesWithReply(in, nil)
+}
+
+// showChoicesWithReply is showChoices with somewhere for the answer to go,
+// reporting whether the question reached the screen at all.
+func (g *Ghost) showChoicesWithReply(in proto.Intent, reply chan string) bool {
 	if muted, why := g.quiet.Active(); muted {
 		g.log.Debug(hlog.Balloon, "choices suppressed (%s)", why)
-		return
+		return false
 	}
 	// A menu is a question, and a question over a half-typed line is two
 	// conversations at once.
@@ -83,6 +114,7 @@ func (g *Ghost) showChoices(in proto.Intent) {
 		tag:       in.Tag,
 		highlight: -1,
 		focused:   false,
+		reply:     reply,
 	}
 	g.choiceMu.Unlock()
 
@@ -104,6 +136,7 @@ func (g *Ghost) showChoices(in proto.Intent) {
 	// takes it: on demand, and given back the moment the menu closes.
 	g.takeKeyboard(true)
 	g.log.Debug(hlog.Balloon, "choices offered: %s", strings.Join(options, " | "))
+	return true
 }
 
 // drawChoices paints the menu and remembers where its rows are.
@@ -277,11 +310,16 @@ func (g *Ghost) answerChoice(i int) {
 		g.choiceMu.Unlock()
 		return
 	}
-	picked, tag := g.choice.options[i], g.choice.tag
+	picked, tag, reply := g.choice.options[i], g.choice.tag, g.choice.reply
 	g.choiceMu.Unlock()
 
 	g.closeChoices()
 	g.log.Debug(hlog.Balloon, "choice taken: %q", picked)
+	if reply != nil {
+		// The driver asked; the driver hears the answer.
+		reply <- picked
+		return
+	}
 	// Through publishExternal: choosing is a person acting, so what the
 	// ghost does next is a response rather than an interruption.
 	g.publishExternal(proto.Event{Type: proto.EventChoice, Name: picked, Tag: tag})
@@ -294,11 +332,15 @@ func (g *Ghost) dismissChoices() {
 		return
 	}
 	g.choiceMu.Lock()
-	tag := g.choice.tag
+	tag, reply := g.choice.tag, g.choice.reply
 	g.choiceMu.Unlock()
 
 	g.closeChoices()
 	g.log.Debug(hlog.Balloon, "choices dismissed")
+	if reply != nil {
+		reply <- ""
+		return
+	}
 	g.publishExternal(proto.Event{Type: proto.EventChoice, Tag: tag})
 }
 

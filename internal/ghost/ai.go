@@ -52,10 +52,10 @@ const historyKey = "_haunt/chat_history"
 // get the same answer no matter what has been said around it.
 func (g *Ghost) execChat(in proto.Intent, userDriven bool) {
 	text, tag, silent := in.Text, in.Tag, in.Silent
-	if !g.capabilityActive("llm") {
-		g.publishAIError("llm capability not granted", tag)
-		return
-	}
+	// The capability was settled before this goroutine took the AI lock
+	// (see execIntent and consent.go). Asking again here would re-read a
+	// grants file that may have been written a millisecond ago, and refuse
+	// a request the person just allowed.
 	if g.aiSvc == nil || !g.aiSvc.LLMEnabled() {
 		g.publishAIError("no LLM backend configured in the haunt config", tag)
 		return
@@ -213,10 +213,7 @@ func (g *Ghost) execChat(in proto.Intent, userDriven bool) {
 // of the one already on disk.
 func (g *Ghost) execImagine(in proto.Intent, userDriven bool) {
 	prompt, tag := in.Text, in.Tag
-	if !g.capabilityActive("imagine") {
-		g.publishAIError("imagine capability not granted", tag)
-		return
-	}
+	// Settled before the lock, as with chat.
 	if g.aiSvc == nil || !g.aiSvc.ImageEnabled() {
 		g.publishAIError("no image backend configured in the haunt config", tag)
 		return
