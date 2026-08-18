@@ -55,6 +55,12 @@ const (
 	// means the menu was dismissed without choosing — a brain waiting on an
 	// answer has to hear that too, or it waits forever.
 	EventChoice EventType = "choice"
+
+	// EventSession reports the shape of the working day rather than a
+	// single window: a long stretch, a flip-flop between two applications,
+	// a title that keeps coming back. Requires the window capability, since
+	// it is made from the same observations. See Event.Session.
+	EventSession EventType = "session"
 )
 
 // Event is one occurrence delivered to a brain.
@@ -84,6 +90,29 @@ type Event struct {
 	// KV is the ghost's persisted state, included only with EventBoot so
 	// brains start with their memory in hand.
 	KV map[string]string `json:"kv,omitempty"`
+	// Session carries what was noticed about the working day, for
+	// EventSession. Summary is the fact in a sentence, which is what a
+	// brain hands to a model; the rest is there for one that would rather
+	// decide for itself.
+	Session *SessionFact `json:"session,omitempty"`
+}
+
+// SessionFact is something noticed about how the day is going: see
+// internal/session, which computes them, and EventSession, which delivers
+// them.
+type SessionFact struct {
+	// Kind is "dwell", "alternation" or "recurrence".
+	Kind string `json:"kind"`
+	// App is the application, or both of them for an alternation.
+	App string `json:"app,omitempty"`
+	// Title is the window title, when the fact is about one.
+	Title string `json:"title,omitempty"`
+	// Minutes is how long (dwell); Count is how many (alternation,
+	// recurrence).
+	Minutes int `json:"minutes,omitempty"`
+	Count   int `json:"count,omitempty"`
+	// Summary is the fact in a sentence: "42 minutes in nvim (session.go)".
+	Summary string `json:"summary,omitempty"`
 }
 
 // IntentType enumerates what a brain may request.

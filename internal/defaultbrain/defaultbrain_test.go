@@ -432,3 +432,51 @@ func TestLinesCarryTheirOwnLifetime(t *testing.T) {
 		t.Errorf("chat = %+v, want the reply's lifetime riding along", chats)
 	}
 }
+
+// The shape of the day is what initiative should be spent on: a remark
+// lands because it is about something, where a timer against idleness is a
+// party trick. The brain only tries — the driver decides whether it may.
+func TestSessionFactsProvokeARemark(t *testing.T) {
+	intents := run(t, proto.Event{
+		Type: proto.EventSession,
+		Name: "dwell",
+		Text: "42 minutes in nvim (session.go)",
+		Session: &proto.SessionFact{
+			Kind: "dwell", App: "nvim", Title: "session.go", Minutes: 42,
+			Summary: "42 minutes in nvim (session.go)",
+		},
+	})
+	chats := only(intents, proto.IntentChat)
+	if len(chats) != 1 || !chats[0].SelfPrompt {
+		t.Fatalf("session chats = %+v, want one self-prompted", chats)
+	}
+	if !strings.Contains(chats[0].Text, "42 minutes in nvim") {
+		t.Errorf("the direction did not carry what was noticed: %q", chats[0].Text)
+	}
+	// Unprompted, so it must not be recorded as something the user said —
+	// that is what SelfPrompt is for, and why Initiate exists.
+	if got := only(intents, proto.IntentSay); len(got) != 0 {
+		t.Errorf("it announced the observation directly: %+v", got)
+	}
+}
+
+// And what it noticed outlasts the moment: when the ghost later speaks
+// first, "forty minutes on one file" is a better thing to go on than the
+// last window title.
+func TestWhatWasNoticedFeedsSpeakingFirst(t *testing.T) {
+	intents := run(t,
+		proto.Event{Type: proto.EventWindow, Name: "firefox", Text: "a wiki page"},
+		proto.Event{Type: proto.EventSession, Name: "recurrence", Text: "back at firefox (build failed) for the 3rd time in the last hour",
+			Session: &proto.SessionFact{Kind: "recurrence", App: "firefox", Title: "build failed", Count: 3,
+				Summary: "back at firefox (build failed) for the 3rd time in the last hour"}},
+		proto.Event{Type: proto.EventIdle},
+	)
+	chats := only(intents, proto.IntentChat)
+	if len(chats) != 2 {
+		t.Fatalf("chats = %d, want one for the observation and one for going idle", len(chats))
+	}
+	idle := chats[1]
+	if !strings.Contains(idle.Text, "3rd time") {
+		t.Errorf("speaking first ignored what had been noticed: %q", idle.Text)
+	}
+}

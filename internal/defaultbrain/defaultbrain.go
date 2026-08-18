@@ -134,6 +134,9 @@ type Brain struct {
 	// pokeN rotates the poke replies, so a second click is not the first
 	// one again.
 	pokeN int
+	// lastNoticed is the most recent thing the session model made of the
+	// day, kept for when the ghost speaks first later on.
+	lastNoticed string
 	// lastPoke is when the ghost was last clicked, for spotting the second
 	// click of a double.
 	lastPoke time.Time
@@ -234,6 +237,21 @@ func (b *Brain) OnEvent(e brainkit.Event, emit *brainkit.Emitter) {
 		// terminal open" is the tiresome version of this feature.
 		emit.Note("Glanced at their screen: " + e.Text)
 
+	case "session":
+		// Something about the shape of the day rather than a single
+		// window: a long stretch, a flip-flop, a title that keeps coming
+		// back. This is what initiative should be spent on — a remark that
+		// lands because it is *about* something, rather than one fired by a
+		// timer against idleness. The driver decides whether the ghost may
+		// spend an unprompted action on it; the brain only tries.
+		if e.Session == nil {
+			return
+		}
+		b.lastNoticed = e.Session.Summary
+		emit.Initiate("You have noticed this about them just now: " + e.Session.Summary +
+			". Say one short thing to them about it, unprompted — or nothing much, if it " +
+			"would be tiresome to remark on.")
+
 	case "idle":
 		// Initiative: nobody asked. The driver decides whether this may
 		// spend one of the ghost's unprompted actions — the brain just
@@ -241,7 +259,12 @@ func (b *Brain) OnEvent(e brainkit.Event, emit *brainkit.Emitter) {
 		// remembered as something the user said.
 		direction := "Nobody has spoken to you in a while. Say one short thing " +
 			"to them, unprompted — draw on what you remember about them."
-		if b.lastWindow != "" {
+		if b.lastNoticed != "" {
+			// The shape of the day beats the last window title: "forty
+			// minutes on one file" is a thing to say something about, where
+			// "nvim" is not.
+			direction += " You noticed earlier: " + b.lastNoticed + "."
+		} else if b.lastWindow != "" {
 			// What they were last doing is usually the most interesting
 			// thing the ghost knows.
 			direction += " They were last looking at " + b.lastWindow + "."

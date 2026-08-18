@@ -12,6 +12,7 @@ import (
 	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/proto"
 	"github.com/aaronjauregui/haunt/internal/quiet"
+	"github.com/aaronjauregui/haunt/internal/session"
 )
 
 // Initiative: the ghost acting without being addressed. The journal and the
@@ -92,6 +93,15 @@ type AwarenessConfig struct {
 	// defaults cover the obvious ones so the careless case is not the
 	// dangerous one.
 	Ignore []string `toml:"ignore"`
+	// Dwell is how long in one window before the ghost may remark on it
+	// ("25m" by default). The rest of the session model's thresholds are
+	// fixed: this is the one people actually want to tune, because it is
+	// the difference between a companion that notices you are stuck and one
+	// that interrupts you while you are working.
+	Dwell string `toml:"dwell"`
+
+	// Session is the parsed form of the above, filled in at load.
+	Session session.Config `toml:"-"`
 }
 
 // defaultIgnoredApps are never watched unless the user replaces the list.
@@ -121,6 +131,13 @@ func loadAwarenessConfig() (AwarenessConfig, error) {
 	cfg := root.Awareness
 	if cfg.Ignore == nil {
 		cfg.Ignore = defaultIgnoredApps
+	}
+	if cfg.Dwell != "" {
+		d, err := time.ParseDuration(cfg.Dwell)
+		if err != nil {
+			return AwarenessConfig{}, fmt.Errorf("parsing %s: [awareness] dwell %q: %w", path, cfg.Dwell, err)
+		}
+		cfg.Session.Dwell = d
 	}
 	return cfg, nil
 }

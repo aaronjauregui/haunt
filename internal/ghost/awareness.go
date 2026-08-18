@@ -7,6 +7,7 @@ import (
 	"github.com/aaronjauregui/haunt/internal/desktop"
 	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/proto"
+	"github.com/aaronjauregui/haunt/internal/session"
 )
 
 // Knowing what you are doing. The compositor already tracks which window
@@ -25,6 +26,18 @@ import (
 // to notice a context switch, rare enough to be free.
 const windowPoll = 3 * time.Second
 
+// The middle layer. A brain given the raw stream is told which window has
+// focus every three seconds and is expected to be interesting about it, but
+// nothing interesting lives in one observation: the signal is the shape over
+// time. internal/session aggregates the same stream into durations,
+// alternations and recurrences, and those are published as their own events
+// beside the raw ones.
+//
+// It is counters and timestamps — nothing per observation worth measuring,
+// and no model until the moment of speaking. Nothing is written to disk: a
+// log of somebody's working day should not outlive the reason for having
+// it, and it never leaves the machine at all.
+
 // watchWindows publishes a window event whenever the focused application or
 // its title changes. Runs until the ghost stops.
 func (g *Ghost) watchWindows() {
@@ -39,6 +52,7 @@ func (g *Ghost) watchWindows() {
 
 	var last desktop.Window
 	var complained bool
+	facts := session.New(g.awareness.Session)
 	t := time.NewTicker(windowPoll)
 	defer t.Stop()
 	for {
@@ -69,9 +83,33 @@ func (g *Ghost) watchWindows() {
 		if g.ignoredApp(win.AppID) {
 			// Not even the fact that it changed: a password manager
 			// gaining focus is itself information the ghost does not need.
+			// The ignore list applies *before* aggregation, or an ignored
+			// application's time turns up in a duration statistic even
+			// though its name never did.
 			last = desktop.Window{}
+			facts.Away(time.Now())
 			continue
 		}
+		// The session model hears every poll, changed or not: a long
+		// stretch is noticed by nothing happening.
+		now := time.Now()
+		for _, f := range facts.Observe(win.AppID, win.Title, now) {
+			g.log.Info(hlog.Screen, "noticed: %s", f.Summary)
+			g.publish(proto.Event{
+				Type: proto.EventSession,
+				Name: string(f.Kind),
+				Text: f.Summary,
+				Session: &proto.SessionFact{
+					Kind:    string(f.Kind),
+					App:     f.App,
+					Title:   f.Title,
+					Minutes: f.Minutes,
+					Count:   f.Count,
+					Summary: f.Summary,
+				},
+			})
+		}
+
 		if win.AppID == last.AppID && win.Title == last.Title {
 			continue
 		}

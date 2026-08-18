@@ -54,6 +54,12 @@ capture that window and show it to a vision model. Both are refused unless
 granted, never fire for apps on `[awareness] ignore` (password managers and
 the like, by default), and never run while something is fullscreen.
 
+With `window` granted, the ghost watches the *shape* of the day rather than
+each window: a long stretch in one file, a flip-flop between two
+applications, a title that keeps coming back. That is what it spends its
+unprompted remarks on, and none of it is written down or leaves the
+machine.
+
 `haunt perms` shows what a ghost asked for and what it has, and takes it
 back:
 
