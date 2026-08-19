@@ -119,6 +119,7 @@ is cropped to what it covers so animation stays cheap.
 | `haunt say <text>` | talk to it from a script |
 | `haunt history` / `haunt journal` | what was said / what it chose to remember |
 | `haunt journal -entities` | who and what it thinks it knows about |
+| `haunt perms grant window` | let it notice what you are working on (or ask it from its menu) |
 | `haunt perms [grant\|revoke <cap>]` | what it may do — revocable while it runs |
 | `haunt shush` / `unshush` | quiet hours, now |
 | `haunt shell init <art.ora>` | build a shell from a layered drawing |

@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -255,6 +256,233 @@ func TestSummariesReadLikeSentences(t *testing.T) {
 		}
 		if strings.Contains(facts[0].Summary, "(foot)") {
 			t.Errorf("a window titled after its own application reads twice: %q", facts[0].Summary)
+		}
+	}
+}
+
+// The fourth shape: coming back to the machine after being away from it.
+func TestReturningAfterALongAbsence(t *testing.T) {
+	m := New(Config{AwayLong: time.Hour})
+
+	if facts, _ := poll(m, "nvim", "session.go", t0, 0); len(facts) != 0 {
+		t.Fatalf("the very first window produced %+v; there is nothing to compare it to", facts)
+	}
+	// Lunch. The poller keeps running against a locked screen, which is
+	// Away, so nothing extends the gap.
+	m.Away(t0.Add(10 * time.Minute))
+
+	facts := m.Observe("nvim", "session.go", t0.Add(2*time.Hour))
+	if len(facts) != 1 || facts[0].Kind != Returning {
+		t.Fatalf("facts on returning = %+v, want one returning", kinds(facts))
+	}
+	if !strings.Contains(facts[0].Summary, "2 hours") {
+		t.Errorf("summary does not say how long: %q", facts[0].Summary)
+	}
+}
+
+// Ten minutes is making tea, not an absence worth remarking on.
+func TestShortGapIsNotAReturn(t *testing.T) {
+	m := New(Config{AwayLong: time.Hour})
+	m.Observe("nvim", "session.go", t0)
+
+	facts := m.Observe("nvim", "session.go", t0.Add(10*time.Minute))
+	if len(facts) != 0 {
+		t.Errorf("noticed %+v after ten minutes away", kinds(facts))
+	}
+}
+
+// The fifth shape: the first window of a new day. A morning and a long
+// absence are the same event described twice, and the morning is the better
+// description, so only one of them fires.
+func TestFirstWindowOfTheDay(t *testing.T) {
+	m := New(Config{})
+	m.Observe("nvim", "session.go", t0)
+
+	next := t0.Add(24 * time.Hour)
+	facts := m.Observe("firefox", "inbox", next)
+	if len(facts) != 1 || facts[0].Kind != Morning {
+		t.Fatalf("facts on a new day = %+v, want one morning", kinds(facts))
+	}
+	if !strings.Contains(facts[0].Summary, "firefox") {
+		t.Errorf("summary does not say what was opened: %q", facts[0].Summary)
+	}
+	// And once: the rest of the day is not also the morning.
+	if facts := m.Observe("firefox", "inbox2", next.Add(time.Hour)); len(facts) != 0 {
+		t.Errorf("said it again: %+v", kinds(facts))
+	}
+}
+
+// Working past midnight is not a new morning at one minute past twelve.
+func TestMidnightIsNotAMorning(t *testing.T) {
+	evening := time.Date(2026, 8, 19, 23, 30, 0, 0, time.UTC)
+	m := New(Config{})
+	m.Observe("nvim", "session.go", evening)
+
+	facts := m.Observe("nvim", "session.go", evening.Add(40*time.Minute))
+	for _, k := range kinds(facts) {
+		if k == Morning {
+			t.Errorf("00:10 reported as a new morning: %+v", facts)
+		}
+	}
+}
+
+// The sixth shape: the clock, not the window. Once per night, where a night
+// runs past midnight.
+func TestLateIsNoticedOncePerNight(t *testing.T) {
+	afternoon := time.Date(2026, 8, 19, 15, 0, 0, 0, time.UTC)
+	m := New(Config{LateHour: 23})
+	m.Observe("nvim", "session.go", afternoon)
+
+	for _, k := range kinds(m.Observe("nvim", "session.go", afternoon.Add(5*time.Hour))) {
+		if k == Late {
+			t.Fatal("eight in the evening was reported as late")
+		}
+	}
+
+	night := time.Date(2026, 8, 19, 23, 10, 0, 0, time.UTC)
+	var late bool
+	for _, f := range m.Observe("nvim", "session.go", night) {
+		if f.Kind == Late {
+			late = true
+			if !strings.Contains(f.Summary, "11:10pm") {
+				t.Errorf("summary does not say the hour: %q", f.Summary)
+			}
+		}
+	}
+	if !late {
+		t.Fatal("23:10 went unremarked")
+	}
+
+	// One in the morning is the same night, and being told twice about it
+	// is the nagging the whole file exists to avoid.
+	small := time.Date(2026, 8, 20, 1, 0, 0, 0, time.UTC)
+	for _, k := range kinds(m.Observe("nvim", "session.go", small)) {
+		if k == Late {
+			t.Error("said it again in the small hours of the same night")
+		}
+	}
+
+	// The next night is a different night.
+	tomorrow := time.Date(2026, 8, 20, 23, 30, 0, 0, time.UTC)
+	m.Observe("nvim", "session.go", time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC))
+	late = false
+	for _, k := range kinds(m.Observe("nvim", "session.go", tomorrow)) {
+		late = late || k == Late
+	}
+	if !late {
+		t.Error("the following night went unremarked")
+	}
+}
+
+// A negative LateHour is for people whose day starts at eleven at night.
+func TestLateCanBeSwitchedOff(t *testing.T) {
+	m := New(Config{LateHour: -1})
+	m.Observe("nvim", "session.go", t0)
+	night := time.Date(2026, 8, 19, 23, 30, 0, 0, time.UTC)
+	for _, k := range kinds(m.Observe("nvim", "session.go", night)) {
+		if k == Late {
+			t.Error("noticed the hour with the shape switched off")
+		}
+	}
+}
+
+// The point of persisting anything: a recurrence spanning a restart used to
+// be invisible, and a companion restarted at login every day is exactly the
+// case that matters.
+func TestRecurrenceSurvivesARestart(t *testing.T) {
+	cfg := Config{RecurCount: 3, RecurGap: time.Minute, RecurWindow: time.Hour}
+	m := New(cfg)
+
+	at := t0
+	for i := 0; i < 2; i++ {
+		m.Observe("firefox", "build failed — CI", at)
+		m.Observe("nvim", "session.go", at.Add(2*time.Minute))
+		at = at.Add(5 * time.Minute)
+	}
+
+	// The ghost stops and comes back.
+	restarted := Restore(cfg, m.Snapshot(), at)
+
+	facts := restarted.Observe("firefox", "build failed — CI", at.Add(time.Minute))
+	var recurred bool
+	for _, f := range facts {
+		if f.Kind == Recurrence {
+			recurred = true
+			if f.Count != 3 {
+				t.Errorf("count = %d, want 3: the sightings before the restart still happened", f.Count)
+			}
+			// The sentence names the window the ghost is looking at now,
+			// which is why the history only has to be countable.
+			if !strings.Contains(f.Summary, "build failed") {
+				t.Errorf("summary lost the title: %q", f.Summary)
+			}
+		}
+	}
+	if !recurred {
+		t.Errorf("the restart forgot the recurrence: %+v", kinds(facts))
+	}
+}
+
+// The cooldown survives too, or restarting the ghost is a way to make it
+// say everything again.
+func TestCooldownSurvivesARestart(t *testing.T) {
+	cfg := Config{Dwell: 10 * time.Minute, Cooldown: time.Hour}
+	m := New(cfg)
+	facts, at := poll(m, "nvim", "session.go", t0, 11*time.Minute)
+	if len(facts) != 1 {
+		t.Fatalf("setup produced %+v, want one dwell", kinds(facts))
+	}
+
+	restarted := Restore(cfg, m.Snapshot(), at)
+	facts, _ = poll(restarted, "nvim", "session.go", at, 11*time.Minute)
+	if len(facts) != 0 {
+		t.Errorf("the restart reset the cooldown: %+v", kinds(facts))
+	}
+}
+
+// A machine that was off for a week must not come back believing it is
+// halfway through an hour of recurrences.
+func TestRestoreDropsWhatIsTooOldToMatter(t *testing.T) {
+	cfg := Config{RecurCount: 3, RecurGap: time.Minute, RecurWindow: time.Hour, Cooldown: time.Hour}
+	m := New(cfg)
+	at := t0
+	for i := 0; i < 2; i++ {
+		m.Observe("firefox", "build failed — CI", at)
+		m.Observe("nvim", "session.go", at.Add(2*time.Minute))
+		at = at.Add(5 * time.Minute)
+	}
+	st := m.Snapshot()
+
+	restarted := Restore(cfg, st, at.Add(7*24*time.Hour))
+	if len(restarted.seen) != 0 || len(restarted.said) != 0 {
+		t.Errorf("a week-old snapshot was trusted: %d sightings, %d cooldowns",
+			len(restarted.seen), len(restarted.said))
+	}
+
+	// A snapshot from the future is a clock that moved, not a prediction.
+	ahead := Restore(cfg, st, t0.Add(-24*time.Hour))
+	if !ahead.lastSeen.IsZero() {
+		t.Error("a snapshot from the future was taken at face value")
+	}
+}
+
+// The privacy claim, asserted rather than promised: what goes to disk holds
+// no window titles. Every use of these maps is an equality test, so nothing
+// is lost by keeping identities instead.
+func TestSnapshotHoldsNoTitles(t *testing.T) {
+	m := New(Config{})
+	secret := "Re: your test results — Dr Halloway"
+	m.Observe("thunderbird", secret, t0)
+	m.Observe("nvim", "session.go", t0.Add(5*time.Minute))
+	m.Observe("thunderbird", secret, t0.Add(10*time.Minute))
+
+	blob, err := json.Marshal(m.Snapshot())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, leak := range []string{secret, "Halloway", "thunderbird", "session.go"} {
+		if strings.Contains(string(blob), leak) {
+			t.Errorf("the snapshot contains %q:\n%s", leak, blob)
 		}
 	}
 }

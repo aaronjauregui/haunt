@@ -96,11 +96,19 @@ type AwarenessConfig struct {
 	// dangerous one.
 	Ignore []string `toml:"ignore"`
 	// Dwell is how long in one window before the ghost may remark on it
-	// ("25m" by default). The rest of the session model's thresholds are
-	// fixed: this is the one people actually want to tune, because it is
-	// the difference between a companion that notices you are stuck and one
-	// that interrupts you while you are working.
+	// ("25m" by default). One of three thresholds people actually want to
+	// tune: this is the difference between a companion that notices you are
+	// stuck and one that interrupts you while you are working. The session
+	// model's remaining thresholds are fixed.
 	Dwell string `toml:"dwell"`
+	// Away is how long a gap counts as having been away from the machine,
+	// so coming back is worth remarking on ("90m" by default).
+	Away string `toml:"away"`
+	// LateHour is the hour after which still working is itself worth
+	// noticing, in local time (23 by default), running until the small
+	// hours of the next morning. Negative switches the shape off, which is
+	// the setting for people whose day starts at eleven at night.
+	LateHour *int `toml:"late_hour"`
 
 	// Session is the parsed form of the above, filled in at load.
 	Session session.Config `toml:"-"`
@@ -140,6 +148,23 @@ func loadAwarenessConfig() (AwarenessConfig, error) {
 			return AwarenessConfig{}, fmt.Errorf("parsing %s: [awareness] dwell %q: %w", path, cfg.Dwell, err)
 		}
 		cfg.Session.Dwell = d
+	}
+	if cfg.Away != "" {
+		d, err := time.ParseDuration(cfg.Away)
+		if err != nil {
+			return AwarenessConfig{}, fmt.Errorf("parsing %s: [awareness] away %q: %w", path, cfg.Away, err)
+		}
+		cfg.Session.AwayLong = d
+	}
+	if cfg.LateHour != nil {
+		h := *cfg.LateHour
+		if h > 23 || (h >= 0 && h < session.EarliestLateHour) {
+			return AwarenessConfig{}, fmt.Errorf(
+				"parsing %s: [awareness] late_hour %d: use %d-23, or a negative number to switch it off — "+
+					"late runs until the small hours, so anything earlier would make the whole day late",
+				path, h, session.EarliestLateHour)
+		}
+		cfg.Session.LateHour = h
 	}
 	return cfg, nil
 }

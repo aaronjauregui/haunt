@@ -59,10 +59,11 @@ func personaGhost(name string) (map[string]string, string) {
 name = %q
 version = "0.1.0"
 author = ""
-# Capabilities the ghost asks the user to grant. llm is what lets it talk;
-# add "imagine" for pictures, "window"/"screen" to let it notice what you
-# are doing.
-capabilities = ["message", "llm"]
+# Capabilities the ghost asks the user to grant. Declaring one only means
+# it may *ask*: llm is what lets it talk, "window" lets it offer to notice
+# what you are working on (from its menu, and only if you say yes). Add
+# "imagine" for pictures and "screen" to let it look at them.
+capabilities = ["message", "llm", "window"]
 
 [shell]
 # sprite = "shell.png"   # PNG with transparency; omit for the built-in blob

@@ -98,6 +98,7 @@ const (
 	menuTag      = "menu"
 	menuHelp     = "What can you do?"
 	menuLook     = "Have a look at my screen"
+	menuWatch    = "Keep an eye on what I'm working on"
 	menuDrawMore = "Draw that again"
 	menuNothing  = "Nothing, thanks"
 )
@@ -140,12 +141,27 @@ type Brain struct {
 	// lastPoke is when the ghost was last clicked, for spotting the second
 	// click of a double.
 	lastPoke time.Time
+	// watched says window events have actually been arriving, which is the
+	// only way a brain can tell whether it is being allowed to watch — the
+	// grant itself is the driver's business and deliberately not visible
+	// here. Used for one thing: not offering to start something already
+	// running.
+	watched bool
 }
 
 // offerMenu asks what the person wants, in a balloon they can click or
 // answer with the number keys.
 func (b *Brain) offerMenu(emit *brainkit.Emitter) {
 	options := []string{menuHelp, menuLook}
+	// Offering to watch is how window awareness gets asked for at all: it
+	// is the one capability whose consumer is a background poller, so there
+	// is no moment of use to ask at, and the person choosing it from a menu
+	// is a better moment than either the install sheet or a popup at login.
+	// Dropped once events are arriving, because a menu entry that starts
+	// something already running is a menu entry that does nothing.
+	if !b.watched {
+		options = append(options, menuWatch)
+	}
 	if b.lastPrompt != "" {
 		options = append(options, menuDrawMore)
 	}
@@ -163,6 +179,11 @@ func (b *Brain) onChoice(picked string, emit *brainkit.Emitter) {
 		emit.SayFor(helpText, lingerHelp)
 	case menuLook:
 		emit.Look(lookTag, "")
+	case menuWatch:
+		// No answer comes back. Either window events start arriving or they
+		// do not, which is exactly what the brain sees when the capability
+		// was never granted — so there is nothing here to handle.
+		emit.Watch()
 	case menuDrawMore:
 		if b.lastPrompt != "" {
 			emit.Send(brainkit.Intent{Type: "imagine", Text: b.lastPrompt, Fresh: true, Wait: "Again, differently…", LingerMS: lingerImage})
@@ -227,6 +248,7 @@ func (b *Brain) OnEvent(e brainkit.Event, emit *brainkit.Emitter) {
 		// branch names, error text. The brain just remembers what it saw;
 		// what it does with that is the model's business later, through
 		// recall.
+		b.watched = true
 		if e.Name != "" {
 			b.lastWindow = e.Name + ": " + e.Text
 		}
@@ -247,6 +269,7 @@ func (b *Brain) OnEvent(e brainkit.Event, emit *brainkit.Emitter) {
 		if e.Session == nil {
 			return
 		}
+		b.watched = true
 		b.lastNoticed = e.Session.Summary
 		emit.Initiate("You have noticed this about them just now: " + e.Session.Summary +
 			". Say one short thing to them about it, unprompted — or nothing much, if it " +

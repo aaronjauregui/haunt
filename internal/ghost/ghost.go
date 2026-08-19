@@ -12,6 +12,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -26,6 +27,7 @@ import (
 	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/proto"
 	"github.com/aaronjauregui/haunt/internal/quiet"
+	"github.com/aaronjauregui/haunt/internal/session"
 	"github.com/aaronjauregui/haunt/internal/shell"
 	"github.com/aaronjauregui/haunt/internal/sprite"
 	"github.com/aaronjauregui/haunt/internal/store"
@@ -162,8 +164,16 @@ type Ghost struct {
 	choiceMu sync.Mutex
 	choice   choiceState
 
-	// awareness is what the ghost may notice about the screen.
+	// awareness is what the ghost may notice about the screen, and
+	// watching guards its poll loop so exactly one runs however many times
+	// it is started (see awareness.go).
 	awareness AwarenessConfig
+	watching  atomic.Bool
+	// sess is the session model the watch loop is feeding, reachable from
+	// here so teardown can write its state out while the store is still
+	// open. The loop owns Observe; sessMu is what lets anyone else read it.
+	sessMu sync.Mutex
+	sess   *session.Model
 
 	// Initiative accounting (see curiosity.go).
 	curiosity *allowance
@@ -522,8 +532,9 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	}
 
 	// Watching the focused window, if the ghost asked for that and the user
-	// agreed to it.
-	g.go_(hlog.Screen, "window awareness", g.watchWindows)
+	// agreed to it. Startable again later, because the user may say yes
+	// during the session (see execWatch).
+	g.startWatching()
 
 	// Idle animation: blinking and the like, on the shell's own schedule.
 	g.startAnimation()
@@ -574,6 +585,10 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	// an AI request nobody is left to hear, will otherwise hold the whole
 	// teardown open.
 	close(g.stopping)
+	// What the day looked like, while there is still a store to put it in:
+	// the watch loop's own exit runs after the store has been closed, so
+	// this is the only place the last minute of it can be saved.
+	g.saveSessionState()
 	// Whatever the ghost was thinking about in its sleep, it is not
 	// finishing it now: the cancel is what stops teardown waiting on a
 	// model call nobody will read (consolidate.go).
@@ -792,6 +807,11 @@ func (g *Ghost) execIntent(in proto.Intent) {
 			defer g.aiMu.Unlock()
 			g.execLook(in)
 		})
+	case proto.IntentWatch:
+		// Its own goroutine, like chat: ensureCapability blocks while the
+		// question is on screen, and the intent loop is not a thing to
+		// stall while somebody reads.
+		g.go_(hlog.Screen, "watch", func() { g.execWatch() })
 	case proto.IntentNote:
 		g.execNote(in.Text)
 	case proto.IntentTell:

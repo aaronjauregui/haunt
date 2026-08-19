@@ -40,9 +40,16 @@ import (
 //     would be a lie.
 //   - Anything from a background loop. The question follows a thing the
 //     ghost was asked to do, so there is something on screen to make sense
-//     of it. Window awareness therefore stays behind `haunt perms` for now:
-//     a permission popup at login, about nothing in particular, is exactly
-//     the pattern this is meant to replace.
+//     of it. A permission popup at login, about nothing in particular, is
+//     exactly the pattern this is meant to replace.
+//
+// Window awareness was the awkward case for that last rule, since the thing
+// that needs it *is* a background loop, and it sat behind `haunt perms`
+// alone for exactly that reason. It is asked for now, but only through
+// `watch` (see awareness.go), which the driver honours only when the person
+// has just acted — the menu entry offering to watch is them raising the
+// question, which is a better moment than either the install sheet or a
+// poller could produce.
 
 // consentGap is how long to leave someone alone after a "not now" before
 // the same question may be asked again.
@@ -128,6 +135,10 @@ var mayAsk = map[string]bool{
 	"llm":     true,
 	"imagine": true,
 	"screen":  true,
+	// `window` is askable only because the `watch` intent gives it a moment
+	// to be asked in, and only when the user just provoked it: see
+	// execWatch, which is the sole caller.
+	"window": true,
 	// `tell` is left out until there is a second ghost to talk to: that
 	// intent runs on the loop that delivers intents, so asking there would
 	// stall the brain while somebody reads a question about a feature that

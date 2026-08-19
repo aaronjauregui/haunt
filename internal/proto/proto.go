@@ -133,6 +133,7 @@ const (
 	IntentSetExpression IntentType = "set_expression" // wear a declared pose
 	IntentPlayClip      IntentType = "play_clip"      // run a declared animation
 	IntentLook          IntentType = "look"           // show the focused window to a vision model
+	IntentWatch         IntentType = "watch"          // the user asked for window awareness; ask and start it
 )
 
 // Intent is one request emitted by a brain. The driver validates and
@@ -275,6 +276,9 @@ func (i *Intent) Validate() error {
 		}
 	case IntentLook:
 		// Text is optional: an empty look asks the driver's own question.
+	// watch carries nothing: it is a request to put a question, and every
+	// term of that question is the driver's.
+	case IntentWatch:
 	case IntentHideSay, IntentMove, IntentLog:
 	default:
 		return fmt.Errorf("unknown intent type %q", i.Type)

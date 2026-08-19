@@ -199,6 +199,24 @@ func (em *Emitter) Look(tag, question string) {
 	em.emit(Intent{Type: proto.IntentLook, Text: question, Tag: tag})
 }
 
+// Watch asks the driver to start noticing which window has focus, putting
+// the permission question to the user if they have not answered it yet.
+//
+// Unlike every other capability, this one is not asked for at the moment it
+// is needed: the thing that would need it is a background poller, and a
+// permission popup about nothing in particular is exactly what asking in
+// the moment was meant to replace. So the honest trigger is the user's own
+// curiosity — offer it as a menu entry and emit this when they pick it —
+// and the driver enforces that by ignoring a Watch that does not follow
+// something the person just did.
+//
+// There is no answer event. If they say yes, window and session events
+// start arriving; if they do not, nothing happens, which is the same thing
+// a brain sees when the capability was never granted.
+func (em *Emitter) Watch() {
+	em.emit(Intent{Type: proto.IntentWatch})
+}
+
 // Note writes a private journal entry. Recent notes are injected into LLM
 // context on every Chat, so what the ghost chooses to remember shapes its
 // future behavior. The user can read the journal with `haunt journal`.

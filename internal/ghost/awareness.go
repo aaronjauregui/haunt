@@ -1,6 +1,7 @@
 package ghost
 
 import (
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -34,9 +35,39 @@ const windowPoll = 3 * time.Second
 // beside the raw ones.
 //
 // It is counters and timestamps — nothing per observation worth measuring,
-// and no model until the moment of speaking. Nothing is written to disk: a
-// log of somebody's working day should not outlive the reason for having
-// it, and it never leaves the machine at all.
+// and no model until the moment of speaking, and none of it ever leaves the
+// machine.
+//
+// A little of it now outlives the session, under `_haunt/session` and
+// nowhere else. It has to: a recurrence is about an hour of history and a
+// morning is about yesterday, so a ghost started at login every day could
+// notice neither. What is kept is the recurrence table, the cooldowns and
+// when a window was last seen — with titles reduced to identities by the
+// session package, so the file on disk can count sightings and says nothing
+// about what was being read.
+
+// sessionStateKey holds what the session model keeps across a restart.
+const sessionStateKey = internalKeyPrefix + "session"
+
+// sessionSaveEvery is how often the model's state is written while the
+// ghost runs. Sightings accumulate without producing facts, so waiting for
+// shutdown would lose an afternoon to a crash; writing on every poll would
+// be a store write every three seconds for a table that rarely changes.
+const sessionSaveEvery = time.Minute
+
+// startWatching begins window awareness if it is not already running.
+// Called at boot and again whenever the user asks for it (see execWatch),
+// since a capability granted mid-session has to take effect without a
+// restart — the loop it starts is the thing being consented to.
+func (g *Ghost) startWatching() {
+	if !g.watching.CompareAndSwap(false, true) {
+		return
+	}
+	g.go_(hlog.Screen, "window awareness", func() {
+		defer g.watching.Store(false)
+		g.watchWindows()
+	})
+}
 
 // watchWindows publishes a window event whenever the focused application or
 // its title changes. Runs until the ghost stops.
@@ -52,13 +83,30 @@ func (g *Ghost) watchWindows() {
 
 	var last desktop.Window
 	var complained bool
-	facts := session.New(g.awareness.Session)
+	// Published on the ghost so teardown can write it out on the way down.
+	// The loop is the only caller of Observe, but Snapshot is read from
+	// another goroutine, so both go through sessMu.
+	g.sessMu.Lock()
+	g.sess = session.Restore(g.awareness.Session, g.loadSessionState(), time.Now())
+	facts := g.sess
+	g.sessMu.Unlock()
+	defer func() {
+		g.saveSessionState()
+		g.sessMu.Lock()
+		g.sess = nil
+		g.sessMu.Unlock()
+	}()
 	t := time.NewTicker(windowPoll)
 	defer t.Stop()
+	save := time.NewTicker(sessionSaveEvery)
+	defer save.Stop()
 	for {
 		select {
 		case <-g.done:
 			return
+		case <-save.C:
+			g.saveSessionState()
+			continue
 		case <-t.C:
 		}
 
@@ -87,13 +135,18 @@ func (g *Ghost) watchWindows() {
 			// application's time turns up in a duration statistic even
 			// though its name never did.
 			last = desktop.Window{}
+			g.sessMu.Lock()
 			facts.Away(time.Now())
+			g.sessMu.Unlock()
 			continue
 		}
 		// The session model hears every poll, changed or not: a long
 		// stretch is noticed by nothing happening.
 		now := time.Now()
-		for _, f := range facts.Observe(win.AppID, win.Title, now) {
+		g.sessMu.Lock()
+		noticed := facts.Observe(win.AppID, win.Title, now)
+		g.sessMu.Unlock()
+		for _, f := range noticed {
 			g.log.Info(hlog.Screen, "noticed: %s", f.Summary)
 			g.publish(proto.Event{
 				Type: proto.EventSession,
@@ -140,3 +193,102 @@ func (g *Ghost) ignoredApp(appID string) bool {
 	}
 	return false
 }
+
+// loadSessionState reads what the last run left. A missing or unreadable
+// value is simply a fresh model: this is an enhancement to awareness, and
+// nothing about it is worth failing a boot over.
+func (g *Ghost) loadSessionState() session.State {
+	raw, ok, err := storeGet(g.store, sessionStateKey)
+	if err != nil || !ok {
+		return session.State{}
+	}
+	var st session.State
+	if json.Unmarshal([]byte(raw), &st) != nil {
+		return session.State{}
+	}
+	return st
+}
+
+// saveSessionState writes the model's state, if there is one to write.
+//
+// Called from the watch loop on a ticker and from teardown, which is why
+// the model is reachable from the Ghost at all: the loop's own exit happens
+// after `defer g.store.Close()` has already run (defers are LIFO and the
+// done channel is closed later than the store is opened), so a save on the
+// way out of the loop would always be a write to a closed database. The
+// shutdown write has to happen on the main path, while the store is still
+// there.
+func (g *Ghost) saveSessionState() {
+	g.sessMu.Lock()
+	defer g.sessMu.Unlock()
+	if g.sess == nil {
+		return
+	}
+	b, err := json.Marshal(g.sess.Snapshot())
+	if err != nil {
+		return
+	}
+	if err := g.store.Set(sessionStateKey, string(b)); err != nil {
+		g.log.Warn(hlog.Screen, "saving what the day looked like: %v", err)
+	}
+}
+
+// execWatch is the user asking to be watched.
+//
+// Window awareness is the one capability that could never be asked for in
+// the moment, because the thing that needs it is a background poller and a
+// permission popup at login about nothing in particular is the pattern
+// asking-in-the-moment exists to replace. The way out is that the question
+// does not have to come from the ghost: a menu entry offering to watch is
+// the person raising it themselves, which is a better moment than either
+// the install sheet or a poller could ever produce.
+//
+// So the driver only honours this when the person has just done something.
+// A brain cannot emit it from a timer and make a permission question appear
+// out of nowhere; the causality clock that rations initiative answers this
+// question too, and answers it driver-side, where a brain cannot claim to
+// have been provoked.
+func (g *Ghost) execWatch() {
+	if !g.respondingToUser() {
+		g.log.Debug(hlog.Screen, "watch intent dropped: nobody asked for it")
+		return
+	}
+	// A user-initiated action that quietly does nothing is worse than a
+	// refusal, so the two terminal cases say so rather than leaving
+	// somebody clicking a menu entry that appears to be broken. The
+	// ordinary "not now" is not one of them: that answer was just given, on
+	// screen, and repeating it back is nagging.
+	switch {
+	case !g.declares("window"):
+		g.sayBriefly(g.manifest.Ghost.Name + " was not built to watch what you are doing.")
+		return
+	case g.opts.Refused != nil && g.opts.Refused("window"):
+		g.sayBriefly("You asked me never to watch. Undo that with: haunt perms grant window")
+		return
+	}
+	if !g.ensureCapability("window") {
+		return
+	}
+	// Granted, possibly a moment ago: the loop exited at boot because there
+	// was nothing to watch with, and this is what starts it without a
+	// restart. Already running is the common case and costs nothing.
+	g.startWatching()
+}
+
+// sayBriefly puts a line from the driver in the balloon. Used where a
+// person asked for something the driver cannot do: the answer belongs on
+// screen, next to the menu entry they just picked, rather than in a log
+// nobody is reading.
+func (g *Ghost) sayBriefly(text string) {
+	// Nowhere to show it is nowhere to read it — the same test canAsk makes
+	// before putting a question up.
+	if g.surface == nil {
+		g.log.Info(hlog.Screen, "%s", text)
+		return
+	}
+	g.showPaged(text)
+	g.lingerBalloon(g.balloonGen(), noticeLinger)
+}
+
+// noticeLinger is long enough to read a sentence with a command in it.
+const noticeLinger = 8 * time.Second

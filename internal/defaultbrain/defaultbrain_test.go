@@ -480,3 +480,61 @@ func TestWhatWasNoticedFeedsSpeakingFirst(t *testing.T) {
 		t.Errorf("speaking first ignored what had been noticed: %q", idle.Text)
 	}
 }
+
+// TestMenuOffersToWatchUntilItIs: window awareness is the one capability
+// with no moment of use to ask at — its consumer is a background poller —
+// so the menu entry *is* the question. It has to be there when nothing is
+// being watched, and gone once something is, or it is an option that does
+// nothing.
+func TestMenuOffersToWatchUntilItIs(t *testing.T) {
+	menu := func(intents []proto.Intent) []string {
+		for _, i := range only(intents, proto.IntentSay) {
+			if len(i.Choices) > 0 {
+				return i.Choices
+			}
+		}
+		return nil
+	}
+	doubleClick := []proto.Event{
+		{Type: proto.EventClick, Time: base},
+		{Type: proto.EventClick, Time: base.Add(200 * time.Millisecond)},
+	}
+
+	options := menu(run(t, doubleClick...))
+	if !contains(options, menuWatch) {
+		t.Errorf("the menu does not offer to watch: %v", options)
+	}
+
+	// Once window events are arriving, the offer is redundant.
+	watched := append([]proto.Event{
+		{Type: proto.EventWindow, Time: base, Name: "nvim", Text: "session.go"},
+	}, doubleClick...)
+	if options := menu(run(t, watched...)); contains(options, menuWatch) {
+		t.Errorf("still offering to start something already running: %v", options)
+	}
+}
+
+// TestPickingWatchAsksTheDriver: the brain emits `watch` and nothing else —
+// there is no answer to wait for, and whether the question is even put is
+// the driver's decision, not the brain's.
+func TestPickingWatchAsksTheDriver(t *testing.T) {
+	intents := run(t, proto.Event{
+		Type: proto.EventChoice, Time: base, Tag: menuTag, Name: menuWatch,
+	})
+	if n := len(only(intents, proto.IntentWatch)); n != 1 {
+		t.Fatalf("emitted %d watch intents, want 1: %+v", n, intents)
+	}
+	// Notably not a chat: asking to be watched is not a conversation.
+	if n := len(only(intents, proto.IntentChat)); n != 0 {
+		t.Errorf("billed a model for a permission request: %+v", intents)
+	}
+}
+
+func contains(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
