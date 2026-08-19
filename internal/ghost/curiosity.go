@@ -53,6 +53,8 @@ const (
 	// curiosityKey persists spends so restarting the ghost does not refill
 	// the allowance.
 	curiosityKey = internalKeyPrefix + "curiosity"
+	// sleepKey persists the consolidation allowance, for the same reason.
+	sleepKey = internalKeyPrefix + "sleep"
 )
 
 // AnimationConfig is the [animation] portion of the user config.
@@ -175,24 +177,35 @@ func loadCuriosityConfig() (int, error) {
 	return *root.Curiosity.ActionsPerDay, nil
 }
 
-// curiosity is a persisted daily allowance of unprompted actions.
-type curiosity struct {
+// allowance is a persisted daily ration of things the user did not ask
+// for. Two exist: unprompted actions (the curiosity budget) and
+// consolidation passes (memory.go's sleep), kept apart because they ration
+// different costs — one is the person's attention, the other their bill —
+// and a ghost should not go quiet because it spent the night thinking.
+type allowance struct {
 	mu     sync.Mutex
+	key    string
 	limit  int
 	spends []time.Time
 	store  Store
 	log    *hlog.Logger
 	now    func() time.Time
+	topic  hlog.Topic
 }
 
-func newCuriosity(limit int, store Store, log *hlog.Logger) *curiosity {
-	c := &curiosity{limit: limit, store: store, log: log, now: time.Now}
+func newAllowance(key string, limit int, store Store, log *hlog.Logger, topic hlog.Topic) *allowance {
+	c := &allowance{key: key, limit: limit, store: store, log: log, now: time.Now, topic: topic}
 	c.load()
 	return c
 }
 
-func (c *curiosity) load() {
-	raw, ok, err := storeGet(c.store, curiosityKey)
+// newCuriosity is the allowance that rations interruptions.
+func newCuriosity(limit int, store Store, log *hlog.Logger) *allowance {
+	return newAllowance(curiosityKey, limit, store, log, hlog.Curiosity)
+}
+
+func (c *allowance) load() {
+	raw, ok, err := storeGet(c.store, c.key)
 	if err != nil || !ok {
 		return
 	}
@@ -204,7 +217,7 @@ func (c *curiosity) load() {
 }
 
 // spend consumes one unprompted action, reporting whether it was allowed.
-func (c *curiosity) spend() (ok bool, remaining int) {
+func (c *allowance) spend() (ok bool, remaining int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -226,13 +239,13 @@ func (c *curiosity) spend() (ok bool, remaining int) {
 }
 
 // persist writes the spend log; callers hold the lock.
-func (c *curiosity) persist() {
+func (c *allowance) persist() {
 	b, err := json.Marshal(c.spends)
 	if err != nil {
 		return
 	}
-	if err := c.store.Set(curiosityKey, string(b)); err != nil {
-		c.log.Warn(hlog.Curiosity, "persisting the spend: %v", err)
+	if err := c.store.Set(c.key, string(b)); err != nil {
+		c.log.Warn(c.topic, "persisting the spend: %v", err)
 	}
 }
 

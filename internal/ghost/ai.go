@@ -75,9 +75,14 @@ func (g *Ghost) execChat(in proto.Intent, userDriven bool) {
 	// adds whatever the utterance is actually about, however long ago it
 	// happened — the part the history window and the recent-notes window
 	// both drop.
+	// Then the entity index: what the ghost has concluded about the people
+	// and projects this utterance actually names. Recall answers "what does
+	// this remind you of"; that question cannot answer "who is Sam", which
+	// is about a subject rather than a resemblance (see entity.go).
 	if !silent {
 		notes, recentNotes := g.notesContext()
-		system += notes + g.recallContext(g.recall(text, recentNotes))
+		system += notes + g.entityContext(text) +
+			g.recallContext(g.recall(text, recentNotes))
 	}
 	msgs = append(msgs, ai.Message{Role: "system", Content: system})
 	msgs = append(msgs, history...)
@@ -204,7 +209,7 @@ func (g *Ghost) execChat(in proto.Intent, userDriven bool) {
 	if in.SelfPrompt {
 		note = "Unprompted, you said: " + full
 	}
-	g.go_(hlog.Memory, "remembering an exchange", func() { g.remember("exchange", note) })
+	g.go_(hlog.Memory, "remembering an exchange", func() { g.remember(kindExchange, note) })
 }
 
 // execImagine handles an imagine intent: generate (or reuse from cache) an

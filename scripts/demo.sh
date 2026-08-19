@@ -6,16 +6,24 @@
 # WLR_BACKENDS=headless for a smoke test without any visible window.
 #
 # IDLE_MS sets how long the nested compositor must see no input before the
-# ghost is told the user has gone idle — which is when it may speak first.
-# The driver's own default is two minutes; IDLE_MS=10000 makes initiative
-# watchable without waiting around. Note the idleness is the *nested*
-# compositor's: moving the pointer across that window resets it.
+# ghost is told the user has gone idle — which is when it may speak first,
+# and when it may consolidate its memories. The driver's own default is two
+# minutes; IDLE_MS=10000 makes initiative watchable without waiting around.
+# Note the idleness is the *nested* compositor's: moving the pointer across
+# that window resets it.
+#
+# SLEEP_DELAY and SLEEP_AGE shorten the two waits in front of memory
+# consolidation (normally 5m after going idle, over memories at least 48h
+# old). SLEEP_DELAY=5s SLEEP_AGE=1s makes the whole thing watchable in a
+# sitting; see "testing consolidation" in DESIGN.md.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
 backend="${WLR_BACKENDS:-wayland}"
 idle_ms="${IDLE_MS:-}"
+sleep_delay="${SLEEP_DELAY:-}"
+sleep_age="${SLEEP_AGE:-}"
 workdir="$(mktemp -d /tmp/haunt-demo-XXXXXX)"
 # Kill child processes (not the whole group: that would kill this script
 # before the rm runs), then remove the workdir.
@@ -91,6 +99,14 @@ run_args=(run -x 200 -y 150)
 if [ -n "$idle_ms" ]; then
     echo ">> idle threshold: ${idle_ms}ms (leave the window alone to see it speak first)"
     run_args+=(-idle-ms "$idle_ms")
+fi
+if [ -n "$sleep_delay" ]; then
+    echo ">> consolidating ${sleep_delay} after going idle"
+    run_args+=(-consolidate-delay "$sleep_delay")
+fi
+if [ -n "$sleep_age" ]; then
+    echo ">> consolidating memories older than ${sleep_age}"
+    run_args+=(-consolidate-after "$sleep_age")
 fi
 WAYLAND_DISPLAY="$display" "$workdir/haunt" "${run_args[@]}" "$workdir/$ghost" &
 

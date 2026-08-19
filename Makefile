@@ -1,6 +1,6 @@
 GO ?= go
 
-.PHONY: build test vet fmt demo demo-ai demo-headless install-user clean
+.PHONY: build test vet fmt demo demo-ai demo-sleep demo-headless install-user clean
 
 build:
 	$(GO) build ./...
@@ -26,6 +26,15 @@ demo:
 # IDLE_MS=10000 shortens the wait before it speaks unprompted.
 demo-ai:
 	GHOST=wisp ./scripts/demo.sh
+
+# The AI ghost again, with memory consolidation collapsed to something you
+# can watch: idle after 10s, consolidate 5s later over anything at least a
+# second old. Say three or four related things to it first (haunt say ...),
+# then leave the nested window alone. Needs [ai.llm] and [ai.embed].
+# Read the result with: haunt journal / haunt journal -entities.
+demo-sleep:
+	GHOST=wisp IDLE_MS=10000 SLEEP_DELAY=5s SLEEP_AGE=1s \
+	    HAUNT_LOG=debug HAUNT_DEBUG=memory ./scripts/demo.sh
 
 # Same, but headless: no visible window, used to smoke-test the demo plumbing.
 demo-headless:

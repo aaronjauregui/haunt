@@ -27,8 +27,11 @@ const (
 	maxNoteLength  = 500
 )
 
-// execNote appends a self-note to the journal.
-func (g *Ghost) execNote(text string) {
+// appendNote adds one entry to the journal and nothing else. Separate from
+// execNote because consolidation (consolidate.go) writes here too, and it
+// has already embedded what it wrote — going through execNote would embed
+// it twice.
+func (g *Ghost) appendNote(text string) bool {
 	if len(text) > maxNoteLength {
 		text = text[:maxNoteLength]
 	}
@@ -39,10 +42,18 @@ func (g *Ghost) execNote(text string) {
 	}
 	b, err := json.Marshal(notes)
 	if err != nil {
-		return
+		return false
 	}
 	if err := g.store.Set(notesKey, string(b)); err != nil {
 		g.log.Warn(hlog.Memory, "saving note: %v", err)
+		return false
+	}
+	return true
+}
+
+// execNote appends a self-note to the journal and remembers it.
+func (g *Ghost) execNote(text string) {
+	if !g.appendNote(text) {
 		return
 	}
 	// Notes age out of the recency window after 20 more; the memory index
@@ -53,7 +64,7 @@ func (g *Ghost) execNote(text string) {
 	if g.memoryEnabled() {
 		go func() {
 			defer g.recoverPanic(hlog.Memory, "journalling")
-			g.remember("note", text)
+			g.remember(kindNote, text)
 		}()
 	}
 }

@@ -27,7 +27,7 @@ base_url = "http://localhost:11434/v1"   # Ollama, llama.cpp, anything
 model = "qwen2.5:7b"
 
 [ai.embed]                                # optional: long-term memory
-model = "nomic-embed-text"
+model = "nomic-embed-text"                # with this, it also sleeps: see below
 
 [ai.image]                                # optional: it can draw
 backend = "comfyui"
@@ -42,6 +42,15 @@ Any OpenAI-compatible endpoint works, which is nearly all of them; for a
 vendor that speaks its own format, point `base_url` at a router like
 LiteLLM. Cloud keys are named, not stored — set `api_key_env = "..."` and
 the driver reads that variable from its own environment.
+
+With an embedding model configured, the ghost remembers past conversations
+and pulls the relevant ones back into context months later. It also
+*sleeps*: while you are away it takes a cluster of old exchanges, works out
+what they amounted to, and writes that down — in its journal, where you can
+read it — along with what it now knows about the people and projects in
+them. The detail fades afterwards on how much it mattered rather than on
+how old it is. That is a model call you did not ask for, so it is rationed:
+`[memory] consolidations_per_day` (four by default, zero to switch it off).
 
 Everything AI is opt-in twice — the ghost asks for a capability, you grant
 it — and the driver holds the keys and the budgets, never the ghost.
@@ -109,6 +118,7 @@ is cropped to what it covers so animation stays cheap.
 | `haunt dev <dir>` | run with hot reload |
 | `haunt say <text>` | talk to it from a script |
 | `haunt history` / `haunt journal` | what was said / what it chose to remember |
+| `haunt journal -entities` | who and what it thinks it knows about |
 | `haunt perms [grant\|revoke <cap>]` | what it may do — revocable while it runs |
 | `haunt shush` / `unshush` | quiet hours, now |
 | `haunt shell init <art.ora>` | build a shell from a layered drawing |

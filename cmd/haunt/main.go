@@ -84,7 +84,7 @@ func isSet(fs *flag.FlagSet, name string) bool {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage:
-  haunt run [-x N] [-y N] [-output NAME] [-record FILE] [-state DIR] [ghost-dir|name]
+  haunt run [-x N] [-y N] [-output NAME] [-record FILE] [-state DIR] [-idle-ms N] [ghost-dir|name]
   haunt dev [-x N] [-y N] [-state DIR] <ghost-dir>
   haunt say [-ghost NAME] <text>
   haunt new [-brain] <name>
@@ -95,7 +95,7 @@ func usage() {
   haunt ls | rm <name> | switch <name>
   haunt perms [name] | perms grant|revoke <capability> [name]
   haunt shush [duration] | unshush
-  haunt journal [name | -state DIR]
+  haunt journal [-entities] [name | -state DIR]
   haunt history [-n N] [name | -state DIR]`)
 }
 
@@ -107,6 +107,16 @@ func cmdRun(args []string) error {
 	record := fs.String("record", "", "record the event session to FILE (JSONL)")
 	state := fs.String("state", "", "override state directory")
 	idleMS := fs.Uint("idle-ms", 0, "idle threshold in milliseconds (default 2 minutes)")
+	// Consolidation is scheduled for a real working day: five minutes after
+	// you walk away, over memories at least two days old. Both are right and
+	// both make it unwatchable, so they are overridable for the same reason
+	// -idle-ms is — you cannot debug a behaviour you have to wait two days
+	// to see. Neither belongs in the config file: this is a demo and
+	// debugging affordance, not a preference.
+	sleepAfter := fs.Duration("consolidate-delay", 0,
+		"wait after the user goes idle before consolidating memories (default 5m)")
+	sleepAge := fs.Duration("consolidate-after", 0,
+		"how old a memory must be to be consolidated (default 48h)")
 	fs.Parse(args)
 	if fs.NArg() > 1 {
 		return fmt.Errorf("run: at most one ghost directory or name expected")
@@ -117,12 +127,14 @@ func cmdRun(args []string) error {
 	logger := hlog.Open(os.Stderr)
 	opts := ghost.Options{
 		X: *x, Y: *y,
-		Placed:        isSet(fs, "x") || isSet(fs, "y"),
-		Output:        *output,
-		RecordTo:      *record,
-		StateDir:      *state,
-		IdleTimeoutMS: uint32(*idleMS),
-		Logger:        logger,
+		Placed:           isSet(fs, "x") || isSet(fs, "y"),
+		Output:           *output,
+		RecordTo:         *record,
+		StateDir:         *state,
+		IdleTimeoutMS:    uint32(*idleMS),
+		ConsolidateDelay: *sleepAfter,
+		ConsolidateAfter: *sleepAge,
+		Logger:           logger,
 		// Machine-readable readiness marker for scripts and tests.
 		OnReady: func() { fmt.Println("READY") },
 	}

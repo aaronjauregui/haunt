@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/aaronjauregui/haunt/internal/ai"
 	"github.com/aaronjauregui/haunt/internal/hlog"
@@ -52,38 +53,48 @@ func TestCosine(t *testing.T) {
 	}
 }
 
-// TestMemoryRingWraps: the index is bounded, and wrapping overwrites the
-// oldest slot rather than growing the store forever.
-func TestMemoryRingWraps(t *testing.T) {
+// TestMemoryIndexIsBounded: however long a ghost runs, the index reuses
+// slots rather than growing the store forever, and what has just been
+// written is in it. *Which* slot a full index gives up is the separate
+// question forget_test.go asks.
+func TestMemoryIndexIsBounded(t *testing.T) {
 	s := &memStore{m: map[string]string{}}
-	g := &Ghost{store: s}
+	g := &Ghost{store: s, log: hlog.Discard()}
 
+	now := time.Now()
 	for i := 0; i < maxMemories+3; i++ {
-		slot := g.nextMemorySlot()
-		entry, _ := json.Marshal(memory{Kind: "note", Text: fmt.Sprintf("note %d", i)})
-		if err := s.Set(memKeyPrefix+strconv.Itoa(slot), string(entry)); err != nil {
+		key, cursor := g.allocMemorySlot()
+		entry, _ := json.Marshal(memory{
+			Kind: kindNote, Text: fmt.Sprintf("note %d", i),
+			// Ascending, so the newest entry is always the strongest and
+			// the pass never immediately evicts what it just wrote.
+			Time: now.Add(time.Duration(i) * time.Minute),
+		})
+		if err := s.Set(key, string(entry)); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.Set(memCursorKey, strconv.Itoa(slot+1)); err != nil {
-			t.Fatal(err)
+		if cursor >= 0 {
+			if err := s.Set(memCursorKey, strconv.Itoa(cursor)); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 
 	mems := g.loadMemories()
 	if len(mems) != maxMemories {
-		t.Errorf("stored %d memories, want the ring capped at %d", len(mems), maxMemories)
+		t.Errorf("stored %d memories, want the index capped at %d", len(mems), maxMemories)
 	}
 	texts := map[string]bool{}
 	for _, m := range mems {
 		texts[m.Text] = true
 	}
-	if texts["note 0"] {
-		t.Error("oldest memory survived the wrap")
-	}
 	for _, want := range []string{"note 500", "note 501", "note 502"} {
 		if !texts[want] {
 			t.Errorf("newest memory %q missing", want)
 		}
+	}
+	if texts["note 0"] {
+		t.Error("the weakest memory survived a full index")
 	}
 }
 
@@ -110,6 +121,7 @@ func TestPickRelevant(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		in   []scored
+		tune tuning
 		want []string
 	}{{
 		// "what tea should I buy": the tea memories stand out; "my socks
@@ -166,9 +178,34 @@ func TestPickRelevant(t *testing.T) {
 		name: "flat and weak stays silent",
 		in:   score(0.40, 0.39, 0.38, 0.37, 0.36),
 		want: nil,
+	}, {
+		// Summaries have their own path because they score high against
+		// everything. A cluster of them at 0.58 — a match that would carry
+		// a raw exchange — is the generality of the summary talking, not
+		// relevance to the utterance.
+		name: "summary pool ignores what would pass as a raw match",
+		in:   score(0.58, 0.56),
+		tune: summaryTuning,
+		want: nil,
+	}, {
+		name: "a summary plainly about the utterance still gets in",
+		in:   score(0.71, 0.55),
+		tune: summaryTuning,
+		want: []string{"m0"},
+	}, {
+		// Two is the ceiling however many summaries score well: each one
+		// stands for a dozen exchanges.
+		name: "summaries are capped tighter than raw entries",
+		in:   score(0.90, 0.88, 0.86),
+		tune: summaryTuning,
+		want: []string{"m0", "m1"},
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := texts(pickRelevant(tc.in))
+			tune := tc.tune
+			if tune.max == 0 {
+				tune = rawTuning
+			}
+			got := texts(pickRelevant(tc.in, tune))
 			if len(got) != len(tc.want) {
 				t.Fatalf("recalled %v, want %v", got, tc.want)
 			}

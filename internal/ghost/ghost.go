@@ -85,6 +85,12 @@ type Options struct {
 	// IdleTimeoutMS overrides the inactivity threshold for idle events
 	// (default 2 minutes).
 	IdleTimeoutMS uint32
+	// ConsolidateDelay overrides how long after the user goes away the
+	// ghost starts consolidating memories, and ConsolidateAfter how old a
+	// memory must be to be material for it. Both exist so tests do not have
+	// to wait five minutes for a two-day-old exchange.
+	ConsolidateDelay time.Duration
+	ConsolidateAfter time.Duration
 }
 
 // Ghost is a running instance.
@@ -160,7 +166,11 @@ type Ghost struct {
 	awareness AwarenessConfig
 
 	// Initiative accounting (see curiosity.go).
-	curiosity       *curiosity
+	curiosity *allowance
+	// sleep is the separate allowance for consolidation, and sleeper the
+	// state of the pass itself (see consolidate.go).
+	sleep           *allowance
+	sleeper         sleeper
 	initMu          sync.Mutex
 	promptedUntil   time.Time
 	initiativeUntil time.Time
@@ -352,6 +362,15 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		return err
 	}
 	g.curiosity = newCuriosity(actionsPerDay, g.store, log)
+
+	// And the separate one for consolidation: it rations the user's bill
+	// rather than their attention, so a ghost that spent the night
+	// thinking still has things to say in the morning.
+	sleepsPerDay, err := loadMemoryConfig()
+	if err != nil {
+		return err
+	}
+	g.sleep = newAllowance(sleepKey, sleepsPerDay, g.store, log, hlog.Memory)
 
 	// AI services (backends are user-configured; absent config just means
 	// the capabilities error out when used).
@@ -555,6 +574,10 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	// an AI request nobody is left to hear, will otherwise hold the whole
 	// teardown open.
 	close(g.stopping)
+	// Whatever the ghost was thinking about in its sleep, it is not
+	// finishing it now: the cancel is what stops teardown waiting on a
+	// model call nobody will read (consolidate.go).
+	g.wakeUp()
 	g.publish(proto.Event{Type: proto.EventShutdown})
 	g.timersMu.Lock()
 	for _, t := range g.timers {
@@ -619,6 +642,11 @@ func (g *Ghost) publishExternal(e proto.Event) error {
 		g.markPrompted()
 	case e.Type == proto.EventIdle:
 		g.endResponding()
+		// Nobody is waiting, so this is when the ghost gets to think about
+		// what it already knows (consolidate.go).
+		g.beginSleeping()
+	case e.Type == proto.EventActive:
+		g.wakeUp()
 	}
 	return g.bus.Publish(e)
 }
