@@ -16,6 +16,7 @@ its reasoning.
 
     make demo        # a scripted ghost, in a nested sway window
     make demo-ai     # one that talks to your LLM
+    make demo-sleep  # the same, with memory consolidation sped up to watch
 
 Poke it, drag it, double-click for a menu, right-click to type at it. A
 menu can be answered with the mouse or with the number keys. `make demo-ai` needs an
@@ -63,11 +64,20 @@ capture that window and show it to a vision model. Both are refused unless
 granted, never fire for apps on `[awareness] ignore` (password managers and
 the like, by default), and never run while something is fullscreen.
 
-With `window` granted, the ghost watches the *shape* of the day rather than
-each window: a long stretch in one file, a flip-flop between two
-applications, a title that keeps coming back. That is what it spends its
-unprompted remarks on, and none of it is written down or leaves the
-machine.
+`window` is the one it asks for differently. What would use it is a poller,
+so there is no moment of use to ask at, and a permission popup at login
+about nothing in particular is the thing this design avoids — so instead
+the ghost offers it from its menu ("Keep an eye on what I'm working on")
+and you raise the question yourself, whenever you feel like it.
+
+Granted, it watches the *shape* of the day rather than each window: a long
+stretch in one file, a flip-flop between two applications, a title that
+keeps coming back, coming back to the machine after an afternoon out, the
+first thing you open in the morning, still being at it at midnight. That is
+what it spends its unprompted remarks on. None of it leaves the machine,
+and the little that is written down — enough to still recognise a
+recurrence after a reboot — stores window titles as hashes, so it can be
+counted but not read.
 
 `haunt perms` shows what a ghost asked for and what it has, and takes it
 back:
@@ -91,7 +101,8 @@ Hyprland config if the service does not start.
 That scaffolds a whole ghost: a manifest and a persona. There is no brain
 in it and nothing to compile — a ghost that declares no brain runs on the
 driver's built-in one, which chats in your persona, draws when asked, keeps
-a journal and speaks first now and then. What is left to do is the art.
+a journal, offers to notice what you are working on, and speaks first now
+and then. What is left to do is the art.
 
     haunt new -brain mycompanion
 
