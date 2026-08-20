@@ -56,8 +56,12 @@ type Store interface {
 // apart again would be arguing with the person holding the mouse.
 type Spots interface {
 	// Claim reserves a rectangle, returning where it actually fits: the
-	// requested spot if it is free, otherwise the nearest free one.
-	Claim(output string, x, y, w, h int) (int, int)
+	// requested spot if it is free, otherwise the nearest free one. speak
+	// is the horizontal room the ghost needs beside it for its balloon —
+	// standing two ghosts shoulder to shoulder leaves each of them talking
+	// over the other, which is worse than overlapping, because a covered
+	// balloon is a sentence you never see.
+	Claim(output string, x, y, w, h, speak int) (int, int)
 	// Moved records a new position for a ghost that has already opened.
 	Moved(output string, x, y, w, h int)
 	// Release gives the spot back when the ghost stops.
@@ -327,7 +331,11 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	// computed the same way for both.
 	if opts.Spots != nil {
 		w, h := sp.Size()
-		claimedX, claimedY := opts.Spots.Claim(outName, startX, startY, w, h)
+		// The balloon's widest, which is fixed by the theme rather than by
+		// this screen — the height cap below depends on the display, the
+		// width does not.
+		speak := balloon.DefaultTheme().MaxWidth + balloonGap
+		claimedX, claimedY := opts.Spots.Claim(outName, startX, startY, w, h, speak)
 		if claimedX != startX || claimedY != startY {
 			log.Info(hlog.Place, "(%d,%d) was taken; opening at (%d,%d)",
 				startX, startY, claimedX, claimedY)
@@ -926,9 +934,47 @@ func (g *Ghost) setTimer(name string, d time.Duration) {
 
 // balloonPos computes the balloon anchor: to the right of the sprite,
 // vertically near its top.
-func (g *Ghost) balloonPos() (int32, int32) {
+func (g *Ghost) balloonPos(lw int32) (int32, int32) {
 	x, y, w, _ := g.surface.Geometry()
-	return x + w + 12, y
+	edge, known := g.outputWidth()
+	return balloonSide(x, w, lw, edge, known), y
+}
+
+// balloonSide picks which side of the sprite a panel of width lw sits on.
+// To the right by default — reading order, and the ghost faces its own
+// words — but flipped to the left when there is no room on the right. That
+// is the ordinary case rather than an exotic one: a ghost's default spot is
+// the bottom right of the screen, so the side it would rather speak on is
+// exactly the side with nothing left of it, and a lone ghost in its own
+// default corner used to talk off the edge of the display.
+//
+// It stays on the right when neither side fits, because a panel running off
+// the right edge is at least anchored to the ghost that said it, while one
+// pushed to a negative x is somewhere else entirely.
+func balloonSide(x, w, lw, edge int32, known bool) int32 {
+	right := x + w + balloonGap
+	if known && right+lw > edge {
+		if left := x - balloonGap - lw; left >= 0 {
+			return left
+		}
+	}
+	return right
+}
+
+// outputWidth is the width of the screen this ghost is on. Not the first
+// screen: on a two-monitor desk those are different questions, and the one
+// that matters is where the balloon is about to be drawn.
+func (g *Ghost) outputWidth() (int32, bool) {
+	if g.app == nil {
+		return 0, false
+	}
+	if g.outputName != "" {
+		if o, ok := g.app.OutputNamed(g.outputName); ok {
+			return o.W, true
+		}
+	}
+	w, _, known := g.app.OutputSize()
+	return w, known
 }
 
 // renderer returns the balloon renderer for the scale the ghost is
@@ -974,9 +1020,11 @@ func (g *Ghost) showBalloonSprite(sp *sprite.Sprite) {
 	if g.surface == nil {
 		return // no compositor: tests drive balloons without a screen
 	}
-	x, y := g.balloonPos()
 	w, h := sp.Size()
 	lw, lh := g.renderer().LogicalSize(w, h)
+	// Measured before it is placed: which side of the ghost the panel goes
+	// on depends on how wide it is.
+	x, y := g.balloonPos(int32(lw))
 	bln, err := g.app.CreateSpriteOpts(sp, x, y, wlclient.SurfaceOptions{
 		PassThrough: true,
 		LogicalW:    int32(lw),
@@ -1054,7 +1102,10 @@ func (g *Ghost) placeBalloon() {
 	if bln == nil {
 		return
 	}
-	x, y := g.balloonPos()
+	// The panel's own width, so a ghost dragged towards the right edge
+	// flips its balloon over rather than dragging it off the screen.
+	_, _, lw, _ := bln.Geometry()
+	x, y := g.balloonPos(lw)
 	if err := bln.MoveTo(x, y); err != nil {
 		g.log.Warn(hlog.Balloon, "balloon follow failed: %v", err)
 	}

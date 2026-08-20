@@ -12,8 +12,9 @@ import (
 // So opening is arbitrated centrally. Only opening: once a person has
 // dragged two ghosts into a heap, the heap is what they asked for.
 
-// gap is the clearance left between two ghosts shuffled apart, so they read
-// as two characters standing near each other rather than one wide smear.
+// gap is the clearance left between two ghosts shuffled apart, over and
+// above the room each needs to speak in, so they read as two characters
+// standing near each other rather than one wide smear.
 const gap = 24
 
 // shuffles is how many times a ghost will step aside before giving up and
@@ -53,8 +54,15 @@ type View struct {
 	name string
 }
 
-// Claim reserves a rectangle, returning where it actually fits.
-func (v *View) Claim(output string, x, y, w, h int) (int, int) {
+// Claim reserves a rectangle, returning where it actually fits. speak is
+// the room the ghost needs beside it for its balloon, which is what sets
+// how far apart two ghosts have to stand: spacing them by their bodies
+// alone puts each one's balloon on top of its neighbour, and a covered
+// balloon is a sentence the person never sees. One lane between two ghosts
+// is enough, because the balloon flips to whichever side has room — see
+// balloonPos — so the neighbours share it and only collide if they both
+// speak at the same moment.
+func (v *View) Claim(output string, x, y, w, h, speak int) (int, int) {
 	r := v.room
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -64,7 +72,7 @@ func (v *View) Claim(output string, x, y, w, h int) (int, int) {
 	// conventional spot is the bottom right and there is more screen to the
 	// left of it; then rightward, for the ghost whose remembered place is
 	// already at the left edge.
-	for _, step := range []int{-(w + gap), w + gap} {
+	for _, step := range []int{-(w + speak + gap), w + speak + gap} {
 		for i := 0; i <= shuffles; i++ {
 			cand := rect{output: output, x: x + i*step, y: y, w: w, h: h}
 			if cand.x < 0 {

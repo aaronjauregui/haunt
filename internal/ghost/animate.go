@@ -152,6 +152,12 @@ func (g *Ghost) playClip(name string) {
 	g.anim.active[name] = r
 	g.anim.mu.Unlock()
 
+	// One line per clip start: "is my ghost animating at all" is otherwise
+	// unanswerable without watching it, and with several ghosts on screen
+	// the question becomes "is *that* one animating", which the name on the
+	// line answers.
+	g.log.Debug(hlog.Anim, "clip %q", name)
+
 	g.advanceClip(name)
 }
 

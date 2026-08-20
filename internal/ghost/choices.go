@@ -178,9 +178,11 @@ func (g *Ghost) showChoiceSprite(sp *sprite.Sprite) {
 	if g.surface == nil || g.app == nil {
 		return // tests drive the state machine without a screen
 	}
-	x, y := g.balloonPos()
 	w, h := sp.Size()
 	lw, lh := g.renderer().LogicalSize(w, h)
+	// A menu is placed like any other line, and flips to the ghost's other
+	// side for the same reason: options you cannot see cannot be chosen.
+	x, y := g.balloonPos(int32(lw))
 	bln, err := g.app.CreateSpriteOpts(sp, x, y, wlclient.SurfaceOptions{
 		Fixed:    true,
 		LogicalW: int32(lw),

@@ -18,6 +18,9 @@ import (
 
 const placeKey = internalKeyPrefix + "place"
 
+// balloonGap is the space between the ghost and the panel it speaks in.
+const balloonGap = 12
+
 // place is the remembered position.
 type place struct {
 	// Output is the connector the ghost was on ("DP-1"). Empty means the

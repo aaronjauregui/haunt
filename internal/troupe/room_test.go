@@ -6,11 +6,11 @@ import "testing"
 // the unlucky one, so the second must land somewhere else.
 func TestSecondGhostStepsAside(t *testing.T) {
 	r := NewRoom()
-	x1, y1 := r.For("wisp").Claim("DP-1", 1000, 500, 160, 160)
+	x1, y1 := r.For("wisp").Claim("DP-1", 1000, 500, 160, 160, 320)
 	if x1 != 1000 || y1 != 500 {
 		t.Fatalf("the first ghost should get the spot it asked for, got (%d,%d)", x1, y1)
 	}
-	x2, y2 := r.For("moth").Claim("DP-1", 1000, 500, 160, 160)
+	x2, y2 := r.For("moth").Claim("DP-1", 1000, 500, 160, 160, 320)
 	if y2 != 500 {
 		t.Errorf("stepping aside should stay on the bottom edge, got y=%d", y2)
 	}
@@ -22,11 +22,26 @@ func TestSecondGhostStepsAside(t *testing.T) {
 	}
 }
 
+// Not overlapping is not enough: two ghosts standing shoulder to shoulder
+// each put their balloon on top of the other, and a covered balloon is a
+// sentence the person never sees. The gap has to hold one.
+func TestGhostsAreSpacedToLeaveRoomToSpeak(t *testing.T) {
+	const sprite, speak = 160, 320
+	r := NewRoom()
+	x1, _ := r.For("wisp").Claim("DP-1", 1000, 500, sprite, sprite, speak)
+	x2, _ := r.For("moth").Claim("DP-1", 1000, 500, sprite, sprite, speak)
+
+	between := x1 - (x2 + sprite)
+	if between < speak {
+		t.Errorf("only %dpx between the two ghosts; a balloon needs %d", between, speak)
+	}
+}
+
 // The same coordinates on two screens are two different places.
 func TestDifferentScreensDoNotCollide(t *testing.T) {
 	r := NewRoom()
-	r.For("wisp").Claim("DP-1", 1000, 500, 160, 160)
-	x, y := r.For("moth").Claim("HDMI-A-1", 1000, 500, 160, 160)
+	r.For("wisp").Claim("DP-1", 1000, 500, 160, 160, 320)
+	x, y := r.For("moth").Claim("HDMI-A-1", 1000, 500, 160, 160, 320)
 	if x != 1000 || y != 500 {
 		t.Errorf("another screen is not crowded; got (%d,%d)", x, y)
 	}
@@ -37,9 +52,9 @@ func TestDifferentScreensDoNotCollide(t *testing.T) {
 func TestReleaseFreesTheSpot(t *testing.T) {
 	r := NewRoom()
 	v := r.For("wisp")
-	v.Claim("DP-1", 1000, 500, 160, 160)
+	v.Claim("DP-1", 1000, 500, 160, 160, 320)
 	v.Release()
-	x, y := r.For("moth").Claim("DP-1", 1000, 500, 160, 160)
+	x, y := r.For("moth").Claim("DP-1", 1000, 500, 160, 160, 320)
 	if x != 1000 || y != 500 {
 		t.Errorf("the spot should be free again; got (%d,%d)", x, y)
 	}
@@ -49,8 +64,8 @@ func TestReleaseFreesTheSpot(t *testing.T) {
 func TestAGhostDoesNotBlockItself(t *testing.T) {
 	r := NewRoom()
 	v := r.For("wisp")
-	v.Claim("DP-1", 1000, 500, 160, 160)
-	x, y := v.Claim("DP-1", 1000, 500, 160, 160)
+	v.Claim("DP-1", 1000, 500, 160, 160, 320)
+	x, y := v.Claim("DP-1", 1000, 500, 160, 160, 320)
 	if x != 1000 || y != 500 {
 		t.Errorf("a ghost should not be pushed off its own spot; got (%d,%d)", x, y)
 	}
@@ -59,8 +74,8 @@ func TestAGhostDoesNotBlockItself(t *testing.T) {
 // Against the left edge there is nowhere to step but right.
 func TestAtTheLeftEdgeItStepsRight(t *testing.T) {
 	r := NewRoom()
-	r.For("wisp").Claim("DP-1", 0, 500, 160, 160)
-	x, _ := r.For("moth").Claim("DP-1", 0, 500, 160, 160)
+	r.For("wisp").Claim("DP-1", 0, 500, 160, 160, 320)
+	x, _ := r.For("moth").Claim("DP-1", 0, 500, 160, 160, 320)
 	if x < 160 {
 		t.Errorf("with no room to the left it should step right; got x=%d", x)
 	}
@@ -71,12 +86,12 @@ func TestAtTheLeftEdgeItStepsRight(t *testing.T) {
 func TestMovedIsRespected(t *testing.T) {
 	r := NewRoom()
 	v := r.For("wisp")
-	v.Claim("DP-1", 1000, 500, 160, 160)
+	v.Claim("DP-1", 1000, 500, 160, 160, 320)
 	v.Moved("DP-1", 300, 200, 160, 160)
-	if x, y := r.For("moth").Claim("DP-1", 1000, 500, 160, 160); x != 1000 || y != 500 {
+	if x, y := r.For("moth").Claim("DP-1", 1000, 500, 160, 160, 320); x != 1000 || y != 500 {
 		t.Errorf("the vacated spot should be free; got (%d,%d)", x, y)
 	}
-	if x, _ := r.For("shade").Claim("DP-1", 300, 200, 160, 160); x == 300 {
+	if x, _ := r.For("shade").Claim("DP-1", 300, 200, 160, 160, 320); x == 300 {
 		t.Error("the dragged-to spot should be taken")
 	}
 }
@@ -87,7 +102,7 @@ func TestOutOfRoomItOpensAnyway(t *testing.T) {
 	// A wide sprite on a narrow imaginary screen: after `shuffles` steps
 	// in each direction there is nowhere left that is free.
 	for i := 0; i < shuffles*2+4; i++ {
-		r.For(string(rune('a'+i))).Claim("DP-1", 400, 0, 400, 160)
+		r.For(string(rune('a'+i))).Claim("DP-1", 400, 0, 400, 160, 320)
 	}
 	if got := len(r.taken); got != shuffles*2+4 {
 		t.Errorf("every ghost should have a spot recorded, got %d", got)

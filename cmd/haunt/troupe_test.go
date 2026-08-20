@@ -1,12 +1,14 @@
 package main
 
 import (
+	"image"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/aaronjauregui/haunt/internal/testenv"
 )
@@ -129,4 +131,67 @@ wasm = "brain.wasm"
 	if _, err := os.Stat(filepath.Join(rt, "wisp.last")); err != nil {
 		t.Errorf("wisp was spoken to but not marked as recent: %v", err)
 	}
+
+	// Both ghosts must be able to *say* something you can read. The ghost
+	// in the conventional bottom-right corner would otherwise put its
+	// balloon past the right edge of the display, and the one beside it
+	// would put its own on top of its neighbour.
+	waitPanels(t, c, dir, 2)
+}
+
+// waitPanels waits for n separate balloon panels to be visible on screen,
+// none of them running off an edge. It counts runs of balloon-coloured
+// pixels along a horizontal scan rather than looking near any one sprite:
+// which side of a ghost its balloon ends up on is exactly what is under
+// test, so a helper that assumed a side would assume the answer.
+func waitPanels(t *testing.T, c *testenv.Compositor, dir string, n int) {
+	t.Helper()
+	path := filepath.Join(dir, "panels.png")
+	deadline := time.Now().Add(15 * time.Second)
+	var best int
+	for {
+		img := shot(t, c, path)
+		if runs := widestPanelRuns(img); len(runs) >= n {
+			return
+		} else if len(runs) > best {
+			best = len(runs)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("only %d balloon panels are on screen, want %d "+
+				"(a balloon off the edge or behind the other ghost looks exactly like this)", best, n)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// widestPanelRuns returns the horizontal extents of the balloon-coloured
+// runs on the screen's busiest scanline.
+func widestPanelRuns(img image.Image) [][2]int {
+	b := img.Bounds()
+	var best [][2]int
+	for y := b.Min.Y; y < b.Max.Y; y += 4 {
+		var runs [][2]int
+		start := -1
+		for x := b.Min.X; x < b.Max.X; x++ {
+			r, g, bl, _ := img.At(x, y).RGBA()
+			panel := r>>8 < 60 && g>>8 < 60 && bl>>8 > 40 && bl>>8 < 90
+			switch {
+			case panel && start < 0:
+				start = x
+			case !panel && start >= 0:
+				// Narrow runs are the ghost's own outline, not a panel.
+				if x-start > 80 {
+					runs = append(runs, [2]int{start, x})
+				}
+				start = -1
+			}
+		}
+		if start >= 0 && b.Max.X-start > 80 {
+			runs = append(runs, [2]int{start, b.Max.X})
+		}
+		if len(runs) > len(best) {
+			best = runs
+		}
+	}
+	return best
 }
