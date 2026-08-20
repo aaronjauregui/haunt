@@ -207,12 +207,18 @@ on.
 
 A converted shell often looks static, and usually is not broken. Its idle
 animation runs, but ukagaka shells lean on their script to change
-expression constantly, and nothing here does that yet. Naming a few poses
-is what makes the face follow the words:
+expression constantly, and the script is the half this deliberately does
+not import. Naming a few poses is what puts a converted shell back in
+touch with its face:
 
     haunt-seriko -pose happy=3,sad=5,surprised=2 ghost.nar
 
-Only you can say which surface is a smile; `-n` lists what the shell has.
+Those names are what everything else here looks for. The face follows the
+words a ghost says, and between sentences it follows the shape of the day —
+sleepy after midnight, brighter when you come back from an afternoon out —
+so a shell with a few poses named is a shell that keeps changing even when
+nobody is talking. Only you can say which surface is a smile; `-n` lists
+what the shell has.
 
 ## Commands
 

@@ -108,7 +108,9 @@ const (
 	// Curiosity is initiative accounting: what was spent and what was
 	// refused.
 	Curiosity Topic = "curiosity"
-	// Control is the socket other programs talk to, and cross-ghost tells.
+	// Control is the socket other programs talk to, and everything that
+	// passes between ghosts: tells they address to each other, and what
+	// each one saw the others do.
 	Control Topic = "control"
 )
 
