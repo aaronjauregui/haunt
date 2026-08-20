@@ -184,6 +184,12 @@ memory goes there too, so nothing lands in your library:
     make demo-seriko SERIKO=~/Downloads/some_ghost.nar
     make demo-seriko SERIKO=https://example.org/some_ghost.nar
 
+Worth knowing when one sits perfectly still: plenty of shells define no
+animation at all. Their `surfaces.txt` is collision boxes and nothing else,
+and every frame of movement came from the script switching surfaces — the
+half this deliberately does not import. `-n` tells you how many clips a
+shell actually has before you go looking for a bug.
+
 `SERIKO_ARGS` passes flags through — `-only 0,1,2` keeps a two-hundred-
 surface shell from converting all of it, `-surface N` picks what it rests
 on.
