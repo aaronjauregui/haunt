@@ -1,6 +1,6 @@
 GO ?= go
 
-.PHONY: build test vet fmt demo demo-ai demo-troupe demo-sleep demo-headless install-user clean
+.PHONY: build test vet fmt demo demo-ai demo-troupe demo-seriko demo-sleep demo-headless install-user clean
 
 build:
 	$(GO) build ./...
@@ -35,6 +35,17 @@ demo-ai:
 # whichever you last clicked. `haunt say -ghost wisp ...` addresses one.
 demo-troupe:
 	GHOST="whisper wisp" ./scripts/demo.sh
+
+# Try a ukagaka shell without installing anything. SERIKO takes a path or a
+# URL to a .nar or a shell directory; it is fetched, converted and run
+# inside a throwaway directory, and the ghost's memory goes there too, so
+# nothing lands in your library.
+#   make demo-seriko SERIKO=~/Downloads/some_ghost.nar
+#   make demo-seriko SERIKO=https://example.org/some_ghost.nar
+# SERIKO_ARGS passes flags through, e.g. SERIKO_ARGS="-only 0,1,2 -surface 0".
+demo-seriko:
+	@test -n "$(SERIKO)" || { echo "set SERIKO=<path or URL to a .nar or shell dir>"; exit 2; }
+	SERIKO="$(SERIKO)" SERIKO_ARGS="$(SERIKO_ARGS)" ./scripts/demo.sh
 
 # The AI ghost again, with memory consolidation collapsed to something you
 # can watch: idle after 10s, consolidate 5s later over anything at least a

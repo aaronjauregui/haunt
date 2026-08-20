@@ -25,11 +25,14 @@ idle_ms="${IDLE_MS:-}"
 sleep_delay="${SLEEP_DELAY:-}"
 sleep_age="${SLEEP_AGE:-}"
 workdir="$(mktemp -d /tmp/haunt-demo-XXXXXX)"
+# Short, because a unix socket path has about 100 characters to play with
+# and the control socket lives under this.
+runtime="$(mktemp -d /tmp/hd-XXXXXX)"
 # Kill child processes (not the whole group: that would kill this script
 # before the rm runs), then remove the workdir.
 cleanup() {
     kill $(jobs -p) 2>/dev/null || true
-    rm -rf "$workdir"
+    rm -rf "$workdir" "$runtime"
 }
 trap cleanup EXIT TERM INT
 
@@ -37,6 +40,12 @@ cat > "$workdir/sway.cfg" <<'EOF'
 output * bg #24283b solid_color
 EOF
 
+# SERIKO=<path or URL> converts a ukagaka shell and runs *that* instead of
+# the built-in demo ghosts. Everything happens inside the throwaway workdir:
+# the archive is downloaded there, converted there, and the ghost's state
+# lives there too, so trying somebody else's shell leaves nothing behind in
+# your library and nothing in the directory you ran this from.
+#
 # GHOST=whisper (default) or wisp, or several separated by spaces —
 # GHOST="whisper wisp" puts both on screen at once, which is how you watch
 # the multi-ghost behaviour: neither opens on top of the other, and `haunt
@@ -44,10 +53,31 @@ EOF
 # brain, built to WASM; wisp declares no brain at all and so runs on the
 # driver's built-in one, chatting via your configured LLM ([ai.llm] in
 # ~/.config/haunt/config.toml) and drawing via [ai.image].
+seriko="${SERIKO:-}"
 ghosts="${GHOST:-whisper}"
+ghost_dirs=()
+
+if [ -n "$seriko" ]; then
+    echo ">> building haunt and haunt-seriko"
+    go build -o "$workdir/haunt" ./cmd/haunt
+    go build -o "$workdir/haunt-seriko" ./cmd/haunt-seriko
+
+    src="$seriko"
+    case "$seriko" in
+    http://*|https://*)
+        echo ">> fetching $seriko"
+        src="$workdir/$(basename "${seriko%%\?*}")"
+        curl -fsSL "$seriko" -o "$src"
+        ;;
+    esac
+
+    echo ">> converting $src"
+    "$workdir/haunt-seriko" -o "$workdir/imported" ${SERIKO_ARGS:-} "$src"
+    ghost_dirs=("$workdir/imported")
+    ghosts="imported"
+else
 echo ">> building haunt and: $ghosts"
 go build -o "$workdir/haunt" ./cmd/haunt
-ghost_dirs=()
 for ghost in $ghosts; do
     mkdir -p "$workdir/$ghost"
     ghost_dirs+=("$workdir/$ghost")
@@ -82,6 +112,7 @@ EOF
         ;;
     esac
 done
+fi
 ghost_count=${#ghost_dirs[@]}
 
 echo ">> starting nested sway (backend: $backend)"
@@ -99,17 +130,23 @@ done
 [ -n "$display" ] || { echo "sway never reported a display"; tail "$workdir/sway.log"; exit 1; }
 
 echo ">> nested sway is up on $display; spawning $ghosts (click it, drag it, right-click to type at it)"
-echo ">> from another terminal, talk to it with:  go run ./cmd/haunt say \"hello\""
+# The control socket lives in the throwaway runtime dir, so the command a
+# person copies has to point at it too.
+echo ">> from another terminal, talk to it with:"
+echo ">>     HAUNT_RUNTIME_DIR=$runtime go run ./cmd/haunt say \"hello\""
+echo ">> and read back why it said that with:"
+echo ">>     go run ./cmd/haunt history -state $workdir/data/haunt/ghosts/<name> -why"
 if [ "$ghost_count" -gt 1 ]; then
     echo ">> two ghosts. \`say\` with no -ghost goes to whichever you last clicked:"
     echo ">>     go run ./cmd/haunt say \"who am I talking to\""
-    echo ">>   or address one by name:  go run ./cmd/haunt say -ghost whisper \"hello\""
+    echo ">>   or address one by name, with -ghost whisper"
     echo ">>   A ghost that has been run before comes back to where it was left, so"
     echo ">>   to watch the second one *step aside* from a shared default corner,"
     echo ">>   start from a clean slate:  XDG_DATA_HOME=\$(mktemp -d) make demo-troupe"
 fi
 if [[ " $ghosts " == *" wisp "* ]]; then
-    echo ">> wisp extras:  say help  |  say \"draw a whale\"  |  say \"draw again\"  |  say \"remember I like tea\"  |  haunt journal -state ~/.local/share/haunt/ghosts/wisp"
+    echo ">> wisp extras:  say help  |  say \"draw a whale\"  |  say \"draw again\"  |  say \"remember I like tea\""
+    echo ">>     journal:  go run ./cmd/haunt journal -state $workdir/data/haunt/ghosts/wisp"
 fi
 run_args=(run)
 if [ "$ghost_count" -eq 1 ]; then
@@ -129,6 +166,10 @@ if [ -n "$sleep_age" ]; then
     echo ">> consolidating memories older than ${sleep_age}"
     run_args+=(-consolidate-after "$sleep_age")
 fi
-WAYLAND_DISPLAY="$display" "$workdir/haunt" "${run_args[@]}" "${ghost_dirs[@]}" &
+# The ghost's memory and cache go in the workdir, not the real library: a
+# demo is for looking at, and an imported shell you are trying out has no
+# business leaving a state directory behind under somebody's name.
+XDG_DATA_HOME="$workdir/data" HAUNT_RUNTIME_DIR="$runtime" \
+    WAYLAND_DISPLAY="$display" "$workdir/haunt" "${run_args[@]}" "${ghost_dirs[@]}" &
 
 wait "$sway_pid"

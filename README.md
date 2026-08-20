@@ -17,6 +17,7 @@ its reasoning.
     make demo         # a scripted ghost, in a nested sway window
     make demo-ai      # one that talks to your LLM
     make demo-troupe  # two of them at once, sharing a screen
+    make demo-seriko SERIKO=<ghost.nar>   # somebody else's ukagaka shell
     make demo-sleep   # the first, with memory consolidation sped up to watch
 
 Poke it, drag it, double-click for a menu, right-click to type at it. A
@@ -167,8 +168,8 @@ is cropped to what it covers so animation stays cheap.
 Two decades of ukagaka shells exist. `haunt-seriko` converts their *art* —
 surfaces, collisions and frame-swap animation — into a haunt shell:
 
-    haunt-seriko -n mayura_final.nar          # what it would do
-    haunt-seriko -i-have-permission ghost.nar # convert it
+    haunt-seriko -n ghost.nar        # what it would do
+    haunt-seriko ghost.nar           # convert it
 
 It reads SERIKO/1.x and 2.0, PNG+PNA and colour-keyed transparency, and
 Shift-JIS files; surfaces become poses, collisions become named regions you
@@ -176,11 +177,16 @@ can poke, and animations become clips. It converts art only: SHIORI, SSTP
 and SakuraScript are out of scope and stay that way, so what you get is a
 shell a haunt brain wears, not somebody else's ghost.
 
-It will not convert a shell whose terms it cannot find, and it prints them
-when it can. These are people's drawings, usually under terms they wrote
-down in a readme and often in Japanese; converting for yourself is one
-thing, publishing the result is redistribution, and that is what most of
-those readmes are about.
+To try one without installing anything, point the demo at it. The archive
+is fetched, converted and run inside a throwaway directory, and the ghost's
+memory goes there too, so nothing lands in your library:
+
+    make demo-seriko SERIKO=~/Downloads/some_ghost.nar
+    make demo-seriko SERIKO=https://example.org/some_ghost.nar
+
+`SERIKO_ARGS` passes flags through — `-only 0,1,2` keeps a two-hundred-
+surface shell from converting all of it, `-surface N` picks what it rests
+on.
 
 ## Commands
 

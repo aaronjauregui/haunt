@@ -39,8 +39,6 @@ func run() error {
 	surface := fs.Int("surface", 0, "the surface the ghost rests on")
 	only := fs.String("only", "", "convert only these surface ids (comma separated), plus whatever they animate")
 	name := fs.String("name", "", "the ghost's name (default: from descript.txt)")
-	permitted := fs.Bool("i-have-permission", false,
-		"you have read the shell's terms and may convert it")
 	dry := fs.Bool("n", false, "say what would be written without writing it")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, `usage: haunt-seriko [-o DIR] [-surface N] [-only IDS] [-name NAME] [-n] <shell-dir | ghost.nar>
@@ -73,26 +71,6 @@ and always will be. What you get is a shell a haunt brain can wear.`)
 	raw, ok := src.Read("surfaces.txt")
 	if !ok {
 		return fmt.Errorf("no surfaces.txt under %s — is this a shell?", target)
-	}
-
-	// The terms, before anything is written.
-	lic, found := seriko.FindLicense(src)
-	if !found && !*permitted {
-		return &seriko.ErrNoLicense{Looked: seriko.LicenseNames()}
-	}
-	if found {
-		fmt.Fprintf(os.Stderr, "── terms, from %s ──\n%s\n──\n", lic.File, lic.Summary(30))
-		if flags := lic.Restrictive(); len(flags) > 0 {
-			fmt.Fprintf(os.Stderr, "\nThis reads like it restricts what you may do with the art. It %s.\n",
-				strings.Join(flags, "; it "))
-		}
-		fmt.Fprintln(os.Stderr,
-			"\nThese terms govern the art, not this tool. Converting for your own use is\n"+
-				"usually fine; publishing a converted ghost is redistribution, and that is what\n"+
-				"most of these readmes are about.")
-		if !*permitted {
-			return fmt.Errorf("read the terms above, then pass -i-have-permission to convert")
-		}
 	}
 
 	sh, err := seriko.Parse(raw)
@@ -226,9 +204,7 @@ func unzip(src, dest string) error {
 // renderManifest writes the ghost.toml a converted shell needs.
 func renderManifest(name string, res *seriko.Result) ([]byte, error) {
 	var b strings.Builder
-	b.WriteString("# Converted from ukagaka shell art by haunt-seriko.\n")
-	b.WriteString("# The art is the original author's and carries their terms; see the\n")
-	b.WriteString("# readme that came with the shell.\n\n")
+	b.WriteString("# Converted from ukagaka shell art by haunt-seriko.\n\n")
 	b.WriteString("[ghost]\n")
 	b.WriteString(fmt.Sprintf("name = %q\n", name))
 	b.WriteString("version = \"0.1.0\"\n")
