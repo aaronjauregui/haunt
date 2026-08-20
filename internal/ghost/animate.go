@@ -35,33 +35,6 @@ var triggerDelays = map[string][2]time.Duration{
 	shell.TriggerRarely:    {45 * time.Second, 150 * time.Second},
 }
 
-// clipDelay is the range to wait before an automatic clip runs again: the
-// shell's own rate when it states one, otherwise the trigger's range.
-//
-// A stated rate is jittered by half either way rather than obeyed exactly.
-// The formats this comes from express these as a probability per second,
-// which is not a metronome, and a blink landing on the beat reads as a
-// mechanism rather than a face.
-func clipDelay(c shell.Clip) (lo, hi time.Duration, ok bool) {
-	if c.EveryMS > 0 {
-		every := time.Duration(c.EveryMS) * time.Millisecond
-		if every < minClipDelay {
-			every = minClipDelay
-		}
-		return every / 2, every * 3 / 2, true
-	}
-	d, ok := triggerDelays[c.Trigger]
-	if !ok {
-		return 0, 0, false
-	}
-	return d[0], d[1], true
-}
-
-// minClipDelay is the floor under a shell-stated rate. A shell asking to
-// blink every fifty milliseconds is asking for a strobe, and the driver
-// composites and repaints on every frame of one.
-const minClipDelay = 700 * time.Millisecond
-
 // running is one clip in flight.
 type running struct {
 	clip    shell.Clip
@@ -140,7 +113,7 @@ func (g *Ghost) stopAnimation() {
 
 // scheduleClip arranges the next automatic run.
 func (g *Ghost) scheduleClip(c shell.Clip) {
-	lo, hi, ok := clipDelay(c)
+	d, ok := triggerDelays[c.Trigger]
 	if !ok {
 		return
 	}
@@ -149,7 +122,7 @@ func (g *Ghost) scheduleClip(c shell.Clip) {
 	if g.anim.stopped {
 		return
 	}
-	wait := lo + time.Duration(g.anim.rng.Int63n(int64(hi-lo)))
+	wait := d[0] + time.Duration(g.anim.rng.Int63n(int64(d[1]-d[0])))
 	g.anim.pending[c.Name] = time.AfterFunc(wait, func() {
 		g.guard(hlog.Anim, "clip "+c.Name, func() { g.playClip(c.Name) })
 	})
