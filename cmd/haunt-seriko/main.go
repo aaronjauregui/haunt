@@ -39,6 +39,8 @@ func run() error {
 	surface := fs.Int("surface", 0, "the surface the ghost rests on")
 	only := fs.String("only", "", "convert only these surface ids (comma separated), plus whatever they animate")
 	name := fs.String("name", "", "the ghost's name (default: from descript.txt)")
+	poses := fs.String("pose", "",
+		"name poses so the face can follow the words, e.g. happy=3,sad=5 (see -n for what the shell has)")
 	dry := fs.Bool("n", false, "say what would be written without writing it")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, `usage: haunt-seriko [-o DIR] [-surface N] [-only IDS] [-name NAME] [-n] <shell-dir | ghost.nar>
@@ -86,7 +88,11 @@ and always will be. What you get is a shell a haunt brain can wear.`)
 	if err != nil {
 		return err
 	}
-	res, err := seriko.Convert(sh, src, seriko.Options{Default: *surface, Only: ids})
+	named, err := parsePoses(*poses)
+	if err != nil {
+		return err
+	}
+	res, err := seriko.Convert(sh, src, seriko.Options{Default: *surface, Only: ids, Named: named})
 	if err != nil {
 		return err
 	}
@@ -248,6 +254,27 @@ func sortedPaths(files map[string][]byte) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// parsePoses reads `happy=3,sad=5`. SERIKO numbers its surfaces, and only a
+// person looking at the art knows which number is a smile.
+func parsePoses(s string) (map[string]int, error) {
+	if strings.TrimSpace(s) == "" {
+		return nil, nil
+	}
+	out := map[string]int{}
+	for _, pair := range strings.Split(s, ",") {
+		name, num, ok := strings.Cut(strings.TrimSpace(pair), "=")
+		if !ok {
+			return nil, fmt.Errorf("-pose: %q should look like happy=3", pair)
+		}
+		id, err := strconv.Atoi(strings.TrimSpace(num))
+		if err != nil {
+			return nil, fmt.Errorf("-pose: %q is not a surface id", num)
+		}
+		out[strings.TrimSpace(name)] = id
+	}
+	return out, nil
 }
 
 func parseOnly(s string) ([]int, error) {

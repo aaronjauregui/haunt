@@ -1105,6 +1105,11 @@ func (g *Ghost) setExpression(pose string) {
 	g.painted = g.shell.State()
 	g.shellMu.Unlock()
 
+	// The counterpart to the clip line: "did its face change" is otherwise
+	// as unanswerable as "is it animating", and on a shell whose poses are
+	// named something the driver cannot choose the answer is a silent no.
+	g.log.Debug(hlog.Anim, "expression %q", pose)
+
 	if g.surface == nil {
 		return // no compositor: tests drive the shell without one
 	}

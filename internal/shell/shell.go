@@ -83,6 +83,19 @@ type Manifest struct {
 	Hits []Hit `toml:"hit"`
 }
 
+// MoodPoses are the pose names the driver knows how to choose by itself,
+// from the mood of a line (see internal/ghost/expression.go). A shell that
+// names its poses these gets an expression that follows what it says,
+// without its brain asking for anything; a shell that names them otherwise
+// keeps whatever face its brain sets, which for a brain that sets none is
+// one face forever.
+//
+// Declared here rather than in the driver because it is a fact about the
+// shell format — an author choosing names, or a converter inventing them,
+// needs to know which ones mean something. A test in internal/ghost keeps
+// this and the mood table from drifting apart.
+var MoodPoses = []string{"happy", "sad", "surprised", "asleep", "thinking"}
+
 // Hit is a named rectangle a person can poke, independent of what is drawn
 // there. Declaration order decides ties, first one winning, which is what
 // the formats that use rectangles already mean by it.

@@ -46,6 +46,12 @@ type Options struct {
 	// surfaces converts to two hundred full-size PNGs otherwise, which is
 	// a lot of megabytes for a first look.
 	Only []int
+	// Named gives poses human names: "happy" -> 3. SERIKO identifies its
+	// surfaces by number, and a number cannot be chosen from the mood of a
+	// line — so a converted shell keeps one face until somebody says which
+	// surface is a smile. Only a person looking at the art can, which is
+	// why this is an argument rather than a guess.
+	Named map[string]int
 }
 
 // Result is a converted shell.
@@ -151,6 +157,32 @@ func Convert(sh *Shell, src Source, opts Options) (*Result, error) {
 				"alias %q stood for surfaces %v; using the first, since poses here are not random", alias, ids))
 		}
 		poses[name] = map[string]string{bodyLayer: variantName(ids[0])}
+	}
+
+	// Names the person gave, and the shell's own aliases above. Both are
+	// how a numbered surface becomes something the driver can choose.
+	for name, id := range opts.Named {
+		safe := safeName(name)
+		if safe == "" {
+			res.Notes = append(res.Notes, fmt.Sprintf("pose name %q has nothing usable in it; skipped", name))
+			continue
+		}
+		if _, ok := pics[id]; !ok {
+			res.Notes = append(res.Notes, fmt.Sprintf(
+				"pose %q wants surface %d, which this shell does not have; skipped", name, id))
+			continue
+		}
+		poses[safe] = map[string]string{bodyLayer: variantName(id)}
+	}
+
+	// Whether anything here can be chosen without a brain asking. Said out
+	// loud because the failure is silent otherwise: the ghost simply wears
+	// one face forever and looks broken rather than unconfigured.
+	if !anyMoodPose(poses) {
+		res.Notes = append(res.Notes, fmt.Sprintf(
+			"no pose is named for the driver's own expression inference (%s), so the face will not "+
+				"follow what the ghost says — pass -pose happy=N,sad=N to name them, or leave it to a brain",
+			strings.Join(shell.MoodPoses, ", ")))
 	}
 
 	// Animations.
@@ -294,6 +326,17 @@ func hits(s *Surface) []shell.Hit {
 		})
 	}
 	return out
+}
+
+// anyMoodPose reports whether the shell has a pose the driver can pick from
+// the mood of a line.
+func anyMoodPose(poses map[string]map[string]string) bool {
+	for _, m := range shell.MoodPoses {
+		if _, ok := poses[m]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func variantName(id int) string { return "s" + strconv.Itoa(id) }

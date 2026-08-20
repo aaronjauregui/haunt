@@ -188,6 +188,15 @@ memory goes there too, so nothing lands in your library:
 surface shell from converting all of it, `-surface N` picks what it rests
 on.
 
+A converted shell often looks static, and usually is not broken. Its idle
+animation runs, but ukagaka shells lean on their script to change
+expression constantly, and nothing here does that yet. Naming a few poses
+is what makes the face follow the words:
+
+    haunt-seriko -pose happy=3,sad=5,surprised=2 ghost.nar
+
+Only you can say which surface is a smile; `-n` lists what the shell has.
+
 ## Commands
 
 | | |

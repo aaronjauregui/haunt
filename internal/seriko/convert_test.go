@@ -370,3 +370,57 @@ func TestDirectIntervalMappings(t *testing.T) {
 		}
 	}
 }
+
+// A converted shell's poses are numbers, and the driver picks a face by
+// name — so unless somebody says which surface is a smile, the face never
+// changes. The converter cannot know, but it can say so, and it can take
+// the answer.
+func TestPoseNaming(t *testing.T) {
+	sh := parse(t, "surface0\n{\n}\n\nsurface3\n{\n}\n")
+	src := mem{
+		"surface0.png": pngOf(t, 60, 90, green, skin),
+		"surface3.png": pngOf(t, 60, 90, green, skin),
+	}
+
+	// Unnamed: the silence is called out, because it looks like a bug.
+	plain, err := Convert(sh, src, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasNote(plain.Notes, "expression inference") {
+		t.Errorf("an unnameable shell did not say so: %v", plain.Notes)
+	}
+
+	// Named: the pose exists under a name the driver can choose.
+	named, err := Convert(sh, src, Options{Named: map[string]int{"happy": 3}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sel, ok := named.Shell.Poses["happy"]
+	if !ok {
+		t.Fatalf("no happy pose; have %v", named.Shell.Poses)
+	}
+	if sel[bodyLayer] != "s3" {
+		t.Errorf("happy wears %q, want s3", sel[bodyLayer])
+	}
+	if hasNote(named.Notes, "expression inference") {
+		t.Error("a named shell still complained about inference")
+	}
+}
+
+// Naming a surface the shell does not have is a typo, and silently doing
+// nothing about it is how a person concludes the flag is broken.
+func TestPoseNamingRejectsAMissingSurface(t *testing.T) {
+	sh := parse(t, "surface0\n{\n}\n")
+	src := mem{"surface0.png": pngOf(t, 60, 90, green, skin)}
+	res, err := Convert(sh, src, Options{Named: map[string]int{"happy": 99}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := res.Shell.Poses["happy"]; ok {
+		t.Error("a pose was named for a surface that does not exist")
+	}
+	if !hasNote(res.Notes, "does not have") {
+		t.Errorf("the skip was not explained: %v", res.Notes)
+	}
+}
