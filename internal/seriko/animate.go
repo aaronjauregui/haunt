@@ -74,6 +74,10 @@ func convertAnimation(sh *Shell, src Source, pics map[int]*image.NRGBA,
 	if trigger == "" {
 		return nil, nil, note
 	}
+	every := 0
+	if resting {
+		every = periodMS(a)
+	}
 
 	// Frames drawn with `base` swap the whole body; everything else is an
 	// overlay of its own.
@@ -86,7 +90,7 @@ func convertAnimation(sh *Shell, src Source, pics map[int]*image.NRGBA,
 	}
 
 	if !overlay {
-		clip := baseClip(name, trigger, a, pics, s.ID)
+		clip := baseClip(name, trigger, every, a, pics, s.ID)
 		if clip == nil {
 			return nil, nil, fmt.Sprintf("%s: none of its frames could be read", name)
 		}
@@ -188,11 +192,11 @@ func convertAnimation(sh *Shell, src Source, pics map[int]*image.NRGBA,
 		keys = append(keys, shell.Key{At: at, Set: map[string]string{name: "none"}})
 	}
 
-	return &shell.Clip{Name: name, Trigger: trigger, Keys: keys}, &layer, note
+	return &shell.Clip{Name: name, Trigger: trigger, Keys: keys, EveryMS: every}, &layer, note
 }
 
 // baseClip builds a clip whose frames replace the body outright.
-func baseClip(name, trigger string, a *Animation, pics map[int]*image.NRGBA, own int) *shell.Clip {
+func baseClip(name, trigger string, every int, a *Animation, pics map[int]*image.NRGBA, own int) *shell.Clip {
 	var keys []shell.Key
 	at := 0
 	any := false
@@ -215,7 +219,7 @@ func baseClip(name, trigger string, a *Animation, pics map[int]*image.NRGBA, own
 	// Back to the surface it started from, or the ghost keeps whichever
 	// frame the clip ended on.
 	keys = append(keys, shell.Key{At: at, Set: map[string]string{bodyLayer: variantName(own)}})
-	return &shell.Clip{Name: name, Trigger: trigger, Keys: keys}
+	return &shell.Clip{Name: name, Trigger: trigger, Keys: keys, EveryMS: every}
 }
 
 // frameImage is the art for one animation frame.
@@ -284,6 +288,26 @@ func triggerFor(a *Animation, resting bool, name string) (string, string) {
 		name, a.Interval)
 }
 
+// periodMS is how often a SERIKO interval actually fires, in milliseconds,
+// or zero for the triggers that are not on a clock. It is what a converted
+// clip carries as its own rate, because SERIKO states this as a number and
+// rounding it into one of two buckets is what made an imported ghost look
+// like it had stopped blinking.
+func periodMS(a *Animation) int {
+	switch a.Interval {
+	case "sometimes":
+		return 2000 // one-in-two per second
+	case "rarely":
+		return 4000 // one-in-four per second
+	case "random", "periodic":
+		if a.Every > 0 {
+			return a.Every * 1000
+		}
+		return 4000
+	}
+	return 0
+}
+
 // byPeriod picks a haunt trigger from how often the SERIKO one actually
 // fires, rather than from what it is called.
 //
@@ -294,27 +318,15 @@ func triggerFor(a *Animation, resting bool, name string) (string, string) {
 // 3-12s and 45-150s. Matching the words maps a four-second blink onto a
 // ninety-second one and the ghost stops looking alive.
 func byPeriod(a *Animation, name string) (string, string) {
-	seconds := 0.0
-	switch a.Interval {
-	case "sometimes":
-		seconds = 2 // one-in-two per second
-	case "rarely":
-		seconds = 4 // one-in-four per second
-	case "random", "periodic":
-		seconds = float64(a.Every)
-		if seconds <= 0 {
-			seconds = 4
-		}
-	}
-	// The crossover sits between haunt's two ranges, nearer the fast one
-	// because that is where nearly every shell animation lives: blinks,
-	// breathing, hair. Anything slower than half a minute was meant to be
-	// occasional and can have the slow trigger.
+	// The clip carries its exact rate (periodMS), so the trigger only has
+	// to be the right *kind* of automatic — it decides what happens when
+	// something is fullscreen, and which bucket a shell falls back to if
+	// the rate is ever dropped.
+	seconds := float64(periodMS(a)) / 1000
 	if seconds <= 25 {
 		return shell.TriggerSometimes, ""
 	}
-	return shell.TriggerRarely, fmt.Sprintf(
-		"%s fired about every %.0fs; the nearest thing here is the slow trigger, at 45-150s", name, seconds)
+	return shell.TriggerRarely, ""
 }
 
 func sortedAnimIDs(s *Surface) []int {

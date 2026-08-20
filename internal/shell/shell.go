@@ -530,6 +530,18 @@ type Clip struct {
 	Trigger string `toml:"trigger"`
 	// Keys are the frames, in time order from the clip's start.
 	Keys []Key `toml:"keys"`
+	// EveryMS is roughly how often an automatic clip should run, when the
+	// shell wants to say so itself. Zero takes the trigger's own range,
+	// which is what a hand-authored shell normally wants: "sometimes" and
+	// "rarely" are the useful granularity when a person is guessing.
+	//
+	// It exists because a converted shell is not guessing. SERIKO states
+	// its rates as numbers — a blink every two seconds — and rounding that
+	// to the nearer of two buckets is the difference between a ghost that
+	// blinks and one that appears not to. The driver jitters around this
+	// rather than obeying it exactly: a face on a metronome reads as a
+	// machine.
+	EveryMS int `toml:"every_ms"`
 }
 
 // Key is one frame of a clip.
