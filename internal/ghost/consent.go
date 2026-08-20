@@ -139,10 +139,11 @@ var mayAsk = map[string]bool{
 	// to be asked in, and only when the user just provoked it: see
 	// execWatch, which is the sole caller.
 	"window": true,
-	// `tell` is left out until there is a second ghost to talk to: that
-	// intent runs on the loop that delivers intents, so asking there would
-	// stall the brain while somebody reads a question about a feature that
-	// currently does nothing.
+	// `tell` became askable once there was a second ghost to talk to. It
+	// asks off the intent loop rather than on it (see IntentTell), because
+	// blocking that loop while somebody reads would stop the ghost doing
+	// anything else, including saying the thing it is asking about.
+	"tell": true,
 }
 
 // ensureCapability reports whether the ghost may do this now, asking the

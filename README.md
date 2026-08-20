@@ -85,6 +85,31 @@ back:
     haunt perms                 # what it asked for, what it has
     haunt perms revoke window   # stops within seconds, no restart
 
+## More than one
+
+A desktop can hold several ghosts. `haunt switch` picks one instead of the
+others; `haunt add` and `haunt drop` are how you keep them:
+
+    haunt add moth      # moth moves in alongside whoever is there
+    haunt ls            # * marks who is resident
+    haunt drop moth     # moth moves out, keeping its memory and its grants
+    haunt run           # runs everyone resident
+
+Each ghost is its own session — its own memory, its own brain, its own
+compositor connection — so one crashing is one ghost lost rather than the
+room. What they share is what belongs to you rather than to any of them:
+nobody opens on top of anybody else, `haunt say` with no `-ghost` goes to
+the one you last interacted with, the hourly limits on backend calls are
+one ration between them rather than one each, and there is a ceiling on
+unprompted remarks across all of them together. That last one is
+sub-linear on purpose: a second ghost adds half an allowance rather than a
+whole one, so three ghosts are more present than one without being three
+times the interruptions or three times the model bill. Set it yourself with
+`[curiosity] actions_per_day_total` if you disagree.
+
+Quiet hours, the fullscreen rule and reduced motion stay what they always
+were: answers about the room, and every ghost obeys them.
+
 ## Live with it
 
     make install-user
@@ -125,7 +150,7 @@ is cropped to what it covers so animation stays cheap.
 
 | | |
 |---|---|
-| `haunt run [-output NAME] [ghost]` | run a ghost (remembers where it was) |
+| `haunt run [-output NAME] [ghost ...]` | run the resident ghosts (each remembers where it was) |
 | `haunt dev <dir>` | run with hot reload |
 | `haunt say <text>` | talk to it from a script |
 | `haunt history` / `haunt journal` | what was said / what it chose to remember |
@@ -134,6 +159,7 @@ is cropped to what it covers so animation stays cheap.
 | `haunt perms [grant\|revoke <cap>]` | what it may do — revocable while it runs |
 | `haunt shush` / `unshush` | quiet hours, now |
 | `haunt shell init <art.ora>` | build a shell from a layered drawing |
+| `haunt add <name>` / `haunt drop <name>` | who lives on your desktop |
 | `haunt new`, `pack`, `install`, `ls`, `switch`, `rm` | authoring and packages |
 
 ## Building

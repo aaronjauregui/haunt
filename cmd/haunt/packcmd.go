@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/aaronjauregui/haunt/internal/control"
 	"github.com/aaronjauregui/haunt/internal/ghost"
 	"github.com/aaronjauregui/haunt/internal/library"
 	"github.com/aaronjauregui/haunt/internal/pack"
@@ -131,12 +132,38 @@ func cmdInstall(args []string) error {
 	} else {
 		fmt.Printf("updated %s to %s\n", res.Name, res.Version)
 	}
-	if cur, _ := library.Current(); cur == "" {
+	// An empty library gets its first ghost made resident: installing one
+	// thing and then being told nobody is home is a poor introduction.
+	// A library that already has residents does not, because `haunt add`
+	// is the sentence for that and it should be the user's.
+	if resident, _ := library.Resident(); len(resident) == 0 {
 		if err := library.SetCurrent(res.Name); err == nil {
-			fmt.Printf("%s is now the current ghost\n", res.Name)
+			fmt.Printf("%s is now the resident ghost\n", res.Name)
 		}
+	} else {
+		fmt.Printf("run `haunt add %s` to have it join the others\n", res.Name)
 	}
 	return nil
+}
+
+// soleResident is the ghost a command means when it was not told: the one
+// resident ghost. It is deliberately an error rather than a guess when
+// several are resident — the caller supplies what to do about it, since
+// the fix differs per command.
+func soleResident(fix string) (string, error) {
+	names, err := library.Resident()
+	if err != nil {
+		return "", err
+	}
+	switch len(names) {
+	case 0:
+		return "", fmt.Errorf("no ghost is resident; %s, or haunt switch first", fix)
+	case 1:
+		return names[0], nil
+	default:
+		return "", fmt.Errorf("several ghosts are resident (%s); %s",
+			strings.Join(names, ", "), fix)
+	}
 }
 
 // cmdLs lists installed ghosts.
@@ -148,10 +175,15 @@ func cmdLs(args []string) error {
 	if err != nil {
 		return err
 	}
-	cur, _ := library.Current()
+	resident := map[string]bool{}
+	if names, err := library.Resident(); err == nil {
+		for _, n := range names {
+			resident[n] = true
+		}
+	}
 	for _, n := range names {
 		marker := " "
-		if n == cur {
+		if resident[n] {
 			marker = "*"
 		}
 		pkgDir, err := library.PkgDir(n)
@@ -174,7 +206,8 @@ func cmdRm(args []string) error {
 	return library.Remove(args[0])
 }
 
-// cmdSwitch selects the current ghost.
+// cmdSwitch makes one ghost the whole resident set: this one instead of
+// whoever was there.
 func cmdSwitch(args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("switch: exactly one ghost name expected")
@@ -182,6 +215,53 @@ func cmdSwitch(args []string) error {
 	if err := library.SetCurrent(args[0]); err != nil {
 		return err
 	}
-	fmt.Printf("current ghost is now %s\n", args[0])
+	fmt.Printf("%s is now the resident ghost\n", args[0])
+	return nil
+}
+
+// cmdAdd makes a ghost resident alongside the others: this one as well.
+func cmdAdd(args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("add: exactly one ghost name expected")
+	}
+	added, err := library.AddResident(args[0])
+	if err != nil {
+		return err
+	}
+	if !added {
+		fmt.Printf("%s is already resident\n", args[0])
+		return nil
+	}
+	names, _ := library.Resident()
+	fmt.Printf("%s is now resident (%s)\n", args[0], strings.Join(names, ", "))
+	return restartNote()
+}
+
+// cmdDrop takes a ghost out of the room. Not `rm`: its memory, grants and
+// package all stay, and adding it back picks up the conversation where it
+// stopped. Uninstalling is the other, destructive thing.
+func cmdDrop(args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("drop: exactly one ghost name expected")
+	}
+	if _, err := library.DropResident(args[0]); err != nil {
+		return err
+	}
+	names, _ := library.Resident()
+	if len(names) == 0 {
+		fmt.Printf("%s is no longer resident; nobody is\n", args[0])
+	} else {
+		fmt.Printf("%s is no longer resident (%s)\n", args[0], strings.Join(names, ", "))
+	}
+	return restartNote()
+}
+
+// restartNote says the obvious thing once rather than leaving the user to
+// wonder why nothing happened: the resident set is read at startup, and
+// changing it changes the next session rather than this one.
+func restartNote() error {
+	if len(control.Running()) > 0 {
+		fmt.Println("(the running session keeps its ghosts; restart haunt to apply this)")
+	}
 	return nil
 }

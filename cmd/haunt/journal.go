@@ -100,12 +100,9 @@ func resolveStateDir(override string, args []string) (string, error) {
 	if len(args) == 1 {
 		return library.GhostDir(args[0])
 	}
-	name, err := library.Current()
+	name, err := soleResident("pass a ghost name or -state DIR")
 	if err != nil {
 		return "", err
-	}
-	if name == "" {
-		return "", fmt.Errorf("pass a ghost name or -state DIR")
 	}
 	return library.GhostDir(name)
 }

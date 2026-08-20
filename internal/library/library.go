@@ -1,13 +1,14 @@
 // Package library manages installed ghosts: extraction into the data
 // directory, author-key pinning (trust on first use), capability grants,
-// and the "current ghost" selection.
+// and who is resident.
 //
 // Layout under $XDG_DATA_HOME/haunt:
 //
 //	ghosts/<name>/pkg/         extracted package content
 //	ghosts/<name>/state.db     the ghost's persistent memory
 //	ghosts/<name>/grants.toml  pinned author key + granted capabilities
-//	current                    name of the selected ghost
+//	resident                   the ghosts that should be running, one per line
+//	current                    the first of them, for a haunt older than this
 package library
 
 import (
@@ -273,30 +274,34 @@ func Remove(name string) error {
 	if _, err := os.Stat(filepath.Join(dir, "pkg", "ghost.toml")); err != nil {
 		return fmt.Errorf("ghost %q is not installed", name)
 	}
-	if cur, _ := Current(); cur == name {
-		root, _ := Root()
-		os.Remove(filepath.Join(root, "current"))
+	// Uninstalling implies leaving the room, and leaving it written down
+	// would mean the next login failed on a ghost that no longer exists.
+	if resident, err := Resident(); err == nil {
+		var kept []string
+		for _, n := range resident {
+			if n != name {
+				kept = append(kept, n)
+			}
+		}
+		if len(kept) != len(resident) {
+			// Deliberately not SetResident: it verifies each name is
+			// installed, and this ghost is about to stop being.
+			writeResident(kept)
+		}
 	}
 	return os.RemoveAll(dir)
 }
 
-// SetCurrent selects the default ghost for haunt run.
+// SetCurrent selects one ghost and only that one: `haunt switch` says
+// "this ghost instead of the others", so it replaces the resident set
+// rather than editing it. `haunt add` is how you keep the others.
 func SetCurrent(name string) error {
-	dir, err := GhostDir(name)
-	if err != nil {
-		return err
-	}
-	if _, err := os.Stat(filepath.Join(dir, "pkg", "ghost.toml")); err != nil {
-		return fmt.Errorf("ghost %q is not installed", name)
-	}
-	root, err := Root()
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(root, "current"), []byte(name+"\n"), 0o644)
+	return SetResident([]string{name})
 }
 
-// Current returns the selected ghost name, or "" if none.
+// Current returns the first resident ghost, or "" if none. It is the
+// single-ghost question — "which one, if I have to pick one" — and the
+// answer is the one the user chose first.
 func Current() (string, error) {
 	root, err := Root()
 	if err != nil {

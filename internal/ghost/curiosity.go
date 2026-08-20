@@ -176,30 +176,52 @@ type CuriosityConfig struct {
 	// ActionsPerDay caps unprompted actions in any rolling 24 hours. Zero
 	// disables initiative entirely; absent means defaultActionsPerDay.
 	ActionsPerDay *int `toml:"actions_per_day"`
+	// ActionsPerDayTotal caps unprompted actions across every resident
+	// ghost together. Absent means the ceiling is derived from the number
+	// of ghosts in the room (see internal/troupe); it is here for the user
+	// who wants to say "however many of you there are, twenty a day".
+	ActionsPerDayTotal *int `toml:"actions_per_day_total"`
 }
 
-// loadCuriosityConfig reads [curiosity] from the user config file.
-func loadCuriosityConfig() (int, error) {
+// Curiosity reports the user's [curiosity] settings: the per-ghost daily
+// allowance, and the explicit ceiling for the room if they set one (-1 when
+// they did not). The supervisor needs the second and the ghost needs the
+// first, and neither should be parsing the config file a second time.
+func Curiosity() (perGhost, room int, err error) {
+	cfg, err := curiosityConfig()
+	if err != nil {
+		return 0, 0, err
+	}
+	perGhost = defaultActionsPerDay
+	if cfg.ActionsPerDay != nil {
+		perGhost = *cfg.ActionsPerDay
+	}
+	room = -1
+	if cfg.ActionsPerDayTotal != nil {
+		room = *cfg.ActionsPerDayTotal
+	}
+	return perGhost, room, nil
+}
+
+// curiosityConfig reads [curiosity] from the user config file.
+func curiosityConfig() (CuriosityConfig, error) {
 	path, err := quiet.ConfigPath()
 	if err != nil {
-		return 0, err
+		return CuriosityConfig{}, err
 	}
 	var root struct {
 		Curiosity CuriosityConfig `toml:"curiosity"`
 	}
 	data, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
-		return 0, err
+		return CuriosityConfig{}, err
 	}
 	if err == nil {
 		if err := toml.Unmarshal(data, &root); err != nil {
-			return 0, fmt.Errorf("parsing %s: %w", path, err)
+			return CuriosityConfig{}, fmt.Errorf("parsing %s: %w", path, err)
 		}
 	}
-	if root.Curiosity.ActionsPerDay == nil {
-		return defaultActionsPerDay, nil
-	}
-	return *root.Curiosity.ActionsPerDay, nil
+	return root.Curiosity, nil
 }
 
 // allowance is a persisted daily ration of things the user did not ask
@@ -261,6 +283,21 @@ func (c *allowance) spend() (ok bool, remaining int) {
 	c.spends = append(c.spends, c.now())
 	c.persist()
 	return true, c.limit - len(c.spends)
+}
+
+// refund puts back the most recent spend. It exists for one case: an
+// action that passed this allowance and was then refused by a ceiling above
+// it. The alternative — asking the ceiling first — would have the ghost
+// spending a share of the household budget on something its own budget
+// could not afford anyway.
+func (c *allowance) refund() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.spends) == 0 {
+		return
+	}
+	c.spends = c.spends[:len(c.spends)-1]
+	c.persist()
 }
 
 // persist writes the spend log; callers hold the lock.
@@ -366,6 +403,14 @@ func (g *Ghost) allowInitiative(what string) bool {
 	ok, remaining := g.curiosity.spend()
 	if !ok {
 		g.log.Debug(hlog.Curiosity, "initiative: %s dropped (daily curiosity spent)", what)
+		return false
+	}
+	// And the household ceiling, if there are other ghosts in the room.
+	// Three ghosts each within their own allowance still add up to three
+	// times the interruptions and three times the bill.
+	if g.opts.Initiative != nil && !g.opts.Initiative(what) {
+		g.curiosity.refund()
+		g.log.Debug(hlog.Curiosity, "initiative: %s dropped (the room's daily allowance is spent)", what)
 		return false
 	}
 	g.openInitiative()

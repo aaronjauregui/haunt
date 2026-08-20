@@ -203,3 +203,41 @@ func TestWithAddsTopicsAndSharesTheDestination(t *testing.T) {
 		t.Error("With enabled more than it was given")
 	}
 }
+
+// Several ghosts writing to one destination need to be told apart, and one
+// ghost must not pay for that with a tag on every line.
+func TestNamedTagsLines(t *testing.T) {
+	var buf bytes.Buffer
+	l := New(&buf, LevelInfo, nil)
+	l.Info(Session, "alone")
+	l.Named("wisp").Info(Session, "with company")
+	l.Named("").Info(Session, "still alone")
+
+	got := buf.String()
+	for _, want := range []string{
+		"haunt: alone\n",
+		"haunt: wisp: with company\n",
+		"haunt: still alone\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+}
+
+// A named logger keeps the filters it was derived from: being tagged is
+// not a reason to start writing debug output nobody asked for.
+func TestNamedKeepsFilters(t *testing.T) {
+	var buf bytes.Buffer
+	l := New(&buf, LevelInfo, []Topic{Place}).Named("moth")
+	l.Debug(Place, "asked for")
+	l.Debug(Memory, "not asked for")
+
+	got := buf.String()
+	if !strings.Contains(got, "haunt: [place] moth: asked for") {
+		t.Errorf("the enabled topic did not survive Named:\n%s", got)
+	}
+	if strings.Contains(got, "not asked for") {
+		t.Errorf("Named turned on a topic that was off:\n%s", got)
+	}
+}

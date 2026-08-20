@@ -52,7 +52,7 @@ func (s *Service) Embed(ctx context.Context, text string) ([]float32, error) {
 	if !s.EmbedEnabled() {
 		return nil, fmt.Errorf("no embedding model configured (set [ai.embed] model in the haunt config)")
 	}
-	if err := s.embedBudget.spend(); err != nil {
+	if err := s.budgets.embed.spend(); err != nil {
 		return nil, fmt.Errorf("embed budget: %w", err)
 	}
 	s.trace("embed → %s model=%s\n  [text] %s", s.embedBaseURL(), s.cfg.Embed.Model, text)

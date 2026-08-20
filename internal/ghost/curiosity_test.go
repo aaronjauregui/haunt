@@ -246,3 +246,42 @@ func TestIdleClosesTheWindows(t *testing.T) {
 		t.Errorf("second idle cost nothing; spends = %d, want 2", spent)
 	}
 }
+
+// TestTheRoomCeilingCanRefuse: a ghost inside its own allowance may still
+// be turned away by the ceiling above it, and the spend it was about to
+// make is put back — otherwise a refused action would quietly cost the
+// ghost one of its own twelve.
+func TestTheRoomCeilingCanRefuse(t *testing.T) {
+	g, logged := testCuriosityGhost(t, 5)
+	room := 0
+	g.opts.Initiative = func(string) bool {
+		room++
+		return room <= 1
+	}
+
+	if !g.allowInitiative("say") {
+		t.Fatal("the first unprompted action should pass both allowances")
+	}
+	// Not inside the paid chain window, or the second would ride free.
+	g.endResponding()
+	if g.allowInitiative("say") {
+		t.Error("the second should be refused by the room's ceiling")
+	}
+	if got := len(g.curiosity.spends); got != 1 {
+		t.Errorf("the ghost spent %d of its own allowance, want 1: a refused action was charged", got)
+	}
+	if lines := strings.Join(logged(), "\n"); !strings.Contains(lines, "room's daily allowance") {
+		t.Errorf("the refusal should say who refused it:\n%s", lines)
+	}
+}
+
+// And with nobody else in the room there is no ceiling to consult.
+func TestALoneGhostHasNoCeiling(t *testing.T) {
+	g, _ := testCuriosityGhost(t, 2)
+	if g.opts.Initiative != nil {
+		t.Fatal("a ghost on its own should have no ceiling above it")
+	}
+	if !g.allowInitiative("say") {
+		t.Error("a lone ghost inside its allowance should act")
+	}
+}

@@ -25,7 +25,7 @@ func (s *Service) Look(ctx context.Context, question string, png []byte) (string
 	if !s.VisionEnabled() {
 		return "", fmt.Errorf("no vision model configured (set [ai.vision] model in the haunt config)")
 	}
-	if err := s.llmBudget.spend(); err != nil {
+	if err := s.budgets.llm.spend(); err != nil {
 		return "", fmt.Errorf("llm budget: %w", err)
 	}
 	s.trace("look → %s model=%s (%d KiB image)\n  [question] %s",

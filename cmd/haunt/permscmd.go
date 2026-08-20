@@ -42,19 +42,14 @@ func cmdPerms(args []string) error {
 }
 
 // permsWho resolves the ghost being talked about: the named one, or the
-// current one.
+// resident one when there is only one to mean. With a room full of ghosts
+// it asks rather than picks — granting a capability to the wrong character
+// is not a mistake to make silently.
 func permsWho(name string) (string, error) {
 	if name != "" {
 		return name, nil
 	}
-	cur, err := library.Current()
-	if err != nil {
-		return "", err
-	}
-	if cur == "" {
-		return "", fmt.Errorf("no ghost selected; name one, or haunt switch first")
-	}
-	return cur, nil
+	return soleResident("name one")
 }
 
 // permsList prints what the ghost asked for and what it has.

@@ -46,6 +46,24 @@ type Store interface {
 	Close() error
 }
 
+// Spots arbitrates opening positions when several ghosts share a screen.
+// A ghost running alone has none and opens wherever it was left; the
+// supervisor hands each resident ghost a view of the room bound to that
+// ghost, so Release needs no argument.
+//
+// Only *opening* is arbitrated. Once the user has dragged two ghosts into
+// a heap, that is where they want them, and a driver that pushed them
+// apart again would be arguing with the person holding the mouse.
+type Spots interface {
+	// Claim reserves a rectangle, returning where it actually fits: the
+	// requested spot if it is free, otherwise the nearest free one.
+	Claim(output string, x, y, w, h int) (int, int)
+	// Moved records a new position for a ghost that has already opened.
+	Moved(output string, x, y, w, h int)
+	// Release gives the spot back when the ghost stops.
+	Release()
+}
+
 // Options configures a ghost run.
 type Options struct {
 	// Store overrides the persistence backend. Nil uses SQLite in StateDir.
@@ -84,6 +102,19 @@ type Options struct {
 	// Refused reports a standing "never ask me about this again", so the
 	// question is not raised a second time. Nil means nothing was refused.
 	Refused func(cap string) bool
+	// Spots, when set, keeps this ghost from opening on top of another
+	// one. Nil means nothing else is on screen to avoid.
+	Spots Spots
+	// AIBudgets, when set, is the hourly ration of backend calls this
+	// ghost spends against, shared with the other resident ghosts. Nil
+	// gives the ghost one of its own, which is right when it is alone.
+	AIBudgets *ai.Budgets
+	// Initiative is a ceiling above this ghost's own curiosity allowance,
+	// consulted only for an action that would otherwise be charged and
+	// only once the ghost's own allowance has agreed to pay. It is what
+	// stops N resident ghosts multiplying the user's bill by N. Nil means
+	// there is no one else spending.
+	Initiative func(what string) bool
 	// IdleTimeoutMS overrides the inactivity threshold for idle events
 	// (default 2 minutes).
 	IdleTimeoutMS uint32
@@ -291,6 +322,19 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		}
 	}
 	g.outputName = outName
+	// Not on top of somebody else. Two ghosts opening in the same default
+	// corner is the ordinary case, not the unlucky one: the corner is
+	// computed the same way for both.
+	if opts.Spots != nil {
+		w, h := sp.Size()
+		claimedX, claimedY := opts.Spots.Claim(outName, startX, startY, w, h)
+		if claimedX != startX || claimedY != startY {
+			log.Info(hlog.Place, "(%d,%d) was taken; opening at (%d,%d)",
+				startX, startY, claimedX, claimedY)
+		}
+		startX, startY = claimedX, claimedY
+		defer opts.Spots.Release()
+	}
 	if g.surface, err = g.app.CreateSpriteOpts(sp, int32(startX), int32(startY),
 		wlclient.SurfaceOptions{Output: outName}); err != nil {
 		return err
@@ -367,7 +411,7 @@ func Run(ctx context.Context, dir string, opts Options) error {
 
 	// Initiative allowance. Persisted, so restarting the ghost is not a way
 	// to refill it.
-	actionsPerDay, err := loadCuriosityConfig()
+	actionsPerDay, _, err := Curiosity()
 	if err != nil {
 		return err
 	}
@@ -388,7 +432,7 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	if err != nil {
 		return err
 	}
-	g.aiSvc = ai.NewService(aiCfg, log)
+	g.aiSvc = ai.NewServiceWith(aiCfg, log, opts.AIBudgets)
 	g.cacheDir = filepath.Join(opts.StateDir, "cache")
 	if opts.StateDir == "" {
 		g.cacheDir = filepath.Join(os.TempDir(), "haunt-cache-"+m.Ghost.Name)
@@ -453,8 +497,11 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		g.publish(proto.Event{Type: proto.EventDragEnd, X: x, Y: y, Region: g.shell.RegionAt(x, y)})
 		// Dragging is how a person says where they want it, so that is
 		// what gets remembered.
-		if sx, sy, _, _ := g.surface.Geometry(); true {
+		if sx, sy, sw, sh := g.surface.Geometry(); true {
 			g.savePlace(int(sx), int(sy))
+			if opts.Spots != nil {
+				opts.Spots.Moved(g.outputName, int(sx), int(sy), int(sw), int(sh))
+			}
 		}
 	}
 	// The balloon belongs to the ghost: it follows the sprite while dragged.
@@ -487,6 +534,7 @@ func Run(ctx context.Context, dir string, opts Options) error {
 			return err
 		}
 		defer ctl.Close()
+		defer control.Forget(m.Ghost.Name)
 	}
 
 	// Idle awareness: after inactivity brains hear idle, and active when
@@ -655,6 +703,13 @@ func (g *Ghost) publishExternal(e proto.Event) error {
 		g.markPromptedFor(bootWindow)
 	case promptedEvent(e):
 		g.markPrompted()
+		// The same causality answers a second question: which ghost
+		// `haunt say` means when it is not told. Boot is left out — being
+		// started is not being spoken to, and a login that starts three
+		// ghosts must not make the last one to boot the one you address.
+		if g.manifest != nil {
+			control.Touch(g.manifest.Ghost.Name)
+		}
 	case e.Type == proto.EventIdle:
 		g.endResponding()
 		// Nobody is waiting, so this is when the ghost gets to think about
@@ -815,22 +870,38 @@ func (g *Ghost) execIntent(in proto.Intent) {
 	case proto.IntentNote:
 		g.execNote(in.Text)
 	case proto.IntentTell:
-		if !g.capabilityActive("tell") {
-			g.log.Debug(hlog.Control, "tell intent dropped: capability not granted")
-			return
-		}
 		if in.Name == g.manifest.Ghost.Name {
 			g.log.Debug(hlog.Control, "tell intent dropped: ghost addressed itself")
 			return
 		}
-		err := control.Send(in.Name, proto.Event{
-			Type: proto.EventMessage,
-			Text: in.Text,
-			From: g.manifest.Ghost.Name,
-		})
-		if err != nil {
-			g.log.Warn(hlog.Control, "tell %s: %v", in.Name, err)
+		// Granted already: sent from here, so two tells in a row arrive in
+		// the order the brain sent them. Only the question goes elsewhere.
+		if g.capabilityActive("tell") {
+			g.sendTell(in.Name, in.Text)
+			return
 		}
+		g.go_(hlog.Control, "tell", func() {
+			if !g.ensureCapability("tell") {
+				g.log.Debug(hlog.Control, "tell intent dropped: capability not granted")
+				return
+			}
+			g.sendTell(in.Name, in.Text)
+		})
+	}
+}
+
+// sendTell delivers one ghost's message to another over the second ghost's
+// control socket. The sender's name rides along, which is what keeps the
+// causality rules honest: a message with From set is another ghost talking,
+// not a person, and does not open a response window.
+func (g *Ghost) sendTell(to, text string) {
+	err := control.Send(to, proto.Event{
+		Type: proto.EventMessage,
+		Text: text,
+		From: g.manifest.Ghost.Name,
+	})
+	if err != nil {
+		g.log.Warn(hlog.Control, "tell %s: %v", to, err)
 	}
 }
 

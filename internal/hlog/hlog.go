@@ -129,6 +129,11 @@ type Logger struct {
 	// everything, whatever the map says.
 	debug map[Topic]bool
 	all   bool
+	// name tags every line with whose it is. Empty for a session with one
+	// ghost in it, where naming it would be noise; set by the supervisor
+	// when several are resident, because "placed on DP-1" is unreadable
+	// when three ghosts say it at once.
+	name string
 }
 
 // sink is the shared destination and the lock that serialises writes to it.
@@ -161,7 +166,7 @@ func (l *Logger) With(debug ...Topic) *Logger {
 	if l == nil {
 		return nil
 	}
-	out := &Logger{out: l.out, level: l.level, all: l.all, debug: map[Topic]bool{}}
+	out := &Logger{out: l.out, level: l.level, all: l.all, name: l.name, debug: map[Topic]bool{}}
 	for t := range l.debug {
 		out.debug[t] = true
 	}
@@ -173,6 +178,30 @@ func (l *Logger) With(debug ...Topic) *Logger {
 		out.debug[t] = true
 	}
 	return out
+}
+
+// Named returns a logger that tags its lines with a ghost's name, writing
+// to the same destination and keeping the same filters. An empty name
+// returns the logger unchanged, so a lone ghost's output is exactly what it
+// has always been.
+func (l *Logger) Named(name string) *Logger {
+	if l == nil || name == "" {
+		return l
+	}
+	out := &Logger{out: l.out, level: l.level, all: l.all, name: name, debug: map[Topic]bool{}}
+	for t := range l.debug {
+		out.debug[t] = true
+	}
+	return out
+}
+
+// Name reports the ghost this logger speaks for, empty when it speaks for
+// the session as a whole.
+func (l *Logger) Name() string {
+	if l == nil {
+		return ""
+	}
+	return l.name
 }
 
 // Discard is a logger that writes nothing, for tests that do not care.
@@ -209,6 +238,9 @@ func (l *Logger) log(t Topic, lv Level, format string, args ...any) {
 		prefix = "haunt: [" + string(t) + "] "
 	default:
 		prefix = "haunt: "
+	}
+	if l.name != "" {
+		prefix += l.name + ": "
 	}
 	l.out.mu.Lock()
 	defer l.out.mu.Unlock()

@@ -208,35 +208,57 @@ type Message struct {
 	Content string `json:"content"`
 }
 
-// Service executes AI requests within budget.
-type Service struct {
-	cfg         *Config
-	llmBudget   *budget
-	imageBudget *budget
-	embedBudget *budget
-	log         *hlog.Logger
+// Budgets is the hourly ration a Service spends against. It is a value of
+// its own rather than three fields inside Service because it is the one
+// part of a Service that several ghosts may need to *share*: the rate
+// limits are the user's money, and three resident ghosts each with a
+// private 120 calls an hour is 360 calls an hour. Ghosts running alone get
+// their own, which is the same thing seen from one side.
+type Budgets struct {
+	llm   *budget
+	image *budget
+	embed *budget
 }
 
-// NewService builds a Service from config. The logger receives prompt
-// traces on the prompt topic when
-// they are enabled; nil discards them.
+// NewBudgets builds an hourly ration from config. Defaults are filled in
+// here as well as in LoadConfig, so a Config built directly — tests,
+// embedders — gets a working allowance rather than one that refuses
+// everything.
+func NewBudgets(cfg BudgetConfig) *Budgets {
+	return &Budgets{
+		llm:   newBudget(orDefault(cfg.LLMRequestsPerHour, defaultLLMPerHour)),
+		image: newBudget(orDefault(cfg.ImageRequestsPerHour, defaultImagePerHour)),
+		embed: newBudget(orDefault(cfg.EmbedRequestsPerHour, defaultEmbedPerHour)),
+	}
+}
+
+// Service executes AI requests within budget.
+type Service struct {
+	cfg     *Config
+	budgets *Budgets
+	log     *hlog.Logger
+}
+
+// NewService builds a Service from config, with a ration of its own. The
+// logger receives prompt traces on the prompt topic when they are enabled;
+// nil discards them.
 func NewService(cfg *Config, log *hlog.Logger) *Service {
+	return NewServiceWith(cfg, log, NewBudgets(cfg.Budget))
+}
+
+// NewServiceWith is NewService against a ration that may be shared with
+// other ghosts. A nil ration means one of its own.
+func NewServiceWith(cfg *Config, log *hlog.Logger, budgets *Budgets) *Service {
 	// The config switch is an older spelling of "enable the prompt topic",
 	// so make it one: otherwise tracing is decided twice, and the second
 	// decision — the topic filter on the way out — silently wins.
 	if cfg.LogPrompts {
 		log = log.With(hlog.Prompt)
 	}
-	return &Service{
-		cfg: cfg,
-		// Defaulted here as well as in LoadConfig, so a Config built
-		// directly — tests, embedders — gets a working allowance rather
-		// than one that refuses everything.
-		llmBudget:   newBudget(orDefault(cfg.Budget.LLMRequestsPerHour, defaultLLMPerHour)),
-		imageBudget: newBudget(orDefault(cfg.Budget.ImageRequestsPerHour, defaultImagePerHour)),
-		embedBudget: newBudget(orDefault(cfg.Budget.EmbedRequestsPerHour, defaultEmbedPerHour)),
-		log:         log,
+	if budgets == nil {
+		budgets = NewBudgets(cfg.Budget)
 	}
+	return &Service{cfg: cfg, budgets: budgets, log: log}
 }
 
 // orDefault fills in an unconfigured allowance.
@@ -345,7 +367,7 @@ func (s *Service) Chat(ctx context.Context, msgs []Message, onDelta func(string)
 	if !s.LLMEnabled() {
 		return "", fmt.Errorf("no LLM backend configured (set [ai.llm] base_url in the haunt config)")
 	}
-	if err := s.llmBudget.spend(); err != nil {
+	if err := s.budgets.llm.spend(); err != nil {
 		return "", fmt.Errorf("llm budget: %w", err)
 	}
 	s.traceMessages(msgs, opts)
@@ -371,7 +393,7 @@ func (s *Service) GenerateImage(ctx context.Context, prompt string) ([]byte, err
 	if !s.ImageEnabled() {
 		return nil, fmt.Errorf("no image backend configured (set [ai.image] base_url in the haunt config)")
 	}
-	if err := s.imageBudget.spend(); err != nil {
+	if err := s.budgets.image.spend(); err != nil {
 		return nil, fmt.Errorf("image budget: %w", err)
 	}
 	s.traceImage(prompt)

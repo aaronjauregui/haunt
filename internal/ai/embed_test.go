@@ -102,7 +102,7 @@ func TestEmbedBudgetIsSeparate(t *testing.T) {
 		t.Error("embed budget never ran out")
 	}
 	// The LLM allowance is untouched by all that memory work.
-	if got := s.llmBudget.limit - len(s.llmBudget.spends); got != 1 {
+	if got := s.budgets.llm.limit - len(s.budgets.llm.spends); got != 1 {
 		t.Errorf("llm budget remaining = %d, want 1", got)
 	}
 }
