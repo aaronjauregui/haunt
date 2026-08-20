@@ -416,6 +416,17 @@ func (g *Ghost) reembedOne(ctx context.Context, m memory, model string) bool {
 // skip holds text already present in the prompt (the recency journal), so
 // recall spends its slots on things the ghost would otherwise have lost.
 func (g *Ghost) recall(text string, skip map[string]bool) []memory {
+	picked := g.recallScored(text, skip)
+	out := make([]memory, 0, len(picked))
+	for _, p := range picked {
+		out = append(out, p.m)
+	}
+	return out
+}
+
+// recallScored is recall keeping each memory's similarity, so the driver
+// can say afterwards not only what came back but how strongly.
+func (g *Ghost) recallScored(text string, skip map[string]bool) []scored {
 	if !g.memoryEnabled() {
 		return nil
 	}
@@ -452,9 +463,13 @@ func (g *Ghost) recall(text string, skip map[string]bool) []memory {
 	// against everything; dropped into one pool it would win every slot on
 	// generality rather than relevance, and the concrete detail that makes
 	// recall worth having would never get in.
-	out := pickRelevant(summaries, summaryTuning)
-	out = append(out, pickRelevant(raw, rawTuning)...)
-	g.reinforceLater(out)
+	out := pickRelevantScored(summaries, summaryTuning)
+	out = append(out, pickRelevantScored(raw, rawTuning)...)
+	picked := make([]memory, 0, len(out))
+	for _, o := range out {
+		picked = append(picked, o.m)
+	}
+	g.reinforceLater(picked)
 	return out
 }
 
@@ -535,6 +550,20 @@ var summaryTuning = tuning{0.18, 0.6, 0.62, summaryRecallCount}
 // attention: nothing at all unless the best clearly stands out from the
 // pool's own baseline, then everything on the shoulder below it.
 func pickRelevant(ranked []scored, t tuning) []memory {
+	picked := pickRelevantScored(ranked, t)
+	out := make([]memory, 0, len(picked))
+	for _, p := range picked {
+		out = append(out, p.m)
+	}
+	return out
+}
+
+// pickRelevantScored is pickRelevant keeping the similarity that got each
+// memory in. Only `haunt history -why` wants that — the prompt does not —
+// but it has to be the same selection, not a re-derivation, or the account
+// the ghost gives of itself would be a plausible story rather than what
+// actually happened.
+func pickRelevantScored(ranked []scored, t tuning) []scored {
 	if len(ranked) == 0 {
 		return nil
 	}
@@ -552,12 +581,12 @@ func pickRelevant(ranked []scored, t tuning) []memory {
 		cut = baseline + t.standoutShare*(best-baseline)
 	}
 
-	out := make([]memory, 0, t.max)
+	out := make([]scored, 0, t.max)
 	for _, r := range ranked {
 		if r.sim < cut || len(out) == t.max {
 			break
 		}
-		out = append(out, r.m)
+		out = append(out, r)
 	}
 	return out
 }

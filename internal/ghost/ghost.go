@@ -209,6 +209,10 @@ type Ghost struct {
 	// open. The loop owns Observe; sessMu is what lets anyone else read it.
 	sessMu sync.Mutex
 	sess   *session.Model
+	// seenWindow is the last window the watch loop looked at, kept so a
+	// reply can record what the ghost could see when it gave it (why.go).
+	// Under sessMu because it is written by the same loop.
+	seenWindow WhyWindow
 
 	// Initiative accounting (see curiosity.go).
 	curiosity *allowance

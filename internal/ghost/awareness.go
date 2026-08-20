@@ -94,6 +94,10 @@ func (g *Ghost) watchWindows() {
 		g.saveSessionState()
 		g.sessMu.Lock()
 		g.sess = nil
+		// Nothing is being watched any more, so nothing is known: a reply
+		// after the capability is withdrawn must not report the last window
+		// the ghost happened to catch before it stopped looking.
+		g.seenWindow = WhyWindow{}
 		g.sessMu.Unlock()
 	}()
 	t := time.NewTicker(windowPoll)
@@ -128,6 +132,9 @@ func (g *Ghost) watchWindows() {
 		}
 		complained = false
 
+		// Remembered before the ignore check has a chance to blank it, so
+		// that what the ghost knew and what it may act on stay one answer
+		// rather than two: an ignored application is not seen at all.
 		if g.ignoredApp(win.AppID) {
 			// Not even the fact that it changed: a password manager
 			// gaining focus is itself information the ghost does not need.
@@ -135,6 +142,7 @@ func (g *Ghost) watchWindows() {
 			// application's time turns up in a duration statistic even
 			// though its name never did.
 			last = desktop.Window{}
+			g.noteWindow("", "")
 			g.sessMu.Lock()
 			facts.Away(time.Now())
 			g.sessMu.Unlock()
@@ -143,6 +151,7 @@ func (g *Ghost) watchWindows() {
 		// The session model hears every poll, changed or not: a long
 		// stretch is noticed by nothing happening.
 		now := time.Now()
+		g.noteWindow(win.AppID, win.Title)
 		g.sessMu.Lock()
 		noticed := facts.Observe(win.AppID, win.Title, now)
 		g.sessMu.Unlock()

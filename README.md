@@ -80,6 +80,18 @@ and the little that is written down — enough to still recognise a
 recurrence after a reboot — stores window titles as hashes, so it can be
 counted but not read.
 
+When it says something that seems to come from nowhere, you can ask where
+it came from:
+
+    haunt history -why           # per reply: what it recalled and what it could see
+    haunt history -why -prompt   # and the prompt it was actually given
+
+Recall is the part worth checking. It shows which memories came back, how
+old they are, how strongly they matched and how often they have proved
+useful before — so "it remembered" and "it guessed" stop looking the same.
+The reasons live in the ghost's own store beside the conversation, never in
+a session recording, and only the last dozen replies keep them.
+
 `haunt perms` shows what a ghost asked for and what it has, and takes it
 back:
 
@@ -158,6 +170,7 @@ is cropped to what it covers so animation stays cheap.
 | `haunt dev <dir>` | run with hot reload |
 | `haunt say <text>` | talk to it from a script |
 | `haunt history` / `haunt journal` | what was said / what it chose to remember |
+| `haunt history -why [-prompt]` | why it said that: what it recalled, saw, and was asked |
 | `haunt journal -entities` | who and what it thinks it knows about |
 | `haunt perms grant window` | let it notice what you are working on (or ask it from its menu) |
 | `haunt perms [grant\|revoke <cap>]` | what it may do — revocable while it runs |

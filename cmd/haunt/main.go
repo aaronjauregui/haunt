@@ -104,7 +104,7 @@ func usage() {
   haunt perms [name] | perms grant|revoke <capability> [name]
   haunt shush [duration] | unshush
   haunt journal [-entities] [name | -state DIR]
-  haunt history [-n N] [name | -state DIR]`)
+  haunt history [-n N] [-why [-prompt]] [name | -state DIR]`)
 }
 
 func cmdRun(args []string) error {

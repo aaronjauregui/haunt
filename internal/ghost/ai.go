@@ -79,10 +79,15 @@ func (g *Ghost) execChat(in proto.Intent, userDriven bool) {
 	// and projects this utterance actually names. Recall answers "what does
 	// this remind you of"; that question cannot answer "who is Sam", which
 	// is about a subject rather than a resemblance (see entity.go).
+	var recalled []scored
 	if !silent {
 		notes, recentNotes := g.notesContext()
-		system += notes + g.entityContext(text) +
-			g.recallContext(g.recall(text, recentNotes))
+		recalled = g.recallScored(text, recentNotes)
+		picked := make([]memory, 0, len(recalled))
+		for _, r := range recalled {
+			picked = append(picked, r.m)
+		}
+		system += notes + g.entityContext(text) + g.recallContext(picked)
 	}
 	msgs = append(msgs, ai.Message{Role: "system", Content: system})
 	msgs = append(msgs, history...)
@@ -189,6 +194,21 @@ func (g *Ghost) execChat(in proto.Intent, userDriven bool) {
 		history = history[len(history)-max:]
 	}
 	g.saveHistory(history)
+
+	// Why it said that. Written before the reply is published so a person
+	// who asks the moment they see the balloon finds the answer already
+	// there. Silent calls are excluded above: there was no balloon, so
+	// there is no "that" (see why.go).
+	g.noteWhy(Why{
+		Time:         time.Now(),
+		User:         text,
+		SelfPrompt:   in.SelfPrompt,
+		Reply:        full,
+		Recalled:     recalledTrace(recalled),
+		Window:       g.currentWindow(),
+		System:       system,
+		HistoryTurns: len(history) / 2,
+	})
 
 	// The brain hears the reply before memory is written. Remembering means
 	// embedding, which is a call to a backend that can be slow or wedged,

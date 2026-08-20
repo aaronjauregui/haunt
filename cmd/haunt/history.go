@@ -18,6 +18,8 @@ func cmdHistory(args []string) error {
 	fs := flag.NewFlagSet("history", flag.ExitOnError)
 	state := fs.String("state", "", "override state directory")
 	n := fs.Int("n", 10, "how many turns to show, most recent last")
+	why := fs.Bool("why", false, "show what went into each reply: recalled memories, what was on screen, the prompt")
+	full := fs.Bool("prompt", false, "with -why, print the whole system prompt as it was sent")
 	fs.Parse(args)
 
 	stateDir, err := resolveStateDir(*state, fs.Args())
@@ -46,6 +48,20 @@ func cmdHistory(args []string) error {
 	if *n > 0 && len(turns) > *n {
 		turns = turns[len(turns)-*n:]
 	}
+	// The reasons, if they were asked for. Loaded once and matched to the
+	// turns below rather than looked up per line: they are a short ring of
+	// their own and may not cover the whole window.
+	var traces []ghost.Why
+	if *why {
+		if raw, ok, err := s.Get(ghost.WhyStoreKey); err != nil {
+			return err
+		} else if ok {
+			if traces, err = ghost.DecodeWhy(raw); err != nil {
+				return fmt.Errorf("the reply trace is corrupt: %w", err)
+			}
+		}
+	}
+
 	for _, t := range turns {
 		who := "you"
 		if t.Role == "assistant" {
@@ -54,6 +70,83 @@ func cmdHistory(args []string) error {
 		// Indent continuations so a multi-paragraph reply stays legible.
 		text := strings.ReplaceAll(strings.TrimSpace(t.Text), "\n", "\n       ")
 		fmt.Printf("%-6s %s\n", who+":", text)
+		if !*why || t.Role != "assistant" {
+			continue
+		}
+		w, ok := traceFor(traces, t.Text)
+		if !ok {
+			fmt.Println("       (no reasons kept for this one — it is older than the trace)")
+			continue
+		}
+		printWhy(w, *full)
 	}
 	return nil
+}
+
+// traceFor finds the reasons behind a reply, and consumes the match so two
+// identical replies get their own record rather than sharing the first.
+func traceFor(traces []ghost.Why, reply string) (ghost.Why, bool) {
+	for i, w := range traces {
+		if w.Reply == reply {
+			// Blanked rather than removed: the slice is walked in order and
+			// removing would shift everything after it.
+			traces[i].Reply = "\x00consumed"
+			return w, true
+		}
+	}
+	return ghost.Why{}, false
+}
+
+// printWhy renders one reply's reasons under the line it explains.
+func printWhy(w ghost.Why, showPrompt bool) {
+	const indent = "       "
+	if w.SelfPrompt {
+		fmt.Println(indent + "· spoke first — nobody asked")
+	}
+	if !w.Window.Empty() {
+		what := w.Window.App
+		if w.Window.Title != "" {
+			what += " — " + w.Window.Title
+		}
+		fmt.Println(indent + "· on screen at the time: " + what)
+	}
+	if w.HistoryTurns > 0 {
+		fmt.Printf("%s· with the last %d turns of this conversation\n", indent, w.HistoryTurns)
+	}
+	if len(w.Recalled) == 0 {
+		fmt.Println(indent + "· nothing was recalled from further back")
+	} else {
+		fmt.Printf("%s· recalled %d thing(s) from further back:\n", indent, len(w.Recalled))
+		for _, r := range w.Recalled {
+			kind := r.Kind
+			if kind == "summary" {
+				kind = "summary of many"
+			}
+			fmt.Printf("%s    [%s, %s, similarity %.2f", indent, kind, r.When.Format("2 Jan 2006"), r.Sim)
+			if r.Uses > 0 {
+				fmt.Printf(", recalled %d time(s) before", r.Uses)
+			}
+			fmt.Println("]")
+			fmt.Printf("%s    %s\n", indent, oneLine(r.Text, 100))
+		}
+	}
+	if showPrompt {
+		fmt.Println(indent + "· the prompt it was given:")
+		for _, line := range strings.Split(strings.TrimRight(w.System, "\n"), "\n") {
+			fmt.Println(indent + "    " + line)
+		}
+	}
+}
+
+// oneLine flattens a memory to something that fits under a history line.
+func oneLine(s string, max int) string {
+	s = strings.Join(strings.Fields(strings.ReplaceAll(s, "\n", " ")), " ")
+	if len(s) > max {
+		// Rune-safe: memories are conversation text and may be any script.
+		r := []rune(s)
+		if len(r) > max {
+			return string(r[:max-1]) + "…"
+		}
+	}
+	return s
 }
