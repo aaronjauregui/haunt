@@ -90,6 +90,21 @@ type Event struct {
 	// KV is the ghost's persisted state, included only with EventBoot so
 	// brains start with their memory in hand.
 	KV map[string]string `json:"kv,omitempty"`
+	// Poses lists the expressions the ghost's shell declares, included
+	// only with EventBoot. A brain that means to choose a face — for a
+	// line, or for an occasion offered by MayPose — needs to know which
+	// faces exist, since the alternative is guessing names at a driver
+	// that quietly ignores the ones the shell does not have.
+	Poses []string `json:"poses,omitempty"`
+	// MayPose is the driver offering the occasion: this is a moment the
+	// ghost could reasonably change its face for, and the driver's own
+	// rules about when a face may change at all are already satisfied.
+	// Advisory — the brain decides whether to wear anything, and what.
+	// A brain is free to set an expression without an offer; the offer is
+	// about occasions nobody asked for, which is where the driver's rules
+	// (nothing over a fullscreen window, nothing under reduced motion)
+	// apply.
+	MayPose bool `json:"may_pose,omitempty"`
 	// Session carries what was noticed about the working day, for
 	// EventSession. Summary is the fact in a sentence, which is what a
 	// brain hands to a model; the rest is there for one that would rather

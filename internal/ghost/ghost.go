@@ -581,12 +581,18 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		defer sched.Stop()
 	}
 
-	// Boot with the persisted KV snapshot.
+	// Boot with the persisted KV snapshot, and with the faces this shell
+	// can wear: a brain choosing an expression is otherwise guessing names
+	// at a driver that silently ignores the ones that do not exist.
 	kv, err := g.store.All()
 	if err != nil {
 		return err
 	}
-	g.publish(proto.Event{Type: proto.EventBoot, KV: visibleKV(kv)})
+	var poses []string
+	if g.shell != nil {
+		poses = g.shell.Poses()
+	}
+	g.publish(proto.Event{Type: proto.EventBoot, KV: visibleKV(kv), Poses: poses})
 	if opts.OnReady != nil {
 		opts.OnReady()
 	}

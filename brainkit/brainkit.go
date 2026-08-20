@@ -174,7 +174,14 @@ func (em *Emitter) ImagineFreshWaiting(prompt, waiting string) {
 
 // SetExpression wears one of the poses the ghost's shell declares — the
 // driver ignores a pose the shell does not have, so a brain written for a
-// richer shell degrades quietly on a simpler one.
+// richer shell degrades quietly on a simpler one. Which poses exist
+// arrives with the boot event, as Event.Poses.
+//
+// Faces are not only for lines being said. An event marked Event.MayPose
+// is the driver offering an occasion to change expression with no words
+// attached — its own rules about that (nothing over a fullscreen window,
+// nothing under reduced motion) are already satisfied, and what to wear,
+// or whether to bother, is the brain's to decide.
 func (em *Emitter) SetExpression(pose string) {
 	em.emit(Intent{Type: proto.IntentSetExpression, Name: pose})
 }

@@ -141,6 +141,15 @@ type Brain struct {
 	// lastPoke is when the ghost was last clicked, for spotting the second
 	// click of a double.
 	lastPoke time.Time
+	// poses are the faces this ghost's shell declares, learned at boot.
+	// Empty on a single-image shell, which is why choosing one is always
+	// conditional rather than assumed.
+	poses []string
+	// worn is the last face chosen for an occasion rather than for a line,
+	// so the same shape twice running does not re-send the same pose.
+	// Dialogue moves the face too and this does not track that; the cost
+	// of being wrong is one redundant intent the driver drops.
+	worn string
 	// watched says window events have actually been arriving, which is the
 	// only way a brain can tell whether it is being allowed to watch — the
 	// grant itself is the driver's business and deliberately not visible
@@ -207,6 +216,10 @@ func Run(events io.Reader, intents io.Writer) {
 func (b *Brain) OnEvent(e brainkit.Event, emit *brainkit.Emitter) {
 	switch e.Type {
 	case "boot":
+		// Which faces this shell has. A brain that means to choose one is
+		// otherwise guessing names at a driver that quietly ignores the
+		// ones that do not exist.
+		b.poses = e.Poses
 		for k, v := range e.KV {
 			if request, ok := strings.CutPrefix(k, promptKeyPrefix); ok {
 				b.prompts[request] = v
@@ -271,6 +284,11 @@ func (b *Brain) OnEvent(e brainkit.Event, emit *brainkit.Emitter) {
 		}
 		b.watched = true
 		b.lastNoticed = e.Session.Summary
+		// The face first, because it is free and certain: the remark below
+		// is an unprompted action the driver may well refuse, and a ghost
+		// that only looks sleepy on the nights it has an interruption to
+		// spare is a ghost whose face is rationed. See face.go.
+		b.wearForOccasion(e, emit)
 		emit.Initiate("You have noticed this about them just now: " + e.Session.Summary +
 			". Say one short thing to them about it, unprompted — or nothing much, if it " +
 			"would be tiresome to remark on.")

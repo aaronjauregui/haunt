@@ -158,9 +158,10 @@ func (g *Ghost) watchWindows() {
 		for _, f := range noticed {
 			g.log.Info(hlog.Screen, "noticed: %s", f.Summary)
 			g.publish(proto.Event{
-				Type: proto.EventSession,
-				Name: string(f.Kind),
-				Text: f.Summary,
+				Type:    proto.EventSession,
+				Name:    string(f.Kind),
+				Text:    f.Summary,
+				MayPose: g.mayPose(),
 				Session: &proto.SessionFact{
 					Kind:    string(f.Kind),
 					App:     f.App,

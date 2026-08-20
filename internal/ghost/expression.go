@@ -171,3 +171,44 @@ func (g *Ghost) classifyExpression(text string, poses []string) string {
 	g.log.Debug(hlog.Anim, "expression inference: %q names none of %v", strings.TrimSpace(reply), poses)
 	return ""
 }
+
+// The face at rest.
+//
+// Everything above this line runs on a line of dialogue: the face follows
+// what is about to be said. Between sentences — nearly all of the time a
+// companion is on screen — nothing moved it at all, so a ghost nobody had
+// spoken to since login wore one face all day.
+//
+// The occasion for a change is something the driver knows and the brain
+// does not: the shape of the working day (internal/session), which the
+// brain already hears about as a `session` event and until now could only
+// turn into words. So the driver *offers* — it marks the event MayPose —
+// and the brain decides whether to wear anything and what. That division
+// is deliberate: choosing a face with nothing to derive it from is closer
+// to inventing character, which is the brain's job, and a driver that
+// quietly rearranges a character's face is the same kind of overreach as
+// one that quietly takes actions on its behalf.
+//
+// The offer costs nothing and so pays nothing: no words, no model call,
+// nothing demanded of the person, and charging it against the curiosity
+// allowance would be the same category error as charging a blink. What it
+// does inherit is the other two idle rules.
+
+// mayPose reports whether this is a moment the ghost's face may change for
+// on its own account. The rules are the idle animation's, for the same
+// reasons: a companion pulling faces over a game or a film is exactly the
+// intrusion fullscreen means to exclude, and somebody who asked for less
+// motion did not mean "except for the face".
+//
+// A brain setting an expression on a line it is saying is unaffected —
+// that face arrives with words the person is already reading, and this
+// gates only the changes nobody asked for.
+func (g *Ghost) mayPose() bool {
+	if g.reducedMotion {
+		return false
+	}
+	if g.desktop != nil && g.desktop.Fullscreen() {
+		return false
+	}
+	return true
+}

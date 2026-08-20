@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/aaronjauregui/haunt/internal/ai"
+	"github.com/aaronjauregui/haunt/internal/desktop"
 	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/shell"
 )
@@ -226,5 +227,47 @@ func TestNumberedPosesCannotBeInferred(t *testing.T) {
 	named = append(named, "happy")
 	if got := lexiconPose(line, named); got != "happy" {
 		t.Errorf("lexiconPose = %q with a named pose available, want happy", got)
+	}
+}
+
+// TestMayPoseInheritsTheIdleRules: the offer is the driver's half of the
+// face at rest, and withholding it is how the two rules a face change
+// inherits are enforced. A pose over a fullscreen window is the intrusion
+// fullscreen exists to exclude; a pose under reduced motion is something
+// the person asked not to have.
+func TestMayPoseInheritsTheIdleRules(t *testing.T) {
+	g := &Ghost{log: hlog.Discard(), shell: shell.Builtin(64)}
+	if !g.mayPose() {
+		t.Error("an ordinary moment was not offered")
+	}
+
+	// Nothing to ask about fullscreen windows answers "not fullscreen":
+	// the failure mode is a face that changes when it might not have, not
+	// a ghost frozen because a compositor socket moved.
+	g.desktop = desktop.New(hlog.Discard())
+	if !g.mayPose() {
+		t.Error("no compositor IPC turned the face off entirely")
+	}
+
+	g.reducedMotion = true
+	if g.mayPose() {
+		t.Error("offered a pose under reduced motion")
+	}
+}
+
+// TestBootCarriesTheShellsPoses: a brain choosing a face needs to know
+// which faces exist — the driver ignores the ones the shell does not have,
+// so without the list a brain is guessing into silence.
+func TestBootCarriesTheShellsPoses(t *testing.T) {
+	sh := shell.Builtin(64)
+	if got := sh.Poses(); len(got) == 0 {
+		t.Fatal("the built-in shell declares no poses")
+	}
+	// The same list the driver checks against in setExpression, so the two
+	// cannot drift into a brain being told about a pose it may not wear.
+	for _, p := range sh.Poses() {
+		if !sh.SetPose(p) {
+			t.Errorf("pose %q is advertised but not wearable", p)
+		}
 	}
 }
