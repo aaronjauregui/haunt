@@ -142,6 +142,14 @@ func convertAnimation(sh *Shell, src Source, pics map[int]*image.NRGBA,
 	at := 0
 	written := map[string]bool{}
 	for _, p := range a.Patterns {
+		// The wait comes *first*. SERIKO's wait is "how long until this
+		// frame is drawn", not "how long it stays" — so a pattern's time is
+		// the running total including its own wait, and the frame before it
+		// is what holds for that long. Reading it as a duration shifts every
+		// frame early and truncates the last one's hold, which on a
+		// seven-frame `runonce` is the difference between a gesture and a
+		// twitch.
+		at += p.WaitMS
 		set := map[string]string{}
 		if p.Clearing() {
 			set[name] = "none"
@@ -170,7 +178,6 @@ func convertAnimation(sh *Shell, src Source, pics map[int]*image.NRGBA,
 			set[name] = v
 		}
 		keys = append(keys, shell.Key{At: at, Set: set})
-		at += p.WaitMS
 	}
 	if len(keys) == 0 {
 		return nil, nil, fmt.Sprintf("%s: no usable frames", name)
@@ -190,6 +197,8 @@ func baseClip(name, trigger string, a *Animation, pics map[int]*image.NRGBA, own
 	at := 0
 	any := false
 	for _, p := range a.Patterns {
+		// The wait leads the frame, as above.
+		at += p.WaitMS
 		v := variantName(own)
 		if !p.Clearing() {
 			if _, ok := pics[p.Surface]; !ok {
@@ -199,7 +208,6 @@ func baseClip(name, trigger string, a *Animation, pics map[int]*image.NRGBA, own
 			any = true
 		}
 		keys = append(keys, shell.Key{At: at, Set: map[string]string{bodyLayer: v}})
-		at += p.WaitMS
 	}
 	if !any {
 		return nil
@@ -253,10 +261,6 @@ func triggerFor(a *Animation, resting bool, name string) (string, string) {
 				"its frames are placed for that surface's art", name)
 	}
 	switch a.Interval {
-	case "sometimes":
-		return shell.TriggerSometimes, ""
-	case "rarely", "random", "periodic":
-		return shell.TriggerRarely, ""
 	case "always":
 		return shell.TriggerAlways, ""
 	case "runonce":
@@ -265,6 +269,8 @@ func triggerFor(a *Animation, resting bool, name string) (string, string) {
 		return shell.TriggerTalk, ""
 	case "never", "":
 		return shell.TriggerManual, ""
+	case "sometimes", "rarely", "random", "periodic":
+		return byPeriod(a, name)
 	case "bind":
 		// Dressup: a static overlay chosen by the user, not an animation.
 		// haunt has no wardrobe, so the honest answer is a manual clip and
@@ -276,6 +282,39 @@ func triggerFor(a *Animation, resting bool, name string) (string, string) {
 	return shell.TriggerManual, fmt.Sprintf(
 		"%s has interval %q, which has no equivalent here; it became a manual clip",
 		name, a.Interval)
+}
+
+// byPeriod picks a haunt trigger from how often the SERIKO one actually
+// fires, rather than from what it is called.
+//
+// The names are a trap. Both formats have `sometimes` and `rarely` and they
+// mean nearly opposite things: SERIKO's are probabilities *per second* —
+// `sometimes` is one-in-two, so about every two seconds, and `rarely` is
+// one-in-four, about every four — while haunt's are interval ranges of
+// 3-12s and 45-150s. Matching the words maps a four-second blink onto a
+// ninety-second one and the ghost stops looking alive.
+func byPeriod(a *Animation, name string) (string, string) {
+	seconds := 0.0
+	switch a.Interval {
+	case "sometimes":
+		seconds = 2 // one-in-two per second
+	case "rarely":
+		seconds = 4 // one-in-four per second
+	case "random", "periodic":
+		seconds = float64(a.Every)
+		if seconds <= 0 {
+			seconds = 4
+		}
+	}
+	// The crossover sits between haunt's two ranges, nearer the fast one
+	// because that is where nearly every shell animation lives: blinks,
+	// breathing, hair. Anything slower than half a minute was meant to be
+	// occasional and can have the slow trigger.
+	if seconds <= 25 {
+		return shell.TriggerSometimes, ""
+	}
+	return shell.TriggerRarely, fmt.Sprintf(
+		"%s fired about every %.0fs; the nearest thing here is the slow trigger, at 45-150s", name, seconds)
 }
 
 func sortedAnimIDs(s *Surface) []int {

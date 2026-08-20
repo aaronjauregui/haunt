@@ -114,12 +114,16 @@ func TestConvertOverlayAnimation(t *testing.T) {
 	if c.Trigger != "sometimes" {
 		t.Errorf("trigger = %q, want sometimes — it is on the resting surface", c.Trigger)
 	}
-	// Three patterns plus the clearing one already in them.
+	// Three patterns, the last of which already clears.
 	if len(c.Keys) != 3 {
 		t.Fatalf("%d keys, want 3: %+v", len(c.Keys), c.Keys)
 	}
-	if c.Keys[1].At != 50 {
-		t.Errorf("second key at %dms, want 50", c.Keys[1].At)
+	// The wait leads its frame rather than trailing it: pattern0 waits 5
+	// (50ms) and *then* draws, so the first frame lands at 50ms and each
+	// one after it is another wait later. Reading the wait as a duration
+	// puts the first frame at 0 and loses the last one's hold entirely.
+	if got := []int{c.Keys[0].At, c.Keys[1].At, c.Keys[2].At}; got[0] != 50 || got[1] != 100 || got[2] != 200 {
+		t.Errorf("keys at %v ms, want [50 100 200]", got)
 	}
 	if c.Keys[2].Set[c.Name] != "none" {
 		t.Errorf("the clip does not end cleared: %+v", c.Keys[2])
@@ -318,4 +322,51 @@ func decodePNG(t *testing.T, b []byte) image.Image {
 		t.Fatal(err)
 	}
 	return img
+}
+
+// Both formats have `sometimes` and `rarely` and they mean nearly opposite
+// things — SERIKO's are probabilities per second, haunt's are interval
+// ranges. Matching on the word turns a four-second blink into a
+// ninety-second one, which is the difference between a ghost that looks
+// alive and one that looks broken.
+func TestIntervalsMapByPeriodNotByName(t *testing.T) {
+	for _, tc := range []struct {
+		interval string
+		every    int
+		want     string
+	}{
+		// One-in-two per second: about every 2s.
+		{"sometimes", 0, "sometimes"},
+		// One-in-four per second: about every 4s — nowhere near haunt's
+		// `rarely`, despite sharing its name.
+		{"rarely", 0, "sometimes"},
+		{"periodic", 3, "sometimes"},
+		{"random", 10, "sometimes"},
+		// Genuinely occasional, so the slow trigger is right.
+		{"random", 120, "rarely"},
+		{"periodic", 60, "rarely"},
+	} {
+		a := &Animation{Interval: tc.interval, Every: tc.every}
+		got, _ := triggerFor(a, true, "probe")
+		if got != tc.want {
+			t.Errorf("%s,%d -> %q, want %q", tc.interval, tc.every, got, tc.want)
+		}
+	}
+}
+
+// The non-random intervals still map straight across.
+func TestDirectIntervalMappings(t *testing.T) {
+	for interval, want := range map[string]string{
+		"always":  "always",
+		"runonce": "runonce",
+		"talk":    "talk",
+		"never":   "manual",
+		"":        "manual",
+		"bind":    "manual",
+	} {
+		got, _ := triggerFor(&Animation{Interval: interval}, true, "probe")
+		if got != want {
+			t.Errorf("%q -> %q, want %q", interval, got, want)
+		}
+	}
 }
