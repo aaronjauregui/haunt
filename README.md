@@ -162,6 +162,26 @@ layer the ghost can blink with — the visible layer in each group is the
 default, hidden top-level layers are left out as sketches, and every layer
 is cropped to what it covers so animation stays cheap.
 
+## Bringing over ukagaka shell art
+
+Two decades of ukagaka shells exist. `haunt-seriko` converts their *art* —
+surfaces, collisions and frame-swap animation — into a haunt shell:
+
+    haunt-seriko -n mayura_final.nar          # what it would do
+    haunt-seriko -i-have-permission ghost.nar # convert it
+
+It reads SERIKO/1.x and 2.0, PNG+PNA and colour-keyed transparency, and
+Shift-JIS files; surfaces become poses, collisions become named regions you
+can poke, and animations become clips. It converts art only: SHIORI, SSTP
+and SakuraScript are out of scope and stay that way, so what you get is a
+shell a haunt brain wears, not somebody else's ghost.
+
+It will not convert a shell whose terms it cannot find, and it prints them
+when it can. These are people's drawings, usually under terms they wrote
+down in a readme and often in Japanese; converting for yourself is one
+thing, publishing the result is redistribution, and that is what most of
+those readmes are about.
+
 ## Commands
 
 | | |
@@ -176,6 +196,7 @@ is cropped to what it covers so animation stays cheap.
 | `haunt perms [grant\|revoke <cap>]` | what it may do — revocable while it runs |
 | `haunt shush` / `unshush` | quiet hours, now |
 | `haunt shell init <art.ora>` | build a shell from a layered drawing |
+| `haunt-seriko <shell>` | convert ukagaka shell art into a haunt shell |
 | `haunt add <name>` / `haunt drop <name>` | who lives on your desktop |
 | `haunt new`, `pack`, `install`, `ls`, `switch`, `rm` | authoring and packages |
 

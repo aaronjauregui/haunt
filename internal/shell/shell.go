@@ -74,6 +74,34 @@ type Manifest struct {
 	Default string `toml:"default_pose"`
 	// Clips are the shell's animations.
 	Clips []Clip `toml:"clip"`
+	// Hits are named rectangles, checked before the art. Hand-drawn shells
+	// name their parts on the layers that draw them, which is better —
+	// a region follows the drawing and needs no maintenance. Imported
+	// shells often cannot: SERIKO describes its hit areas as bare
+	// rectangles with no layer of their own (internal/seriko), and the
+	// alternative would be inventing art to carry them.
+	Hits []Hit `toml:"hit"`
+}
+
+// Hit is a named rectangle a person can poke, independent of what is drawn
+// there. Declaration order decides ties, first one winning, which is what
+// the formats that use rectangles already mean by it.
+type Hit struct {
+	// Region is the name reported for a poke inside it.
+	Region string `toml:"region"`
+	// At is the top-left corner in shell coordinates.
+	At [2]int `toml:"at"`
+	// Size is width and height. A zero or negative dimension disables the
+	// rectangle, which is how shells switch one off per pose.
+	Size [2]int `toml:"size"`
+}
+
+// rect is the hit area as a rectangle, empty when disabled.
+func (h Hit) rect() image.Rectangle {
+	if h.Size[0] <= 0 || h.Size[1] <= 0 {
+		return image.Rectangle{}
+	}
+	return image.Rect(h.At[0], h.At[1], h.At[0]+h.Size[0], h.At[1]+h.Size[1])
 }
 
 // loaded is a layer with its art decoded.
@@ -97,6 +125,9 @@ type Shell struct {
 	overrides map[string]string
 	moves     map[string]Transform
 	clips     []Clip
+	// hits are named rectangles from the manifest, checked before the art
+	// (see RegionAt).
+	hits []Hit
 
 	// cache holds composited poses. A ghost that is not changing
 	// expression composites nothing.
@@ -170,6 +201,16 @@ func Load(dir string, m Manifest) (*Shell, error) {
 				return nil, fmt.Errorf("pose %q selects unknown variant %q of layer %q", pose, variant, layer)
 			}
 		}
+	}
+
+	// Named rectangles, if the manifest declared any. Validated here so a
+	// typo in a region name is a load error rather than a poke that
+	// silently reports nothing.
+	for i, h := range m.Hits {
+		if h.Region == "" {
+			return nil, fmt.Errorf("hit %d has no region name", i)
+		}
+		s.hits = append(s.hits, h)
 	}
 
 	if err := s.loadClips(m.Clips); err != nil {
@@ -417,9 +458,24 @@ func (s *Shell) Sprite() *sprite.Sprite {
 }
 
 // RegionAt names the part of the ghost at a point in shell coordinates:
-// the topmost layer that both declares a region and is opaque there. Empty
-// when the point hits no named part.
+// the topmost layer that both declares a region and is opaque there, or a
+// declared hit rectangle. Empty when the point hits no named part.
+//
+// Rectangles are asked first. A shell that declares them has said where its
+// parts are outright, and the art it draws them over is usually one flat
+// picture with no layer to attach a region to — so falling through to the
+// pixels would find the body layer's region for every poke and report the
+// same answer everywhere.
 func (s *Shell) RegionAt(x, y int) string {
+	p := image.Pt(x, y)
+	for _, h := range s.hits {
+		if h.Region == "" {
+			continue
+		}
+		if r := h.rect(); !r.Empty() && p.In(r) {
+			return h.Region
+		}
+	}
 	const alphaThreshold = 16
 	for i := len(s.layers) - 1; i >= 0; i-- {
 		l := s.layers[i]

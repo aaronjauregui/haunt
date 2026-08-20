@@ -5,6 +5,7 @@ GO ?= go
 build:
 	$(GO) build ./...
 	$(GO) build -o haunt ./cmd/haunt
+	$(GO) build -o haunt-seriko ./cmd/haunt-seriko
 
 test:
 	$(GO) test ./...
@@ -52,11 +53,12 @@ demo-headless:
 # so the ghost is there when you log in. See dist/README.md.
 install-user: build
 	install -Dm755 haunt $(HOME)/.local/bin/haunt
+	install -Dm755 haunt-seriko $(HOME)/.local/bin/haunt-seriko
 	install -Dm644 dist/haunt.service $(HOME)/.config/systemd/user/haunt.service
 	systemctl --user daemon-reload
 	@echo
 	@echo "installed. start it with:  systemctl --user enable --now haunt"
 
 clean:
-	rm -f haunt haunt-poc
+	rm -f haunt haunt-poc haunt-seriko
 	$(GO) clean
