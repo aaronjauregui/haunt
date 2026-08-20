@@ -66,9 +66,15 @@ func TestMemoryIndexIsBounded(t *testing.T) {
 		key, cursor := g.allocMemorySlot()
 		entry, _ := json.Marshal(memory{
 			Kind: kindNote, Text: fmt.Sprintf("note %d", i),
-			// Ascending, so the newest entry is always the strongest and
-			// the pass never immediately evicts what it just wrote.
-			Time: now.Add(time.Duration(i) * time.Minute),
+			// Ascending and in the *past*, so the newest entry is always
+			// the strongest and the pass never immediately evicts what it
+			// just wrote. The past matters: strength clamps a future
+			// timestamp's age to zero — a moved clock must not mint an
+			// unforgettable memory — so dating these forward would tie
+			// every one of them at exactly 1.0 and leave the choice of
+			// what to forget to map iteration order. This test failed
+			// about one run in a hundred that way.
+			Time: now.Add(-time.Duration(maxMemories+3-i) * time.Minute),
 		})
 		if err := s.Set(key, string(entry)); err != nil {
 			t.Fatal(err)

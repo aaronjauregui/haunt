@@ -932,51 +932,6 @@ func (g *Ghost) setTimer(name string, d time.Duration) {
 	})
 }
 
-// balloonPos computes the balloon anchor: to the right of the sprite,
-// vertically near its top.
-func (g *Ghost) balloonPos(lw int32) (int32, int32) {
-	x, y, w, _ := g.surface.Geometry()
-	edge, known := g.outputWidth()
-	return balloonSide(x, w, lw, edge, known), y
-}
-
-// balloonSide picks which side of the sprite a panel of width lw sits on.
-// To the right by default — reading order, and the ghost faces its own
-// words — but flipped to the left when there is no room on the right. That
-// is the ordinary case rather than an exotic one: a ghost's default spot is
-// the bottom right of the screen, so the side it would rather speak on is
-// exactly the side with nothing left of it, and a lone ghost in its own
-// default corner used to talk off the edge of the display.
-//
-// It stays on the right when neither side fits, because a panel running off
-// the right edge is at least anchored to the ghost that said it, while one
-// pushed to a negative x is somewhere else entirely.
-func balloonSide(x, w, lw, edge int32, known bool) int32 {
-	right := x + w + balloonGap
-	if known && right+lw > edge {
-		if left := x - balloonGap - lw; left >= 0 {
-			return left
-		}
-	}
-	return right
-}
-
-// outputWidth is the width of the screen this ghost is on. Not the first
-// screen: on a two-monitor desk those are different questions, and the one
-// that matters is where the balloon is about to be drawn.
-func (g *Ghost) outputWidth() (int32, bool) {
-	if g.app == nil {
-		return 0, false
-	}
-	if g.outputName != "" {
-		if o, ok := g.app.OutputNamed(g.outputName); ok {
-			return o.W, true
-		}
-	}
-	w, _, known := g.app.OutputSize()
-	return w, known
-}
-
 // renderer returns the balloon renderer for the scale the ghost is
 // currently on. Read under the lock: the dispatch goroutine swaps it when
 // the compositor announces a different scale, and every other goroutine
