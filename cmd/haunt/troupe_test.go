@@ -75,9 +75,11 @@ wasm = "brain.wasm"
 		}
 	}
 
-	// `haunt run` with nothing to go on runs the room.
+	// `haunt run` with nothing to go on runs the room. The control topic
+	// is turned up because what one ghost saw the other do is otherwise
+	// only visible as a reaction the scripted example brains do not have.
 	cmd := exec.Command(bin, "run")
-	cmd.Env = env
+	cmd.Env = append(env, "HAUNT_DEBUG=control")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -106,6 +108,20 @@ wasm = "brain.wasm"
 	// exactly the same place; the driver says when it moves one.
 	if !strings.Contains(stderr.String(), "was taken; opening at") {
 		t.Errorf("the second ghost did not step aside:\n%s", stderr.String())
+	}
+
+	// Direction 5, end to end: both ghosts greet at boot, and each one is
+	// in a position to see the other do it. The line names who and what,
+	// because "somebody said something" is not an observation anybody can
+	// react to.
+	// Both halves are waited for together: they are two ghosts on two
+	// connections, so one arriving says nothing about when the other will.
+	if !eventually(10*time.Second, func() bool {
+		saw := stderr.String()
+		return strings.Contains(saw, "observed: wisp spoke") &&
+			strings.Contains(saw, "observed: moth spoke")
+	}) {
+		t.Errorf("the ghosts did not see each other arrive:\n%s", stderr.String())
 	}
 
 	// Nobody has been spoken to yet, so an untargeted message is genuinely

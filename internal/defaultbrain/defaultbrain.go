@@ -141,6 +141,13 @@ type Brain struct {
 	// lastPoke is when the ghost was last clicked, for spotting the second
 	// click of a double.
 	lastPoke time.Time
+	// lastSeen is the most recent thing another resident ghost did in
+	// public, kept for the same reason lastNoticed is: when this ghost
+	// speaks first later on, the room is part of what it can talk about.
+	lastSeen string
+	// lastReacted is when it last remarked on a neighbour, which is the
+	// whole of its self-rationing. See company.go.
+	lastReacted time.Time
 	// poses are the faces this ghost's shell declares, learned at boot.
 	// Empty on a single-image shell, which is why choosing one is always
 	// conditional rather than assumed.
@@ -293,6 +300,13 @@ func (b *Brain) OnEvent(e brainkit.Event, emit *brainkit.Emitter) {
 			". Say one short thing to them about it, unprompted — or nothing much, if it " +
 			"would be tiresome to remark on.")
 
+	case "observed":
+		// Another ghost in the room did something in public. Nobody
+		// addressed this one, so anything it does about it is unprompted
+		// and charged — see company.go for why the driver's charge is not
+		// the only brake here.
+		b.onObserved(e, emit)
+
 	case "idle":
 		// Initiative: nobody asked. The driver decides whether this may
 		// spend one of the ghost's unprompted actions — the brain just
@@ -309,6 +323,11 @@ func (b *Brain) OnEvent(e brainkit.Event, emit *brainkit.Emitter) {
 			// What they were last doing is usually the most interesting
 			// thing the ghost knows.
 			direction += " They were last looking at " + b.lastWindow + "."
+		} else if b.lastSeen != "" {
+			// And failing both, there may be somebody else in the room.
+			// Last, because the person is the point: what their afternoon
+			// looked like beats what the ghost next door was up to.
+			direction += " " + b.lastSeen + "."
 		}
 		emit.Initiate(direction)
 

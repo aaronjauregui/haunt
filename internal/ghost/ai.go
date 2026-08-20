@@ -290,7 +290,13 @@ func (g *Ghost) execImagine(in proto.Intent, userDriven bool) {
 		g.publishAIError("image backend returned invalid PNG: "+err.Error(), tag)
 		return
 	}
-	g.showImageBalloon(img)
+	if g.showImageBalloon(img) {
+		// What the picture is of, to the ghosts who can see it hanging
+		// there. The prompt is the honest description: a picture of a cat
+		// visibly contains a cat, and the rewrite that produced it is not
+		// something the driver has any better summary of.
+		g.announce(proto.ActedDrew, prompt)
+	}
 	if in.LingerMS > 0 {
 		g.lingerBalloon(g.balloonGen(), time.Duration(in.LingerMS)*time.Millisecond)
 	}

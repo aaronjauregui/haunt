@@ -124,6 +124,17 @@ whole one, so three ghosts are more present than one without being three
 times the interruptions or three times the model bill. Set it yourself with
 `[curiosity] actions_per_day_total` if you disagree.
 
+They can also see each other. What a ghost does in public — a line in its
+balloon, a picture, a flourish it was asked for, being poked — reaches the
+others as something they may react to without being spoken to, which is
+where dynamics nobody wrote come from. Only public things: a ghost can
+watch its neighbour and can never reach its neighbour's memory. Reacting
+is unprompted, so it comes out of the same allowance as speaking first,
+and the built-in ghost rations itself further on top of that — two
+characters noticing each other occasionally is company, and two characters
+commenting on everything each other does is a chat log you did not ask for
+and are paying for.
+
 Quiet hours, the fullscreen rule and reduced motion stay what they always
 were: answers about the room, and every ghost obeys them.
 

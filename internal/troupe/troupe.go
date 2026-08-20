@@ -8,11 +8,13 @@
 // make one crashed ghost the end of all of them. A connection each costs a
 // socket and buys isolation.
 //
-// Four things are genuinely shared, because they are properties of the
-// person rather than of a ghost: where everyone is standing (nobody opens
-// on top of anybody), the ceiling on unprompted action, the hourly ration
-// of backend calls (between them, those two are what stops N ghosts
-// multiplying the user's bill by N), and the log destination. Quiet hours,
+// Five things are genuinely shared, because they are properties of the
+// room rather than of a ghost: where everyone is standing (nobody opens on
+// top of anybody), the ceiling on unprompted action, the hourly ration of
+// backend calls (between them, those two are what stops N ghosts
+// multiplying the user's bill by N), the log destination, and the stage —
+// what each ghost does in public, fanned out to the others so they can
+// react to each other (stage.go). Quiet hours,
 // the fullscreen rule and reduced motion were global before this and stay
 // global: they are answers about the room, and each ghost reads them for
 // itself from the same config.
@@ -77,10 +79,16 @@ func Run(ctx context.Context, members []Member, opts Options) error {
 	solo := len(members) == 1
 
 	var room *Room
+	var stage *Stage
 	var budget *Budget
 	var rations *ai.Budgets
 	if !solo {
 		room = NewRoom()
+		// Ghosts can see each other. Only ghosts this supervisor is
+		// running: two `haunt run` processes started separately share a
+		// screen but not a stage, which is the same boundary the room
+		// draws around positions and the ceiling draws around budgets.
+		stage = NewStage(log)
 		// The hourly rate limits are the user's money, so they are one
 		// ration for the household rather than one each: three ghosts with
 		// a private 120 LLM calls an hour is 360 calls an hour, and the
@@ -125,6 +133,7 @@ func Run(ctx context.Context, members []Member, opts Options) error {
 		if !solo {
 			o.Logger = log.Named(m.Name)
 			o.Spots = room.For(m.Name)
+			o.Stage = stage.For(m.Name)
 			o.Initiative = func(what string) bool { return budget.Spend(m.Name, what) }
 			o.AIBudgets = rations
 		}

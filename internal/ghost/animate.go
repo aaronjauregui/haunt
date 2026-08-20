@@ -129,20 +129,23 @@ func (g *Ghost) scheduleClip(c shell.Clip) {
 }
 
 // playClip starts (or restarts) a clip by name.
-func (g *Ghost) playClip(name string) {
+// The bool is whether a clip actually started, which the intent path needs
+// in order to tell the other ghosts in the room about a flourish that
+// really happened rather than about a name this shell has never heard of.
+func (g *Ghost) playClip(name string) bool {
 	if g.shell == nil || g.anim == nil {
-		return
+		return false
 	}
 	c, ok := g.shell.Clip(name)
 	if !ok {
 		g.log.Debug(hlog.Anim, "no clip %q in this shell", name)
-		return
+		return false
 	}
 
 	g.anim.mu.Lock()
 	if g.anim.stopped {
 		g.anim.mu.Unlock()
-		return
+		return false
 	}
 	if r, ok := g.anim.active[name]; ok {
 		r.timer.Stop()
@@ -159,6 +162,7 @@ func (g *Ghost) playClip(name string) {
 	g.log.Debug(hlog.Anim, "clip %q", name)
 
 	g.advanceClip(name)
+	return true
 }
 
 // advanceClip applies the frame due now and schedules the next one.

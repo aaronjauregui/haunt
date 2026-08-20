@@ -68,6 +68,25 @@ type Spots interface {
 	Release()
 }
 
+// Stage is how a ghost sees the other ghosts in the room, and is how they
+// see it. A ghost running alone has none: there is nobody to notice it and
+// nobody to notice.
+//
+// What crosses it is an action and a string — what a bystander would have
+// seen. That narrowness is the design and not an accident of the
+// signature: a ghost may know that its neighbour spoke and what it said,
+// and must have no way at all to reach its neighbour's store, prompts or
+// journal. See internal/troupe/stage.go for the fan-out behind it.
+type Stage interface {
+	// Announce publishes one public action to every other resident ghost.
+	Announce(action, detail string)
+	// Observe starts delivery of what the others do. deliver runs on the
+	// stage's goroutine, so it hands off rather than working.
+	Observe(deliver func(from, action, detail string))
+	// Leave stops delivery when the ghost stops.
+	Leave()
+}
+
 // Options configures a ghost run.
 type Options struct {
 	// Store overrides the persistence backend. Nil uses SQLite in StateDir.
@@ -113,6 +132,10 @@ type Options struct {
 	// ghost spends against, shared with the other resident ghosts. Nil
 	// gives the ghost one of its own, which is right when it is alone.
 	AIBudgets *ai.Budgets
+	// Stage, when set, is the other resident ghosts: what this one does in
+	// public reaches them, and what they do reaches it as `observed`
+	// events. Nil means it is alone in the room.
+	Stage Stage
 	// Initiative is a ceiling above this ghost's own curiosity allowance,
 	// consulted only for an action that would otherwise be charged and
 	// only once the ghost's own allowance has agreed to pay. It is what
@@ -495,6 +518,9 @@ func Run(ctx context.Context, dir string, opts Options) error {
 			return
 		}
 		g.publish(proto.Event{Type: proto.EventClick, X: x, Y: y, Region: g.shell.RegionAt(x, y)})
+		// Somebody chose this ghost out of the several on screen, which is
+		// the most interesting thing the others can see happening.
+		g.announce(proto.ActedPoked, "")
 	}
 	// Right-click opens a line to type at the ghost. A separate gesture
 	// from the left click, which belongs to the brain: a scripted ghost's
@@ -579,6 +605,14 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		}
 		sched.Start()
 		defer sched.Stop()
+	}
+
+	// Take a seat on the stage before booting, so a ghost that comes up
+	// second sees whatever its neighbours do from its first moment rather
+	// than from whenever the last of them finished starting.
+	if opts.Stage != nil {
+		opts.Stage.Observe(g.observed)
+		defer opts.Stage.Leave()
 	}
 
 	// Boot with the persisted KV snapshot, and with the faces this shell
@@ -806,8 +840,13 @@ func (g *Ghost) execIntent(in proto.Intent) {
 	case proto.IntentMove:
 		if err := g.surface.MoveTo(int32(in.X), int32(in.Y)); err != nil {
 			g.log.Warn(hlog.Wayland, "move failed: %v", err)
+			return
 		}
 		g.placeBalloon()
+		// Only the ghost moving itself. Being dragged is the *person*
+		// moving it, and an observer told "it moved" for that would be
+		// crediting the ghost with something the hand on the mouse did.
+		g.announce(proto.ActedMoved, "")
 	case proto.IntentSetTimer:
 		g.setTimer(in.Name, time.Duration(in.DelayMS)*time.Millisecond)
 	case proto.IntentCancelTimer:
@@ -868,7 +907,15 @@ func (g *Ghost) execIntent(in proto.Intent) {
 	case proto.IntentSetExpression:
 		g.setExpression(in.Name)
 	case proto.IntentPlayClip:
-		g.playClip(in.Name)
+		// Announced, unlike the clips the driver starts by itself. A
+		// blink or a breath is furniture — every ghost on screen is doing
+		// it every few seconds, and telling the neighbours about each one
+		// would bury what somebody actually *did* under the noise of
+		// everybody being alive. A clip a brain asked for is a deliberate
+		// flourish, which is a thing to see.
+		if g.playClip(in.Name) {
+			g.announce(proto.ActedClip, in.Name)
+		}
 	case proto.IntentLook:
 		// Own goroutine: capture plus a vision request is seconds of work.
 		g.go_(hlog.Screen, "look", func() {
@@ -1045,18 +1092,22 @@ func (g *Ghost) lingerBalloon(gen uint64, d time.Duration) {
 }
 
 // showImageBalloon renders an image into a balloon panel beside the sprite.
-func (g *Ghost) showImageBalloon(img image.Image) {
+// The bool is whether the picture actually reached the screen, which the
+// caller needs in order to answer the only question the other ghosts in the
+// room can ask about it: was there anything to see (sociality.go).
+func (g *Ghost) showImageBalloon(img image.Image) bool {
 	// A picture replaces a question, and replacing it means closing it.
 	g.dismissChoices()
 	if muted, why := g.quiet.Active(); muted {
 		g.log.Debug(hlog.Balloon, "image balloon suppressed (%s)", why)
-		return
+		return false
 	}
 	if g.inputOpen() {
 		g.log.Debug(hlog.Balloon, "image balloon suppressed (user is typing)")
-		return
+		return false
 	}
 	g.showBalloonSprite(g.renderer().RenderImage(img))
+	return true
 }
 
 // placeBalloon re-anchors the balloon to the sprite's current position.
@@ -1115,6 +1166,10 @@ func (g *Ghost) setExpression(pose string) {
 	// as unanswerable as "is it animating", and on a shell whose poses are
 	// named something the driver cannot choose the answer is a silent no.
 	g.log.Debug(hlog.Anim, "expression %q", pose)
+	// Below the SetPose check, so only a face that really changed is
+	// announced: a pose the shell does not have changed nothing anybody
+	// could have seen.
+	g.announce(proto.ActedExpression, pose)
 
 	if g.surface == nil {
 		return // no compositor: tests drive the shell without one

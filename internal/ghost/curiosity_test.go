@@ -27,6 +27,10 @@ func TestPromptedEvent(t *testing.T) {
 		// Another ghost is not a person: without this, two ghosts could
 		// talk each other into unlimited initiative.
 		{proto.Event{Type: proto.EventMessage, Text: "hi", From: "whisper"}, false},
+		// Watching another ghost act is not being spoken to by it. Without
+		// this, two ghosts in a room would grant each other free
+		// initiative simply by existing near one another.
+		{proto.Event{Type: proto.EventObserved, From: "whisper", Name: proto.ActedSpoke, Text: "hello"}, false},
 		{proto.Event{Type: proto.EventIdle}, false},
 		{proto.Event{Type: proto.EventCron, Name: "morning"}, false},
 		{proto.Event{Type: proto.EventTimer, Name: "followup"}, false},

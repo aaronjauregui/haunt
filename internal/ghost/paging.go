@@ -1,6 +1,9 @@
 package ghost
 
-import "github.com/aaronjauregui/haunt/internal/hlog"
+import (
+	"github.com/aaronjauregui/haunt/internal/hlog"
+	"github.com/aaronjauregui/haunt/internal/proto"
+)
 
 // Paging. A reply longer than the balloon used to be unreadable: the
 // opening scrolled away while it streamed and there was no way back to it,
@@ -33,6 +36,11 @@ func (g *Ghost) showPaged(text string) {
 		g.log.Debug(hlog.Balloon, "balloon suppressed (user is typing)")
 		return
 	}
+	// Past both suppressions, so this line is one a bystander could read —
+	// which is the test for whether the other ghosts in the room get to
+	// hear it (sociality.go). Every finished line the ghost says arrives
+	// here, scripted or generated, so this is the one place it is minted.
+	g.announce(proto.ActedSpoke, text)
 	sp, pages := g.renderer().RenderPage(text, 0)
 
 	g.pageMu.Lock()

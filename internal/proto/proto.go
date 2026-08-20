@@ -61,6 +61,39 @@ const (
 	// a title that keeps coming back. Requires the window capability, since
 	// it is made from the same observations. See Event.Session.
 	EventSession EventType = "session"
+
+	// EventObserved is another resident ghost doing something in public:
+	// it spoke, it moved, it was poked, it drew a picture. From names the
+	// ghost, Name is the action (see the Acted constants) and Text is
+	// whatever of it was visible.
+	//
+	// Observation is not address. Nobody is talking to this ghost and
+	// nothing is waiting on it, so reacting is unprompted by construction
+	// and charged like any other interruption — which is what stops two
+	// personas talking each other into a chatter loop billed to the user.
+	EventObserved EventType = "observed"
+)
+
+// The public actions a ghost can be observed doing. They name what a
+// bystander in the room would have seen, which is the whole boundary:
+// there is no action here for remembering something, for thinking, or for
+// asking a model anything, because none of those are visible and a ghost
+// must not become a side channel into another ghost's private state.
+const (
+	// ActedSpoke: a line appeared in its balloon. Text is the line.
+	ActedSpoke = "spoke"
+	// ActedMoved: it changed position on screen.
+	ActedMoved = "moved"
+	// ActedExpression: it changed its face. Text is the pose.
+	ActedExpression = "expression"
+	// ActedClip: it played an animation. Text is the clip's name.
+	ActedClip = "clip"
+	// ActedDrew: it painted a picture in its balloon. Text is what the
+	// picture is of — visible in the ordinary sense that a picture of a
+	// cat visibly contains a cat.
+	ActedDrew = "drew"
+	// ActedPoked: the user clicked on it.
+	ActedPoked = "poked"
 )
 
 // Event is one occurrence delivered to a brain.
