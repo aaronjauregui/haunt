@@ -1,6 +1,6 @@
 GO ?= go
 
-.PHONY: build test vet fmt demo demo-ai demo-sleep demo-headless install-user clean
+.PHONY: build test vet fmt demo demo-ai demo-troupe demo-sleep demo-headless install-user clean
 
 build:
 	$(GO) build ./...
@@ -26,6 +26,14 @@ demo:
 # IDLE_MS=10000 shortens the wait before it speaks unprompted.
 demo-ai:
 	GHOST=wisp ./scripts/demo.sh
+
+# Two ghosts at once, in one nested sway. Whisper is scripted and wisp runs
+# on the built-in brain, so they behave differently — which is the point.
+# Watch for: the second one opens beside the first rather than on top of it,
+# and from another terminal `haunt say "hello"` with no -ghost goes to
+# whichever you last clicked. `haunt say -ghost wisp ...` addresses one.
+demo-troupe:
+	GHOST="whisper wisp" ./scripts/demo.sh
 
 # The AI ghost again, with memory consolidation collapsed to something you
 # can watch: idle after 10s, consolidate 5s later over anything at least a

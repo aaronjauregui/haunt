@@ -37,44 +37,52 @@ cat > "$workdir/sway.cfg" <<'EOF'
 output * bg #24283b solid_color
 EOF
 
-# GHOST=whisper (default) or wisp. Whisper is the scripted example brain,
-# built to WASM; wisp declares no brain at all and so runs on the driver's
-# built-in one, chatting via your configured LLM ([ai.llm] in
+# GHOST=whisper (default) or wisp, or several separated by spaces —
+# GHOST="whisper wisp" puts both on screen at once, which is how you watch
+# the multi-ghost behaviour: neither opens on top of the other, and `haunt
+# say` follows whichever you last poked. Whisper is the scripted example
+# brain, built to WASM; wisp declares no brain at all and so runs on the
+# driver's built-in one, chatting via your configured LLM ([ai.llm] in
 # ~/.config/haunt/config.toml) and drawing via [ai.image].
-ghost="${GHOST:-whisper}"
-echo ">> building haunt and the $ghost ghost"
+ghosts="${GHOST:-whisper}"
+echo ">> building haunt and: $ghosts"
 go build -o "$workdir/haunt" ./cmd/haunt
-mkdir -p "$workdir/$ghost"
-case "$ghost" in
-whisper)
-    GOOS=wasip1 GOARCH=wasm go build -o "$workdir/whisper/brain.wasm" ./examples/whisper
-    cat > "$workdir/whisper/ghost.toml" <<'EOF'
+ghost_dirs=()
+for ghost in $ghosts; do
+    mkdir -p "$workdir/$ghost"
+    ghost_dirs+=("$workdir/$ghost")
+    case "$ghost" in
+    whisper)
+        GOOS=wasip1 GOARCH=wasm go build -o "$workdir/whisper/brain.wasm" ./examples/whisper
+        cat > "$workdir/whisper/ghost.toml" <<'EOF'
 [ghost]
 name = "whisper"
 version = "0.1.0"
-capabilities = ["message"]
+capabilities = ["message", "tell"]
 
 [brain]
 wasm = "brain.wasm"
 EOF
-    ;;
-wisp)
-    # No [brain] section and nothing to compile: art and a persona are a
-    # whole ghost, and the driver's built-in brain runs it.
-    cat > "$workdir/wisp/ghost.toml" <<'EOF'
+        ;;
+    wisp)
+        # No [brain] section and nothing to compile: art and a persona are a
+        # whole ghost, and the driver's built-in brain runs it.
+        cat > "$workdir/wisp/ghost.toml" <<'EOF'
 [ghost]
 name = "wisp"
 version = "0.1.0"
-capabilities = ["message", "llm", "imagine", "window"]
+capabilities = ["message", "llm", "imagine", "window", "tell"]
 
 [persona]
 system = "You are Wisp, a wry little desktop spirit haunting the user's screen. Reply in one or two short sentences, with dry wit. You may be shown your own private journal; let it color your mood and callbacks."
 EOF
-    ;;
-*)
-    echo "unknown GHOST=$ghost (use whisper or wisp)"; exit 1
-    ;;
-esac
+        ;;
+    *)
+        echo "unknown ghost \"$ghost\" in GHOST (use whisper and/or wisp)"; exit 1
+        ;;
+    esac
+done
+ghost_count=${#ghost_dirs[@]}
 
 echo ">> starting nested sway (backend: $backend)"
 WLR_BACKENDS="$backend" WLR_LIBINPUT_NO_DEVICES=1 SWAYSOCK="$workdir/sway.sock" \
@@ -90,12 +98,25 @@ for _ in $(seq 1 100); do
 done
 [ -n "$display" ] || { echo "sway never reported a display"; tail "$workdir/sway.log"; exit 1; }
 
-echo ">> nested sway is up on $display; spawning $ghost (click it, drag it, right-click to type at it)"
+echo ">> nested sway is up on $display; spawning $ghosts (click it, drag it, right-click to type at it)"
 echo ">> from another terminal, talk to it with:  go run ./cmd/haunt say \"hello\""
-if [ "$ghost" = wisp ]; then
+if [ "$ghost_count" -gt 1 ]; then
+    echo ">> two ghosts. \`say\` with no -ghost goes to whichever you last clicked:"
+    echo ">>     go run ./cmd/haunt say \"who am I talking to\""
+    echo ">>   or address one by name:  go run ./cmd/haunt say -ghost whisper \"hello\""
+    echo ">>   A ghost that has been run before comes back to where it was left, so"
+    echo ">>   to watch the second one *step aside* from a shared default corner,"
+    echo ">>   start from a clean slate:  XDG_DATA_HOME=\$(mktemp -d) make demo-troupe"
+fi
+if [[ " $ghosts " == *" wisp "* ]]; then
     echo ">> wisp extras:  say help  |  say \"draw a whale\"  |  say \"draw again\"  |  say \"remember I like tea\"  |  haunt journal -state ~/.local/share/haunt/ghosts/wisp"
 fi
-run_args=(run -x 200 -y 150)
+run_args=(run)
+if [ "$ghost_count" -eq 1 ]; then
+    # Where to open is a question about one ghost; with several, the
+    # driver arbitrates and the flag is refused.
+    run_args+=(-x 200 -y 150)
+fi
 if [ -n "$idle_ms" ]; then
     echo ">> idle threshold: ${idle_ms}ms (leave the window alone to see it speak first)"
     run_args+=(-idle-ms "$idle_ms")
@@ -108,6 +129,6 @@ if [ -n "$sleep_age" ]; then
     echo ">> consolidating memories older than ${sleep_age}"
     run_args+=(-consolidate-after "$sleep_age")
 fi
-WAYLAND_DISPLAY="$display" "$workdir/haunt" "${run_args[@]}" "$workdir/$ghost" &
+WAYLAND_DISPLAY="$display" "$workdir/haunt" "${run_args[@]}" "${ghost_dirs[@]}" &
 
 wait "$sway_pid"

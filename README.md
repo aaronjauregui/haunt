@@ -14,9 +14,10 @@ its reasoning.
 
 ## Try it
 
-    make demo        # a scripted ghost, in a nested sway window
-    make demo-ai     # one that talks to your LLM
-    make demo-sleep  # the same, with memory consolidation sped up to watch
+    make demo         # a scripted ghost, in a nested sway window
+    make demo-ai      # one that talks to your LLM
+    make demo-troupe  # two of them at once, sharing a screen
+    make demo-sleep   # the first, with memory consolidation sped up to watch
 
 Poke it, drag it, double-click for a menu, right-click to type at it. A
 menu can be answered with the mouse or with the number keys. `make demo-ai` needs an
@@ -94,6 +95,9 @@ others; `haunt add` and `haunt drop` are how you keep them:
     haunt ls            # * marks who is resident
     haunt drop moth     # moth moves out, keeping its memory and its grants
     haunt run           # runs everyone resident
+
+`make demo-troupe` puts two on screen in a nested sway if you want to see
+it before committing your own desktop to it.
 
 Each ghost is its own session — its own memory, its own brain, its own
 compositor connection — so one crashing is one ghost lost rather than the
