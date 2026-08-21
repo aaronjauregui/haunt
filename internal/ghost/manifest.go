@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 
@@ -19,6 +20,7 @@ type Manifest struct {
 	Brain    BrainSection     `toml:"brain"`
 	Persona  PersonaSection   `toml:"persona"`
 	Triggers []TriggerSection `toml:"trigger"`
+	Tools    []ToolSection    `toml:"tool"`
 }
 
 // PersonaSection shapes LLM-generated dialogue. Only meaningful with the
@@ -29,6 +31,40 @@ type PersonaSection struct {
 	// HistoryTurns caps how many past exchanges accompany each request
 	// (default 12).
 	HistoryTurns int `toml:"history_turns"`
+}
+
+// ToolSection declares one MCP tool server the ghost would like to act
+// through. The driver runs it, so the ghost package never contains a
+// credential and the brain never holds one — the same division as the AI
+// backends, and for the same reason.
+//
+// Declaring a server is not permission to use it. The `tools` capability
+// says the ghost may act at all, and each individual tool is consented to
+// the first time it is actually about to be used: a server that offers
+// "read a note" and "delete everything" is one grant in the manifest and
+// two very different questions to put to a person.
+type ToolSection struct {
+	// Name identifies the server, and is the first half of every tool's
+	// name ("notes" makes "notes.search"). It is the name the user sees in
+	// the consent question and in `haunt perms`, so it should say what the
+	// server is for rather than what it is called on disk.
+	Name string `toml:"name"`
+	// Command is the server process (argv). Unlike brain.command, argv[0]
+	// is resolved on PATH as well as relative to the ghost directory: a
+	// tool server is ordinarily something the *user* installed, not
+	// something the ghost shipped, and requiring it inside the package
+	// would mean every ghost vendoring its own copy.
+	Command []string `toml:"command"`
+	// Env names environment variables to pass through from the driver's
+	// own environment. Named, never valued: a token belongs in the user's
+	// environment, and a manifest that could carry one would be a package
+	// that leaks whoever built it.
+	Env []string `toml:"env"`
+	// Allow, when set, restricts which of the server's tools this ghost may
+	// use at all — the manifest's own upper bound, under the user's. Empty
+	// means every tool the server offers, which is the ordinary case for a
+	// server chosen for this ghost.
+	Allow []string `toml:"allow"`
 }
 
 // TriggerSection is a scheduled event: at each cron time, an EventCron with
@@ -53,6 +89,10 @@ var KnownCapabilities = map[string]string{
 	// knowing which window you have open is a different order of intrusion
 	// from being shown a picture of it.
 	"window": "see which application and window you have focused, and its title",
+	// `tools` is the outer switch on agency: it says the ghost may act
+	// through the tool servers its manifest declares, and every individual
+	// tool is still asked about separately the first time it is used.
+	"tools":  "do things through the tool servers it declares, one tool at a time",
 	"screen": "take pictures of the focused window and show them to a vision model",
 }
 
@@ -124,6 +164,28 @@ func LoadManifest(dir string) (*Manifest, error) {
 		if _, ok := KnownCapabilities[c]; !ok {
 			return nil, fmt.Errorf("%s: unknown capability %q", path, c)
 		}
+	}
+	seenTool := map[string]bool{}
+	for i, t := range m.Tools {
+		switch {
+		case t.Name == "":
+			return nil, fmt.Errorf("%s: tool server %d needs a name", path, i)
+		// The name is the first half of every tool's name, so a dot in it
+		// would make "notes.mail.send" ambiguous about where the server
+		// ends — and that name is what the user is asked to approve.
+		case strings.ContainsAny(t.Name, ". \t"):
+			return nil, fmt.Errorf("%s: tool server name %q may not contain a dot or a space", path, t.Name)
+		case seenTool[t.Name]:
+			return nil, fmt.Errorf("%s: two tool servers are both named %q", path, t.Name)
+		case len(t.Command) == 0:
+			return nil, fmt.Errorf("%s: tool server %q needs a command to run", path, t.Name)
+		}
+		seenTool[t.Name] = true
+	}
+	// Declaring servers without asking for the capability is a manifest
+	// that can never act, which is more likely a mistake than an intention.
+	if len(m.Tools) > 0 && !hasCapability(&m, "tools") {
+		return nil, fmt.Errorf("%s: [[tool]] servers are declared but the tools capability is not requested", path)
 	}
 	rels := []string{m.Brain.Wasm, m.Shell.Sprite}
 	if hasCmd {

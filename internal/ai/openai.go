@@ -17,11 +17,17 @@ var httpClient = &http.Client{Timeout: 5 * time.Minute}
 
 // chatCompletion calls an OpenAI-compatible /chat/completions endpoint with
 // streaming, invoking onDelta per content fragment.
-func chatCompletion(ctx context.Context, cfg *LLMConfig, msgs []Message, onDelta func(string), opts Options) (string, error) {
+func chatCompletion(ctx context.Context, cfg *LLMConfig, msgs []Message, onDelta func(string), opts Options) (Reply, error) {
 	body := map[string]any{
 		"model":    cfg.Model,
 		"messages": msgs,
 		"stream":   true,
+	}
+	// Left out unless there is something to offer: a backend that has never
+	// heard of tool calling rejects the field rather than ignoring it, and
+	// most conversations have nothing to offer anyway.
+	if len(opts.Tools) > 0 {
+		body["tools"] = toolSpecs(opts.Tools)
 	}
 	// Left out entirely when unconfigured, so the backend's own default
 	// applies rather than one invented here.
@@ -30,12 +36,12 @@ func chatCompletion(ctx context.Context, cfg *LLMConfig, msgs []Message, onDelta
 	}
 	reqBody, err := json.Marshal(body)
 	if err != nil {
-		return "", err
+		return Reply{}, err
 	}
 	req, err := http.NewRequestWithContext(ctx, "POST",
 		strings.TrimRight(cfg.BaseURL, "/")+"/chat/completions", bytes.NewReader(reqBody))
 	if err != nil {
-		return "", err
+		return Reply{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if key := cfg.apiKey(); key != "" {
@@ -44,16 +50,22 @@ func chatCompletion(ctx context.Context, cfg *LLMConfig, msgs []Message, onDelta
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("llm backend: %w", err)
+		return Reply{}, fmt.Errorf("llm backend: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return "", fmt.Errorf("llm backend: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		return Reply{}, fmt.Errorf("llm backend: %s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
 
 	// SSE: lines of "data: {...}" ending with "data: [DONE]".
 	var full strings.Builder
+	// Tool calls arrive in pieces, keyed by their position in the list: an
+	// id and a name in one chunk, then the arguments a few characters at a
+	// time. Nothing here is valid JSON until the stream ends, which is why
+	// they are assembled rather than parsed as they arrive.
+	calls := map[int]*ToolCall{}
+	var order []int
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
 	for sc.Scan() {
@@ -68,7 +80,16 @@ func chatCompletion(ctx context.Context, cfg *LLMConfig, msgs []Message, onDelta
 		var chunk struct {
 			Choices []struct {
 				Delta struct {
-					Content string `json:"content"`
+					Content   string `json:"content"`
+					ToolCalls []struct {
+						Index    int    `json:"index"`
+						ID       string `json:"id"`
+						Type     string `json:"type"`
+						Function struct {
+							Name      string `json:"name"`
+							Arguments string `json:"arguments"`
+						} `json:"function"`
+					} `json:"tool_calls"`
 				} `json:"delta"`
 			} `json:"choices"`
 		}
@@ -82,15 +103,76 @@ func chatCompletion(ctx context.Context, cfg *LLMConfig, msgs []Message, onDelta
 					onDelta(ch.Delta.Content)
 				}
 			}
+			for _, tc := range ch.Delta.ToolCalls {
+				c, seen := calls[tc.Index]
+				if !seen {
+					c = &ToolCall{}
+					calls[tc.Index] = c
+					order = append(order, tc.Index)
+				}
+				if tc.ID != "" {
+					c.ID = tc.ID
+				}
+				if tc.Type != "" {
+					c.Type = tc.Type
+				}
+				if tc.Function.Name != "" {
+					c.Function.Name = tc.Function.Name
+				}
+				c.Function.Arguments += tc.Function.Arguments
+			}
 		}
 	}
+	reply := Reply{Text: full.String()}
+	for _, i := range order {
+		c := calls[i]
+		if c.Function.Name == "" {
+			continue
+		}
+		if c.Type == "" {
+			c.Type = "function"
+		}
+		// Some backends stream a call with no id at all. The id is only
+		// ever used to tie the result back to the call, so inventing a
+		// stable one is better than dropping a call the model asked for.
+		if c.ID == "" {
+			c.ID = fmt.Sprintf("call_%d", i)
+		}
+		reply.Calls = append(reply.Calls, *c)
+	}
 	if err := sc.Err(); err != nil {
-		return full.String(), fmt.Errorf("llm stream: %w", err)
+		return reply, fmt.Errorf("llm stream: %w", err)
 	}
-	if full.Len() == 0 {
-		return "", fmt.Errorf("llm backend returned an empty reply")
+	// A reply with tool calls and no words is the ordinary shape of a model
+	// that means to do something before it speaks, so emptiness is only a
+	// failure when there is nothing at all.
+	if full.Len() == 0 && len(reply.Calls) == 0 {
+		return Reply{}, fmt.Errorf("llm backend returned an empty reply")
 	}
-	return full.String(), nil
+	return reply, nil
+}
+
+// toolSpecs renders the tools in the shape the chat completions API wants.
+// A tool with no schema is given the empty object schema rather than none:
+// backends differ about whether the field may be missing, and every one of
+// them accepts an object with no properties.
+func toolSpecs(tools []Tool) []map[string]any {
+	out := make([]map[string]any, 0, len(tools))
+	for _, t := range tools {
+		schema := t.Schema
+		if len(schema) == 0 {
+			schema = json.RawMessage(`{"type":"object","properties":{}}`)
+		}
+		out = append(out, map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name":        t.Name,
+				"description": t.Description,
+				"parameters":  schema,
+			},
+		})
+	}
+	return out
 }
 
 // generateImage calls an OpenAI-compatible /images/generations endpoint and

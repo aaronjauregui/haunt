@@ -93,6 +93,18 @@ func (g *Ghost) execChat(in proto.Intent, userDriven bool) {
 	msgs = append(msgs, history...)
 	msgs = append(msgs, ai.Message{Role: "user", Content: text})
 
+	// What this ghost may do, offered to the model alongside what it may
+	// say. Left out of silent calls: those are the brain talking to itself
+	// — rewriting a request into an image prompt — and a machine that
+	// answered a rewrite by sending an email would be a machine nobody
+	// should have built.
+	var tools []ai.Tool
+	var back map[string]toolRef
+	if !silent && g.capabilityActive("tools") {
+		g.startToolServers()
+		tools, back = g.offerable()
+	}
+
 	// The mouth moves for exactly as long as words are arriving — the whole
 	// reason the trigger is called `talk` and not `animate`. It starts on
 	// the first token, not on the request: a mouth moving through a wait
@@ -100,62 +112,56 @@ func (g *Ghost) execChat(in proto.Intent, userDriven bool) {
 	// broken ghost.
 	defer g.stopTalking()
 
-	// Until that first token there is nothing on screen to say the ghost is
-	// working, so the driver says it (waiting.go). Not for silent calls:
-	// those are the brain talking to itself, and the user is owed no
-	// account of them.
-	var wait *waiter
-	if !silent {
-		wait = g.startWaiting(in.Wait)
-	}
-	defer wait.Stop()
-
-	// A backend that accepts the connection and then never answers would
-	// otherwise hold this ghost's single AI slot until the HTTP client's
-	// own timeout, minutes later, with every later request queued behind
-	// it. The deadline is on the *first* token rather than the whole reply,
-	// because a long answer streaming steadily is working and a long
-	// silence is not.
-	ctx, cancel := context.WithCancel(g.sessionContext())
-	defer cancel()
-	var timedOut atomic.Bool
-	deadline := time.AfterFunc(g.firstTokenTimeout(), func() {
-		timedOut.Store(true)
-		cancel()
-	})
-	defer deadline.Stop()
-
-	// Stream into the balloon, re-rendering at a gentle pace.
-	var acc string
-	var started sync.Once
-	last := time.Now()
-	onDelta := func(delta string) {
-		started.Do(func() {
-			deadline.Stop()
-			// Take the indicator down before the first words land, or they
-			// arrive under a balloon full of dots.
-			wait.Stop()
-			g.startTalking()
+	// One utterance can take several requests. A model that has been given
+	// tools answers either with words or with something it wants done
+	// first, and the second kind is not an answer yet: the driver runs what
+	// it asked for, hands back what happened, and asks again. Every one of
+	// those actions is consented to and visible in its own right (act.go),
+	// so this loop cannot become a way to do things quietly by doing them
+	// inside somebody else's sentence.
+	var full string
+	var actions []string
+	spent := 0
+	for {
+		reply, err := g.chatRound(msgs, ai.Options{Silent: silent, Tag: tag, Tools: tools}, in.Wait, silent)
+		if err != nil {
+			g.log.Warn(hlog.AI, "chat: %v", err)
+			g.publishAIError(err.Error(), tag)
+			return
+		}
+		if len(reply.Calls) == 0 {
+			full = reply.Text
+			break
+		}
+		// What it said on the way, if anything, is kept: a model that
+		// explains itself before acting has said something worth hearing,
+		// and the balloon has been showing it.
+		msgs = append(msgs, ai.Message{
+			Role:      "assistant",
+			Content:   reply.Text,
+			ToolCalls: reply.Calls,
 		})
-		acc += delta
-		if time.Since(last) >= 120*time.Millisecond {
-			last = time.Now()
-			g.showBalloon(acc)
+		for _, call := range reply.Calls {
+			result := g.runToolCall(call, back)
+			spent++
+			if result.ran {
+				actions = append(actions, result.ref)
+			}
+			msgs = append(msgs, ai.Message{
+				Role:       "tool",
+				ToolCallID: call.ID,
+				Name:       call.Function.Name,
+				Content:    result.text,
+			})
 		}
-	}
-	if silent {
-		onDelta = func(string) { started.Do(func() { deadline.Stop() }) }
-	}
-	full, err := g.aiSvc.Chat(ctx, msgs, onDelta,
-		ai.Options{Silent: silent, Tag: tag})
-	if err != nil {
-		if timedOut.Load() {
-			err = fmt.Errorf("the model said nothing for %s — is the backend awake?",
-				g.firstTokenTimeout())
+		// The stop. Without one, a model that keeps asking for the same
+		// tool is an unbounded spend nobody asked for; with it, the next
+		// round is offered no tools at all and so has to answer with what
+		// it has, which is a better ending than a truncated exchange.
+		if spent >= g.aiSvc.MaxToolCalls() {
+			g.log.Info(hlog.Tool, "%d tool calls in one exchange; asking for an answer now", spent)
+			tools = nil
 		}
-		g.log.Warn(hlog.AI, "chat: %v", err)
-		g.publishAIError(err.Error(), tag)
-		return
 	}
 	if silent {
 		g.publishAIResult(proto.Event{Type: proto.EventAIReply, Text: full, Tag: tag}, userDriven)
@@ -204,6 +210,7 @@ func (g *Ghost) execChat(in proto.Intent, userDriven bool) {
 		User:         text,
 		SelfPrompt:   in.SelfPrompt,
 		Reply:        full,
+		Acted:        actions,
 		Recalled:     recalledTrace(recalled),
 		Window:       g.currentWindow(),
 		System:       system,
@@ -228,6 +235,13 @@ func (g *Ghost) execChat(in proto.Intent, userDriven bool) {
 	note := "The user said: " + text + "\nYou answered: " + full
 	if in.SelfPrompt {
 		note = "Unprompted, you said: " + full
+	}
+	// What it did in the course of answering is part of what happened, and
+	// the journal already has an entry per action; this is what makes the
+	// exchange itself findable by it months later ("when did you last
+	// touch my notes?").
+	if len(actions) > 0 {
+		note += "\nAlong the way you used: " + strings.Join(actions, ", ")
 	}
 	g.go_(hlog.Memory, "remembering an exchange", func() { g.remember(kindExchange, note) })
 }
@@ -373,4 +387,113 @@ func storeGet(s Store, key string) (string, bool, error) {
 	}
 	v, ok := all[key]
 	return v, ok, nil
+}
+
+// chatRound is one request to the model: the waiting indicator in front of
+// it, the first-token deadline over it, and the words streaming into the
+// balloon as they arrive. An exchange is one of these when nothing is
+// offered, and several when the model asks for something to be done.
+func (g *Ghost) chatRound(msgs []ai.Message, opts ai.Options, wait string, silent bool) (ai.Reply, error) {
+	// Until the first token there is nothing on screen to say the ghost is
+	// working, so the driver says it (waiting.go). Not for silent calls:
+	// those are the brain talking to itself, and the user is owed no
+	// account of them.
+	var waiting *waiter
+	if !silent {
+		waiting = g.startWaiting(wait)
+	}
+	defer waiting.Stop()
+
+	// A backend that accepts the connection and then never answers would
+	// otherwise hold this ghost's single AI slot until the HTTP client's
+	// own timeout, minutes later, with every later request queued behind
+	// it. The deadline is on the *first* token rather than the whole reply,
+	// because a long answer streaming steadily is working and a long
+	// silence is not.
+	ctx, cancel := context.WithCancel(g.sessionContext())
+	defer cancel()
+	var timedOut atomic.Bool
+	deadline := time.AfterFunc(g.firstTokenTimeout(), func() {
+		timedOut.Store(true)
+		cancel()
+	})
+	defer deadline.Stop()
+
+	// Stream into the balloon, re-rendering at a gentle pace.
+	var acc string
+	var started sync.Once
+	last := time.Now()
+	onDelta := func(delta string) {
+		started.Do(func() {
+			deadline.Stop()
+			// Take the indicator down before the first words land, or they
+			// arrive under a balloon full of dots.
+			waiting.Stop()
+			g.startTalking()
+		})
+		acc += delta
+		if time.Since(last) >= 120*time.Millisecond {
+			last = time.Now()
+			g.showBalloon(acc)
+		}
+	}
+	if silent {
+		onDelta = func(string) { started.Do(func() { deadline.Stop() }) }
+	}
+	reply, err := g.aiSvc.ChatWithTools(ctx, msgs, onDelta, opts)
+	// The mouth stops when this round's words stop, not when the whole
+	// exchange does: a ghost that goes on mouthing through a two-minute
+	// tool call is a ghost that looks broken.
+	g.stopTalking()
+	if err != nil {
+		if timedOut.Load() {
+			err = fmt.Errorf("the model said nothing for %s — is the backend awake?",
+				g.firstTokenTimeout())
+		}
+		return reply, err
+	}
+	return reply, nil
+}
+
+// toolResult is what one of the model's tool calls came to, in the terms
+// this file needs: what to hand back to the model, and whether anything
+// actually happened.
+type toolResult struct {
+	text string
+	ref  string
+	ran  bool
+}
+
+// runToolCall turns one call from the model into an action, or into an
+// explanation of why there was not one. Every outcome comes back as
+// content for the model rather than as an error: "you may not do that" and
+// "that did not work" are both things it needs to hear in order to say
+// something sensible next, and a refusal that surfaced as a failed exchange
+// would leave the person who asked with nothing at all.
+func (g *Ghost) runToolCall(call ai.ToolCall, back map[string]toolRef) toolResult {
+	ref, known := back[call.Function.Name]
+	if !known {
+		// The model asked for something that was never offered. It happens,
+		// and the honest answer is the one that stops it happening twice.
+		g.log.Info(hlog.Tool, "the model asked for %q, which is not on offer", call.Function.Name)
+		return toolResult{text: "There is no tool called " + call.Function.Name + "."}
+	}
+	args := json.RawMessage(strings.TrimSpace(call.Function.Arguments))
+	if len(args) == 0 || !json.Valid(args) {
+		// Small models produce this often enough to be worth answering
+		// rather than failing on: an empty string is what a model sends
+		// when it means no arguments, and anything else is a mistake it
+		// can be told about and correct.
+		if len(args) > 0 {
+			return toolResult{text: "Those arguments are not valid JSON."}
+		}
+		args = nil
+	}
+	// No Wait words: inside an exchange the character has already said
+	// whatever it had to say about waiting, and the driver names the tool.
+	out := g.runTool(ref, args, "")
+	if out.Refused {
+		return toolResult{text: "That was not allowed: " + out.Text + "."}
+	}
+	return toolResult{text: out.Text, ref: ref.String(), ran: true}
 }

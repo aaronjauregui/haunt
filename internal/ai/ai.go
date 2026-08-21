@@ -7,6 +7,7 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -38,6 +39,12 @@ type Config struct {
 	// badly enough to be worse than the word table, so the default stays
 	// free and this is opt-in.
 	ExpressionInference string `toml:"expression_inference"`
+
+	// ToolTimeout is how long one tool call may take, in seconds (default
+	// 120), and MaxToolCalls how many tool calls one exchange may make
+	// before the model has to answer with what it has (default 6).
+	ToolTimeout  int `toml:"tool_timeout"`
+	MaxToolCalls int `toml:"max_tool_calls"`
 
 	// FirstTokenTimeout is how long a streaming chat may go without a
 	// single token before the driver gives up on it, in seconds (default
@@ -139,6 +146,11 @@ func (c *VisionConfig) apiKey() string {
 type BudgetConfig struct {
 	LLMRequestsPerHour   int `toml:"llm_requests_per_hour"`
 	ImageRequestsPerHour int `toml:"image_requests_per_hour"`
+	// ToolRequestsPerHour caps how fast a ghost may *act*. Separate from
+	// the LLM allowance because it rations something else: an LLM call
+	// spends money and a tool call changes the world, and one exchange can
+	// contain several of the second.
+	ToolRequestsPerHour int `toml:"tool_requests_per_hour"`
 	// EmbedRequestsPerHour is separate and generous: memory work rides
 	// along with dialogue (a recall on the way in, a write on the way out)
 	// and must not consume the conversation's own allowance.
@@ -149,12 +161,23 @@ const (
 	defaultLLMPerHour   = 120
 	defaultImagePerHour = 12
 	defaultEmbedPerHour = 600
+	// defaultToolPerHour is a working afternoon's worth of doing things
+	// and nothing like enough for a loop.
+	defaultToolPerHour = 60
 
 	// defaultFirstTokenTimeout is generous enough for a local model being
 	// loaded from disk on the first request of the day, and short enough
 	// that a backend which will never answer is noticed while the person
 	// who asked is still there.
 	defaultFirstTokenTimeout = 30 * time.Second
+
+	// defaultToolTimeout is long enough for a build or a slow network call
+	// and short enough that a wedged server is noticed the same afternoon.
+	defaultToolTimeout = 2 * time.Minute
+	// defaultMaxToolCalls is enough for look-then-act-then-say, which is
+	// the shape nearly every useful exchange has, and few enough that a
+	// model going in circles stops quickly.
+	defaultMaxToolCalls = 6
 )
 
 // LoadConfig reads the [ai] section of the user config file.
@@ -185,6 +208,9 @@ func LoadConfig() (*Config, error) {
 	if cfg.Budget.EmbedRequestsPerHour == 0 {
 		cfg.Budget.EmbedRequestsPerHour = defaultEmbedPerHour
 	}
+	if cfg.Budget.ToolRequestsPerHour == 0 {
+		cfg.Budget.ToolRequestsPerHour = defaultToolPerHour
+	}
 	return &cfg, nil
 }
 
@@ -202,10 +228,53 @@ func (c *ImageConfig) apiKey() string {
 	return os.Getenv(c.APIKeyEnv)
 }
 
-// Message is one chat turn.
+// Message is one chat turn. The three tool fields are empty for every
+// message in an ordinary conversation and are only ever set inside a single
+// exchange — an assistant turn that asked for a tool, and the tool turns
+// answering it. None of them are saved into the ghost's history: what
+// outlives the exchange is what was asked and what was finally said, not
+// the machinery in between. See execChat.
 type Message struct {
-	Role    string `json:"role"` // system, user, assistant
+	Role    string `json:"role"` // system, user, assistant, tool
 	Content string `json:"content"`
+	// ToolCalls is what an assistant turn asked to run.
+	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+	// ToolCallID ties a tool turn back to the call it answers.
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	// Name is the tool a tool turn is the result of. Not every backend
+	// wants it and none mind it.
+	Name string `json:"name,omitempty"`
+}
+
+// Tool is one thing the model may ask to have done, in the shape the chat
+// completions API wants. Haunt fills these in from the MCP servers a
+// ghost's manifest declares and the user has approved; the schema is the
+// server's own, passed through unchanged.
+type Tool struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Schema      json.RawMessage `json:"schema"`
+}
+
+// ToolCall is the model asking for one. Arguments is a JSON object as a
+// string, which is how the API sends it and how it is streamed — in
+// fragments that have to be concatenated before they are valid JSON at all.
+type ToolCall struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+}
+
+// Reply is what one chat request produced: words, or a request to do
+// something first, and occasionally both. A model that asks for a tool has
+// not finished answering, so the caller runs what it asked for, appends the
+// results, and asks again — see the tool loop in internal/ghost.
+type Reply struct {
+	Text  string
+	Calls []ToolCall
 }
 
 // Budgets is the hourly ration a Service spends against. It is a value of
@@ -218,6 +287,7 @@ type Budgets struct {
 	llm   *budget
 	image *budget
 	embed *budget
+	tool  *budget
 }
 
 // NewBudgets builds an hourly ration from config. Defaults are filled in
@@ -229,6 +299,7 @@ func NewBudgets(cfg BudgetConfig) *Budgets {
 		llm:   newBudget(orDefault(cfg.LLMRequestsPerHour, defaultLLMPerHour)),
 		image: newBudget(orDefault(cfg.ImageRequestsPerHour, defaultImagePerHour)),
 		embed: newBudget(orDefault(cfg.EmbedRequestsPerHour, defaultEmbedPerHour)),
+		tool:  newBudget(orDefault(cfg.ToolRequestsPerHour, defaultToolPerHour)),
 	}
 }
 
@@ -299,6 +370,13 @@ func (s *Service) traceMessages(msgs []Message, opts Options) {
 	if opts.Tag != "" {
 		fmt.Fprintf(&b, " tag=%s", opts.Tag)
 	}
+	if n := len(opts.Tools); n > 0 {
+		names := make([]string, 0, n)
+		for _, t := range opts.Tools {
+			names = append(names, t.Name)
+		}
+		fmt.Fprintf(&b, " tools=[%s]", strings.Join(names, " "))
+	}
 	fmt.Fprintf(&b, " (%d messages)", len(msgs))
 	for _, m := range msgs {
 		fmt.Fprintf(&b, "\n  [%s] %s", m.Role, m.Content)
@@ -313,6 +391,11 @@ type Options struct {
 	Silent bool
 	// Tag is the brain's label for the request, echoed into traces.
 	Tag string
+	// Tools are what the model may ask to have done. Empty leaves the
+	// field out of the request entirely, which is what every call that is
+	// only a conversation wants — and what a backend that has never heard
+	// of tool calling requires.
+	Tools []Tool
 }
 
 // Expression modes.
@@ -364,20 +447,65 @@ func (s *Service) ImageEnabled() bool { return s.cfg.Image.BaseURL != "" }
 // fragments as they arrive; the full reply is returned. Budget is charged
 // per request, before the call.
 func (s *Service) Chat(ctx context.Context, msgs []Message, onDelta func(string), opts Options) (string, error) {
+	reply, err := s.ChatWithTools(ctx, msgs, onDelta, opts)
+	return reply.Text, err
+}
+
+// ChatWithTools is Chat that can also come back asking for something to be
+// done. With Options.Tools empty it is exactly Chat, which is why Chat is
+// one line: the tool path is not a second implementation of the chat path.
+func (s *Service) ChatWithTools(ctx context.Context, msgs []Message, onDelta func(string), opts Options) (Reply, error) {
 	if !s.LLMEnabled() {
-		return "", fmt.Errorf("no LLM backend configured (set [ai.llm] base_url in the haunt config)")
+		return Reply{}, fmt.Errorf("no LLM backend configured (set [ai.llm] base_url in the haunt config)")
 	}
 	if err := s.budgets.llm.spend(); err != nil {
-		return "", fmt.Errorf("llm budget: %w", err)
+		return Reply{}, fmt.Errorf("llm budget: %w", err)
 	}
 	s.traceMessages(msgs, opts)
-	full, err := chatCompletion(ctx, &s.cfg.LLM, msgs, onDelta, opts)
+	reply, err := chatCompletion(ctx, &s.cfg.LLM, msgs, onDelta, opts)
 	if err != nil {
 		s.trace("chat failed: %v", err)
-		return full, err
+		return reply, err
 	}
-	s.trace("reply (%d chars)\n  %s", len(full), full)
-	return full, nil
+	for _, c := range reply.Calls {
+		s.trace("wants to run %s(%s)", c.Function.Name, c.Function.Arguments)
+	}
+	if reply.Text != "" {
+		s.trace("reply (%d chars)\n  %s", len(reply.Text), reply.Text)
+	}
+	return reply, nil
+}
+
+// SpendToolCall charges one tool call against the hourly ration. It is here
+// rather than beside the call itself because the ration is the user's
+// money and their attention, and both are counted in one place.
+func (s *Service) SpendToolCall() error {
+	if err := s.budgets.tool.spend(); err != nil {
+		return fmt.Errorf("tool budget: %w", err)
+	}
+	return nil
+}
+
+// ToolTimeout is how long one tool call may take. Generous — a tool that
+// builds something or waits on a network is doing what it was asked — and
+// finite, because the ghost holds its one AI slot for the whole exchange
+// and a tool that never returns would make it mute.
+func (s *Service) ToolTimeout() time.Duration {
+	if s.cfg.ToolTimeout > 0 {
+		return time.Duration(s.cfg.ToolTimeout) * time.Second
+	}
+	return defaultToolTimeout
+}
+
+// MaxToolCalls caps how many tool calls one exchange may make before the
+// model is made to answer with what it has. Without a stop, a model that
+// keeps asking for the same tool is an unbounded spend that nobody asked
+// for.
+func (s *Service) MaxToolCalls() int {
+	if s.cfg.MaxToolCalls > 0 {
+		return s.cfg.MaxToolCalls
+	}
+	return defaultMaxToolCalls
 }
 
 // ImageCacheKey identifies the image backend configuration for

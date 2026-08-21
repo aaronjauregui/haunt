@@ -62,6 +62,14 @@ const (
 	// it is made from the same observations. See Event.Session.
 	EventSession EventType = "session"
 
+	// EventActed answers an act intent: Name is the tool that ran
+	// ("notes.append"), Text is what it said, and Tag echoes the intent's.
+	// A tool that failed on its own terms — the file was not there, the
+	// build is still running — arrives here too, in Text, because that is
+	// an answer and the thing that asked should hear it. Only a refusal
+	// (no capability, no consent, no allowance) comes back as EventAIError.
+	EventActed EventType = "acted"
+
 	// EventObserved is another resident ghost doing something in public:
 	// it spoke, it moved, it was poked, it drew a picture. From names the
 	// ghost, Name is the action (see the Acted constants) and Text is
@@ -94,6 +102,12 @@ const (
 	ActedDrew = "drew"
 	// ActedPoked: the user clicked on it.
 	ActedPoked = "poked"
+	// ActedUsedTool: it did something in the world through a tool server.
+	// Text is the tool's name, not its arguments or its answer: what a
+	// bystander saw was a ghost visibly working and a line in its balloon
+	// about it, and the arguments are as private as the prompt behind a
+	// picture.
+	ActedUsedTool = "used_tool"
 )
 
 // Event is one occurrence delivered to a brain.
@@ -138,6 +152,14 @@ type Event struct {
 	// (nothing over a fullscreen window, nothing under reduced motion)
 	// apply.
 	MayPose bool `json:"may_pose,omitempty"`
+	// Tools lists the tools the ghost may act through, included only with
+	// EventBoot, in "server.tool" form. Present for the same reason Poses
+	// is: a brain that means to do something needs to know what there is
+	// to do, and the alternative is guessing names at a driver that
+	// refuses the ones that do not exist. Empty when the ghost declares no
+	// tool servers, or when the tools capability is not active — a brain
+	// is told what it may use, not what it might have used.
+	Tools []string `json:"tools,omitempty"`
 	// Session carries what was noticed about the working day, for
 	// EventSession. Summary is the fact in a sentence, which is what a
 	// brain hands to a model; the rest is there for one that would rather
@@ -182,6 +204,7 @@ const (
 	IntentPlayClip      IntentType = "play_clip"      // run a declared animation
 	IntentLook          IntentType = "look"           // show the focused window to a vision model
 	IntentWatch         IntentType = "watch"          // the user asked for window awareness; ask and start it
+	IntentAct           IntentType = "act"            // run one tool on a declared server
 )
 
 // Intent is one request emitted by a brain. The driver validates and
@@ -236,6 +259,12 @@ type Intent struct {
 	// and the brain does not. Zero means the line stays until something
 	// replaces it.
 	LingerMS int `json:"linger_ms,omitempty"`
+	// Args is the JSON arguments object for IntentAct, passed to the tool
+	// server unchanged. The driver does not validate it against the tool's
+	// schema: that contract is the server's, it will reject a bad call
+	// itself, and a driver re-implementing somebody else's schema badly is
+	// a driver that refuses calls that would have worked.
+	Args json.RawMessage `json:"args,omitempty"`
 	// Wait is what the ghost says while an IntentChat or IntentImagine is
 	// still being answered — "thinking…", "let me look that up". The driver
 	// draws the waiting indicator itself, on its own delay, so a brain that
@@ -327,9 +356,37 @@ func (i *Intent) Validate() error {
 	// watch carries nothing: it is a request to put a question, and every
 	// term of that question is the driver's.
 	case IntentWatch:
+	case IntentAct:
+		if err := ValidToolName(i.Name); err != nil {
+			return fmt.Errorf("act intent: %w", err)
+		}
+		// An argument list that is not a JSON object is a call no server
+		// can read, and the failure is much clearer here than three
+		// processes away.
+		if len(i.Args) > 0 && !json.Valid(i.Args) {
+			return fmt.Errorf("act intent for %s: args are not valid JSON", i.Name)
+		}
 	case IntentHideSay, IntentMove, IntentLog:
 	default:
 		return fmt.Errorf("unknown intent type %q", i.Type)
+	}
+	return nil
+}
+
+// ValidToolName checks the "server.tool" form every tool is named in. It is
+// here rather than in the driver because it is part of the schema: a brain
+// building the name from two strings should be able to check it with the
+// same rule the driver will apply.
+func ValidToolName(name string) error {
+	server, tool, ok := strings.Cut(name, ".")
+	if !ok {
+		return fmt.Errorf("tool name %q is not in server.tool form", name)
+	}
+	if server == "" || tool == "" {
+		return fmt.Errorf("tool name %q has an empty half", name)
+	}
+	if strings.Contains(tool, ".") {
+		return fmt.Errorf("tool name %q has more than one dot", name)
 	}
 	return nil
 }

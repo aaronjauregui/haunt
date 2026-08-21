@@ -252,3 +252,154 @@ func TestPromptTracing(t *testing.T) {
 		t.Error("the prompt topic produced no trace")
 	}
 }
+
+// fakeToolLLM streams a tool call the way the API does: the id and name in
+// one chunk, the arguments a few characters at a time, none of it valid
+// JSON until the stream ends. Assembling that is most of what the tool
+// path in this package does.
+func fakeToolLLM(t *testing.T, wantTools bool) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Tools []struct {
+				Type     string `json:"type"`
+				Function struct {
+					Name       string          `json:"name"`
+					Parameters json.RawMessage `json:"parameters"`
+				} `json:"function"`
+			} `json:"tools"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		if wantTools && len(req.Tools) == 0 {
+			http.Error(w, "the tools were not offered", 400)
+			return
+		}
+		if !wantTools && len(req.Tools) > 0 {
+			http.Error(w, "tools were offered when there were none", 400)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fl := w.(http.Flusher)
+		send := func(delta map[string]any) {
+			b, _ := json.Marshal(map[string]any{
+				"choices": []map[string]any{{"delta": delta}},
+			})
+			fmt.Fprintf(w, "data: %s\n\n", b)
+			fl.Flush()
+		}
+		if wantTools {
+			send(map[string]any{"tool_calls": []map[string]any{{
+				"index": 0, "id": "call_1", "type": "function",
+				"function": map[string]any{"name": "notes__append"},
+			}}})
+			for _, frag := range []string{`{"te`, `xt":"h`, `i"}`} {
+				send(map[string]any{"tool_calls": []map[string]any{{
+					"index": 0, "function": map[string]any{"arguments": frag},
+				}}})
+			}
+		} else {
+			send(map[string]any{"content": "done"})
+		}
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+}
+
+func toolService(t *testing.T, srv *httptest.Server) *Service {
+	t.Helper()
+	return NewService(&Config{
+		LLM:    LLMConfig{BaseURL: srv.URL + "/v1", Model: "fake"},
+		Budget: BudgetConfig{LLMRequestsPerHour: 10},
+	}, nil)
+}
+
+func TestToolCallsAreAssembledFromTheStream(t *testing.T) {
+	srv := fakeToolLLM(t, true)
+	defer srv.Close()
+
+	reply, err := toolService(t, srv).ChatWithTools(context.Background(),
+		[]Message{{Role: "user", Content: "note this"}}, nil,
+		Options{Tools: []Tool{{Name: "notes__append", Description: "Append"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reply.Calls) != 1 {
+		t.Fatalf("calls = %d, want the one the model asked for", len(reply.Calls))
+	}
+	c := reply.Calls[0]
+	if c.ID != "call_1" || c.Function.Name != "notes__append" {
+		t.Errorf("call = %+v, want the id and name from the first chunk", c)
+	}
+	// The whole point of assembling rather than parsing as it arrives.
+	if c.Function.Arguments != `{"text":"hi"}` {
+		t.Errorf("arguments = %q, want the fragments joined", c.Function.Arguments)
+	}
+	if !json.Valid([]byte(c.Function.Arguments)) {
+		t.Error("the assembled arguments are not valid JSON")
+	}
+}
+
+// A reply that is only tool calls has no words in it, and that is the
+// ordinary shape of a model meaning to do something before it speaks —
+// not the empty reply the plain chat path treats as a failure.
+func TestToolCallWithNoWordsIsNotEmpty(t *testing.T) {
+	srv := fakeToolLLM(t, true)
+	defer srv.Close()
+
+	reply, err := toolService(t, srv).ChatWithTools(context.Background(),
+		[]Message{{Role: "user", Content: "note this"}}, nil,
+		Options{Tools: []Tool{{Name: "notes__append"}}})
+	if err != nil {
+		t.Fatalf("a wordless tool call was treated as a failure: %v", err)
+	}
+	if reply.Text != "" {
+		t.Errorf("text = %q, want none", reply.Text)
+	}
+}
+
+// With nothing to offer, the field is left out of the request entirely: a
+// backend that has never heard of tool calling rejects it rather than
+// ignoring it, and most conversations have nothing to offer anyway.
+func TestNoToolsMeansNoToolsField(t *testing.T) {
+	srv := fakeToolLLM(t, false)
+	defer srv.Close()
+
+	full, err := toolService(t, srv).Chat(context.Background(),
+		[]Message{{Role: "user", Content: "hello"}}, nil, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if full != "done" {
+		t.Errorf("reply = %q", full)
+	}
+}
+
+// A tool with no schema still has to be offered with one: backends differ
+// about whether the field may be missing and all of them take an object
+// with no properties.
+func TestToolSpecsFillInAMissingSchema(t *testing.T) {
+	specs := toolSpecs([]Tool{{Name: "t"}})
+	fn := specs[0]["function"].(map[string]any)
+	params, ok := fn["parameters"].(json.RawMessage)
+	if !ok || !json.Valid(params) {
+		t.Fatalf("parameters = %v, want a valid schema", fn["parameters"])
+	}
+	if !strings.Contains(string(params), "object") {
+		t.Errorf("parameters = %s, want an object schema", params)
+	}
+}
+
+// The tool allowance is separate from the conversation's: acting rations
+// something else, and one exchange can contain several actions.
+func TestToolBudgetIsItsOwn(t *testing.T) {
+	s := NewService(&Config{
+		Budget: BudgetConfig{LLMRequestsPerHour: 10, ToolRequestsPerHour: 2},
+	}, nil)
+	for i := range 2 {
+		if err := s.SpendToolCall(); err != nil {
+			t.Fatalf("call %d was refused: %v", i+1, err)
+		}
+	}
+	if err := s.SpendToolCall(); err == nil {
+		t.Error("a third call went through an allowance of two")
+	}
+}

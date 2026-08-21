@@ -63,6 +63,13 @@ const helpText = "Talk to me and I'll answer. `draw <something>` paints a pictur
 	"`draw again` repaints it differently, `remember <fact>` keeps something " +
 	"in mind, `look` glances at your screen."
 
+// toolsHelp is added to that when the ghost has tools. It is deliberately
+// vague about *how* to ask: there is no command for acting, because the
+// model is offered the tools during ordinary conversation and decides for
+// itself — which is the whole reason a ghost that is art plus a persona can
+// do things without a line of code in it.
+const toolsHelp = "\n\nI can also do things when you ask: "
+
 // How long each kind of line stays up. The driver times these from the
 // moment the line appears and drops them if something newer has arrived —
 // which a timer set by this brain could not do, since it cannot know how
@@ -157,6 +164,12 @@ type Brain struct {
 	// Dialogue moves the face too and this does not track that; the cost
 	// of being wrong is one redundant intent the driver drops.
 	worn string
+	// tools are the things this ghost can do, learned at boot. The brain
+	// never calls any of them: they reach the model during ordinary chat,
+	// and this list exists so the ghost can *say* what it is able to do.
+	// A companion whose abilities can only be discovered by guessing is a
+	// companion nobody discovers anything about.
+	tools []string
 	// watched says window events have actually been arriving, which is the
 	// only way a brain can tell whether it is being allowed to watch — the
 	// grant itself is the driver's business and deliberately not visible
@@ -192,7 +205,7 @@ func (b *Brain) onChoice(picked string, emit *brainkit.Emitter) {
 	case "":
 		return
 	case menuHelp:
-		emit.SayFor(helpText, lingerHelp)
+		emit.SayFor(b.help(), lingerHelp)
 	case menuLook:
 		emit.Look(lookTag, "")
 	case menuWatch:
@@ -227,6 +240,7 @@ func (b *Brain) OnEvent(e brainkit.Event, emit *brainkit.Emitter) {
 		// otherwise guessing names at a driver that quietly ignores the
 		// ones that do not exist.
 		b.poses = e.Poses
+		b.tools = e.Tools
 		for k, v := range e.KV {
 			if request, ok := strings.CutPrefix(k, promptKeyPrefix); ok {
 				b.prompts[request] = v
@@ -378,6 +392,9 @@ func (b *Brain) onMessage(text string, emit *brainkit.Emitter) {
 	case "help", "?":
 		b.offerMenu(emit)
 		return
+	case "what can you do", "what can you do?":
+		emit.SayFor(b.help(), lingerHelp)
+		return
 	case "draw again", "again":
 		if b.lastPrompt == "" {
 			emit.SayFor("Draw what? Ask me for something first.", lingerNote)
@@ -420,6 +437,15 @@ func (b *Brain) onMessage(text string, emit *brainkit.Emitter) {
 		Wait:     thinkingText,
 		LingerMS: lingerReply,
 	})
+}
+
+// help is the ghost explaining itself, including what it can do in the
+// world if it can do anything.
+func (b *Brain) help() string {
+	if len(b.tools) == 0 {
+		return helpText
+	}
+	return helpText + toolsHelp + strings.Join(b.tools, ", ") + "."
 }
 
 // nextPoke returns the next poke reply in rotation.

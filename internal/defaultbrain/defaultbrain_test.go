@@ -538,3 +538,43 @@ func contains(ss []string, want string) bool {
 	}
 	return false
 }
+
+// A ghost that can do things has to be able to say so. Nobody wrote this
+// brain, so there is no source for a user to read and no author to ask —
+// what it can do has to be discoverable from the ghost itself.
+func TestHelpNamesTheToolsItHas(t *testing.T) {
+	intents := run(t,
+		proto.Event{Type: proto.EventBoot, Tools: []string{"notes.append", "notes.search"}},
+		proto.Event{Type: proto.EventMessage, Text: "help"},
+		proto.Event{Type: proto.EventChoice, Name: menuHelp, Tag: menuTag},
+	)
+	var explained string
+	for _, s := range only(intents, proto.IntentSay) {
+		if strings.Contains(s.Text, "draw") {
+			explained = s.Text
+		}
+	}
+	if explained == "" {
+		t.Fatalf("nothing explained the ghost: %+v", intents)
+	}
+	for _, want := range []string{"notes.append", "notes.search"} {
+		if !strings.Contains(explained, want) {
+			t.Errorf("help does not mention %q:\n%s", want, explained)
+		}
+	}
+}
+
+// And a ghost with none says nothing about tools, rather than an empty
+// promise.
+func TestHelpSaysNothingAboutToolsItLacks(t *testing.T) {
+	intents := run(t,
+		proto.Event{Type: proto.EventBoot},
+		proto.Event{Type: proto.EventMessage, Text: "help"},
+		proto.Event{Type: proto.EventChoice, Name: menuHelp, Tag: menuTag},
+	)
+	for _, s := range only(intents, proto.IntentSay) {
+		if strings.Contains(s.Text, "I can also do things") {
+			t.Errorf("a ghost with no tools offered to do things:\n%s", s.Text)
+		}
+	}
+}

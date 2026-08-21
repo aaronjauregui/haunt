@@ -110,6 +110,11 @@ func printWhy(w ghost.Why, showPrompt bool) {
 		}
 		fmt.Println(indent + "· on screen at the time: " + what)
 	}
+	if len(w.Acted) > 0 {
+		// Before the memories, because it is the loudest fact about the
+		// reply: the ghost did not only answer, it did something.
+		fmt.Printf("%s· did something first: %s\n", indent, strings.Join(w.Acted, ", "))
+	}
 	if w.HistoryTurns > 0 {
 		fmt.Printf("%s· with the last %d turns of this conversation\n", indent, w.HistoryTurns)
 	}

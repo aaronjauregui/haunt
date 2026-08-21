@@ -112,6 +112,20 @@ func cmdInstall(args []string) error {
 	} else {
 		fmt.Println("requested capabilities: none")
 	}
+	// The `tools` line above says the ghost wants to act; this says what
+	// through. A person deciding at the install sheet should at least see
+	// which programs would be started on their machine, even though the
+	// individual tools are asked about later and one at a time.
+	if len(m.Tools) > 0 {
+		fmt.Println("tool servers it would run:")
+		for _, t := range m.Tools {
+			fmt.Printf("  - %s: %s\n", t.Name, strings.Join(t.Command, " "))
+			if len(t.Env) > 0 {
+				fmt.Printf("      passing through: %s\n", strings.Join(t.Env, ", "))
+			}
+		}
+		fmt.Println("  (each tool is asked about separately, the first time it is used)")
+	}
 
 	grantAll := *yes
 	if !grantAll && len(m.Ghost.Capabilities) > 0 {

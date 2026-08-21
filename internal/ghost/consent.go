@@ -50,6 +50,25 @@ import (
 // has just acted — the menu entry offering to watch is them raising the
 // question, which is a better moment than either the install sheet or a
 // poller could produce.
+//
+// Acting is the other shape this takes, and the only one that asks twice.
+// `tools` is an ordinary capability question, asked exactly as above; each
+// individual tool is then asked about the first time it is really about to
+// run, keyed `tool:notes.append` in the same grants file (see act.go):
+//
+//	Wisp would like to use notes.append — Append a line to today's note.
+//	Allow?
+//	1. Allow
+//	2. Just this once
+//	3. Not now
+//	4. Never ask again
+//
+// The extra option is there because a tool call is a discrete act with a
+// consequence in the world, which is exactly the thing somebody may want to
+// allow one of without allowing all of. Standing capabilities have no use
+// for it — answering "just this once" to "may it talk to your language
+// model" would mean being asked again on the next sentence — so it is
+// offered for tools and nothing else.
 
 // consentGap is how long to leave someone alone after a "not now" before
 // the same question may be asked again.
@@ -60,6 +79,13 @@ const (
 	consentAllow  = "Allow"
 	consentNotNow = "Not now"
 	consentNever  = "Never ask again"
+	// consentOnce is offered for tools and nothing else. Every other
+	// capability is a standing condition — a ghost either may talk to your
+	// language model or may not — and answering "just this once" to one of
+	// those would mean being asked again on the next sentence. A tool call
+	// is a discrete act with a consequence in the world, which is exactly
+	// the thing a person may want to allow one of without allowing all of.
+	consentOnce = "Just this once"
 )
 
 // askedFor remembers what has been asked, so a refusal is respected for a
@@ -99,19 +125,37 @@ func (a *askedFor) begin(cap string) bool {
 	return true
 }
 
-// end releases the question. allowed says the answer was yes, in which case
-// there is nothing to hold off on: the grant itself answers from now on.
-func (a *askedFor) end(cap string, allowed bool) {
+// verdict is what a person said, in the three shapes that matter to what
+// is remembered rather than to what happens next.
+type verdict int
+
+const (
+	// verdictNo covers "not now", a dismissal and a refusal for good: all of
+	// them mean leave the question alone for a while.
+	verdictNo verdict = iota
+	// verdictYes was written to the grants file, so nothing needs holding
+	// off — the grant itself answers from here on.
+	verdictYes
+	// verdictOnce is "just this once": the thing goes ahead and nothing is
+	// remembered, so the next time is a fresh question rather than either a
+	// silent yes or a silent no. Neither the grace period nor the gap
+	// applies, which is the whole difference between this and the other two.
+	verdictOnce
+)
+
+// end releases the question and records what was said.
+func (a *askedFor) end(cap string, said verdict) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.init()
 	a.busy[cap] = false
-	if allowed {
+	switch said {
+	case verdictYes:
 		a.fresh[cap] = time.Now()
 		delete(a.last, cap)
-		return
+	case verdictNo:
+		a.last[cap] = time.Now()
 	}
-	a.last[cap] = time.Now()
 }
 
 // justAllowed reports whether cap was granted in the last moment, before
@@ -139,6 +183,10 @@ var mayAsk = map[string]bool{
 	// to be asked in, and only when the user just provoked it: see
 	// execWatch, which is the sole caller.
 	"window": true,
+	// `tools` is askable, and is the outer of the two questions acting
+	// puts: this one is asked once, and the question about the individual
+	// tool follows it every first time (see act.go).
+	"tools": true,
 	// `tell` became askable once there was a second ghost to talk to. It
 	// asks off the intent loop rather than on it (see IntentTell), because
 	// blocking that loop while somebody reads would stop the ghost doing
@@ -157,42 +205,60 @@ func (g *Ghost) ensureCapability(cap string) bool {
 	if !g.canAsk(cap) {
 		return false
 	}
-	if !g.asked.begin(cap) {
-		g.log.Debug(hlog.Session, "not asking about %s again just yet", cap)
+	what := KnownCapabilities[cap]
+	return g.askPermission(cap,
+		g.manifest.Ghost.Name+" would like to "+what+". Allow?",
+		func() bool { return g.capabilityActive(cap) },
+		consentAllow, consentNotNow, consentNever)
+}
+
+// askPermission puts one permission question and records the answer against
+// key, which is what goes into the grants file. active re-checks the
+// standing answer, since a person may have settled the same question
+// through `haunt perms` between the caller's check and this one. Reports
+// whether the thing may go ahead now — which "just this once" allows
+// without granting anything.
+func (g *Ghost) askPermission(key, question string, active func() bool, options ...string) bool {
+	if !g.asked.begin(key) {
+		g.log.Debug(hlog.Session, "not asking about %s again just yet", key)
 		return false
 	}
-	allowed := false
-	defer func() { g.asked.end(cap, allowed) }()
+	said := verdictNo
+	defer func() { g.asked.end(key, said) }()
 
-	// Between the check and here, someone may have answered the same
-	// question through `haunt perms`.
-	if g.capabilityActive(cap) {
+	if active() {
 		return true
 	}
+	g.log.Info(hlog.Session, "asking whether %s may %s", g.manifest.Ghost.Name, key)
 
-	what := KnownCapabilities[cap]
-	question := g.manifest.Ghost.Name + " would like to " + what + ". Allow?"
-	g.log.Info(hlog.Session, "asking whether %s may %s", g.manifest.Ghost.Name, cap)
-
-	switch g.ask(question, consentAllow, consentNotNow, consentNever) {
+	switch g.ask(question, options...) {
 	case consentAllow:
-		if err := g.opts.Consent(cap, true); err != nil {
-			g.log.Warn(hlog.Session, "recording the grant for %s: %v", cap, err)
+		if err := g.opts.Consent(key, true); err != nil {
+			g.log.Warn(hlog.Session, "recording the grant for %s: %v", key, err)
 			return false
 		}
-		g.log.Info(hlog.Session, "granted: %s — asked for and allowed in the moment", cap)
-		allowed = true
+		g.log.Info(hlog.Session, "granted: %s — asked for and allowed in the moment", key)
+		said = verdictYes
+		return true
+	case consentOnce:
+		// Nothing is written down, so the next call asks again — which is
+		// the whole of what this answer means. It does not count as an
+		// allowance for the purposes of the ask-again gap either: the
+		// person said yes, so a second request a minute later deserves a
+		// question rather than a silent refusal.
+		g.log.Info(hlog.Session, "allowed once: %s — nothing recorded", key)
+		said = verdictOnce
 		return true
 	case consentNever:
-		if err := g.opts.Consent(cap, false); err != nil {
-			g.log.Warn(hlog.Session, "recording the refusal for %s: %v", cap, err)
+		if err := g.opts.Consent(key, false); err != nil {
+			g.log.Warn(hlog.Session, "recording the refusal for %s: %v", key, err)
 		}
-		g.log.Info(hlog.Session, "refused for good: %s — it will not ask again", cap)
+		g.log.Info(hlog.Session, "refused for good: %s — it will not ask again", key)
 		return false
 	default:
 		// "Not now", dismissed, or timed out: all the same answer, and all
 		// of them mean ask again another time rather than never.
-		g.log.Info(hlog.Session, "not allowed this time: %s", cap)
+		g.log.Info(hlog.Session, "not allowed this time: %s", key)
 		return false
 	}
 }
@@ -200,21 +266,33 @@ func (g *Ghost) ensureCapability(cap string) bool {
 // canAsk reports whether an in-the-moment question about cap is possible
 // and appropriate.
 func (g *Ghost) canAsk(cap string) bool {
-	if !mayAsk[cap] || g.opts.Consent == nil {
+	if !mayAsk[cap] {
+		return false
+	}
+	return g.canAskAbout(cap) && g.declares(cap)
+}
+
+// canAskAbout is the half of canAsk that is not about capabilities at all:
+// is there a screen, is the person being left alone, have they already said
+// never. A tool grant shares every one of those and none of the rest — it
+// is not in KnownCapabilities, and its equivalent of "did the manifest
+// declare this" is whether the tool is in the catalogue at all, which
+// runTool has already settled before it asks (see act.go).
+func (g *Ghost) canAskAbout(key string) bool {
+	if g.opts.Consent == nil {
 		return false
 	}
 	// Dev-mode runs grant everything already, so a question would be
-	// theatre; and a capability the manifest never asked for is not the
-	// ghost's to raise.
-	if g.opts.Granted == nil || !g.declares(cap) {
+	// theatre.
+	if g.opts.Granted == nil {
 		return false
 	}
-	if g.opts.Refused != nil && g.opts.Refused(cap) {
-		g.log.Debug(hlog.Session, "%s was refused for good; not asking", cap)
+	if g.opts.Refused != nil && g.opts.Refused(key) {
+		g.log.Debug(hlog.Session, "%s was refused for good; not asking", key)
 		return false
 	}
 	if muted, why := g.quiet.Active(); muted {
-		g.log.Debug(hlog.Session, "not asking about %s (%s)", cap, why)
+		g.log.Debug(hlog.Session, "not asking about %s (%s)", key, why)
 		return false
 	}
 	// Nowhere to show the question is nowhere to answer it.

@@ -224,6 +224,43 @@ func (em *Emitter) Watch() {
 	em.emit(Intent{Type: proto.IntentWatch})
 }
 
+// Act runs one tool on one of the tool servers the ghost's manifest
+// declares (requires the tools capability, and the user's yes for that
+// individual tool the first time it is used). tool is in "server.tool"
+// form — the names arrive at boot, as Event.Tools — and args is the
+// arguments object, which may be nil for a tool that takes none.
+//
+// What happened comes back as an `acted` event carrying the tag given
+// here: Text is what the tool said, whether or not it worked, because "the
+// file is not there" is an answer and not a failure. Only a refusal — no
+// capability, no consent, no allowance left — arrives as `ai_error`.
+//
+// Acting is not a quiet operation and cannot be made into one. The driver
+// puts a working face on the ghost, a line in its balloon about what it
+// did, and an entry in the journal, every time, for every tool call,
+// whether a brain asked for it or the model did. That is the difference
+// between a companion and a process that does things behind your back, and
+// it is enforced in the driver so that no brain can decide otherwise.
+//
+// A brain does not have to use this at all: when the ghost has tools, the
+// model is offered them during ordinary Chat, and a ghost that is art plus
+// a persona can act without a line of code anywhere. Reach for Act when the
+// ghost should do a *particular* thing at a *particular* moment — check the
+// build when the timer fires — rather than whatever the conversation
+// suggests.
+func (em *Emitter) Act(tag, tool string, args map[string]any) {
+	i := Intent{Type: proto.IntentAct, Name: tool, Tag: tag}
+	if len(args) > 0 {
+		b, err := json.Marshal(args)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "brainkit: act %s: %v\n", tool, err)
+			return
+		}
+		i.Args = b
+	}
+	em.emit(i)
+}
+
 // Note writes a private journal entry. Recent notes are injected into LLM
 // context on every Chat, so what the ghost chooses to remember shapes its
 // future behavior. The user can read the journal with `haunt journal`.

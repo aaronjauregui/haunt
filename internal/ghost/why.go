@@ -71,6 +71,13 @@ type Why struct {
 	Reply      string `json:"reply"`
 	// Recalled is what long-term memory contributed, strongest first.
 	Recalled []Recalled `json:"recalled,omitempty"`
+	// Acted is the tools that ran in the course of producing this reply,
+	// in order. Empty for the ordinary exchange where nothing was done.
+	// It belongs here for the same reason the recalled memories do: when a
+	// ghost has *done* something, "why did you say that" and "what did you
+	// do" are the same question, and the answer should not have to be
+	// pieced together from the journal.
+	Acted []string `json:"acted,omitempty"`
 	// Window is what the ghost could see of the screen when it answered,
 	// recorded only while the window capability is actually granted. It is
 	// the context the ghost had, not necessarily context it used.

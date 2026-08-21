@@ -25,6 +25,7 @@ import (
 	"github.com/aaronjauregui/haunt/internal/defaultbrain"
 	"github.com/aaronjauregui/haunt/internal/desktop"
 	"github.com/aaronjauregui/haunt/internal/hlog"
+	"github.com/aaronjauregui/haunt/internal/mcp"
 	"github.com/aaronjauregui/haunt/internal/proto"
 	"github.com/aaronjauregui/haunt/internal/quiet"
 	"github.com/aaronjauregui/haunt/internal/session"
@@ -205,6 +206,17 @@ type Ghost struct {
 	quiet   *quiet.Checker
 	desktop *desktop.Watcher
 
+	// dir is the ghost's own directory, kept because tool servers may be
+	// launched from it (see act.go).
+	dir string
+
+	// Tool servers and what they offer (see act.go). toolsUp guards the
+	// start, which happens at boot or the moment the capability is granted.
+	toolMu  sync.Mutex
+	toolsUp bool
+	servers []*mcp.Server
+	toolCat map[string]toolEntry
+
 	aiSvc    *ai.Service
 	cacheDir string
 	aiMu     sync.Mutex // one AI request at a time per ghost
@@ -289,6 +301,7 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	}
 	g := &Ghost{
 		manifest: m,
+		dir:      dir,
 		opts:     opts,
 		log:      log,
 		timers:   map[string]*time.Timer{},
@@ -615,9 +628,17 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		defer opts.Stage.Leave()
 	}
 
-	// Boot with the persisted KV snapshot, and with the faces this shell
-	// can wear: a brain choosing an expression is otherwise guessing names
-	// at a driver that silently ignores the ones that do not exist.
+	// Tool servers, if the ghost declares any and may use them. Before the
+	// boot event because the boot event carries what they offer, and
+	// startable again later for the same reason window awareness is: the
+	// person may say yes during the session (see execAct).
+	g.startToolServers()
+	defer g.stopToolServers()
+
+	// Boot with the persisted KV snapshot, with the faces this shell can
+	// wear, and with the tools it may act through: a brain choosing an
+	// expression or an action is otherwise guessing names at a driver that
+	// silently ignores the ones that do not exist.
 	kv, err := g.store.All()
 	if err != nil {
 		return err
@@ -626,7 +647,12 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	if g.shell != nil {
 		poses = g.shell.Poses()
 	}
-	g.publish(proto.Event{Type: proto.EventBoot, KV: visibleKV(kv), Poses: poses})
+	g.publish(proto.Event{
+		Type:  proto.EventBoot,
+		KV:    visibleKV(kv),
+		Poses: poses,
+		Tools: g.toolNames(),
+	})
 	if opts.OnReady != nil {
 		opts.OnReady()
 	}
@@ -927,6 +953,43 @@ func (g *Ghost) execIntent(in proto.Intent) {
 			defer g.aiMu.Unlock()
 			g.execLook(in)
 		})
+	case proto.IntentAct:
+		// Gated on the intent loop, as chat is, and for the same reason:
+		// whether this was provoked is a fact about the moment it arrived,
+		// not about whenever a tool server gets round to it. Acting unbidden
+		// is the most interruptive thing a ghost does and is charged like
+		// it — which is also the answer to the obvious worry about an agent
+		// living on your desktop, since deciding to do anything at all
+		// unprompted comes out of a daily allowance a restart cannot refill.
+		if !g.allowInitiative("act") {
+			g.publishAIError("not now: the ghost's allowance for acting unprompted is spent", in.Tag)
+			return
+		}
+		// Its own goroutine, like chat: a tool call is seconds to minutes
+		// of somebody else's work, with a permission question possibly in
+		// front of it, and the intent loop is not a thing to stall for
+		// either. The AI lock is taken because acting and talking share the
+		// balloon and the face, and two of them at once would be two ghosts
+		// wearing one body.
+		g.go_(hlog.Tool, "act", func() {
+			// The standing question, before the lock and for the reason
+			// chat gives: it waits on a person, and holding the ghost's one
+			// slot while they read would leave it deaf meanwhile. The
+			// question about the individual tool cannot be hoisted the same
+			// way — it belongs to the call, and the model's tool loop asks
+			// it mid-exchange — so it is asked under the lock, where the
+			// ghost is genuinely busy anyway.
+			if !g.ensureCapability("tools") {
+				g.publishAIError("tools capability not granted", in.Tag)
+				return
+			}
+			// Granted possibly a moment ago, in which case the servers have
+			// never been started. Cheap and idempotent when they have.
+			g.startToolServers()
+			g.aiMu.Lock()
+			defer g.aiMu.Unlock()
+			g.execAct(in)
+		})
 	case proto.IntentWatch:
 		// Its own goroutine, like chat: ensureCapability blocks while the
 		// question is on screen, and the intent loop is not a thing to
@@ -1029,7 +1092,7 @@ func (g *Ghost) showBalloonSprite(sp *sprite.Sprite) {
 	g.blnGen++
 	g.blnUp = true
 	g.blnMu.Unlock()
-	if g.surface == nil {
+	if g.surface == nil || g.app == nil {
 		return // no compositor: tests drive balloons without a screen
 	}
 	w, h := sp.Size()

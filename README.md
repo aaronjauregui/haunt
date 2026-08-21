@@ -3,8 +3,9 @@
 A desktop companion for Wayland. A **ghost** — a character with a
 personality and its own logic — lives on your screen: it has a **shell**
 (layered art that blinks, breathes and changes expression) and speaks in a
-**balloon**. It remembers you across sessions, and it will occasionally
-speak first.
+**balloon**. It remembers you across sessions, it can do things for you
+through the tool servers you give it, and it will occasionally speak
+first.
 
 The terms are the ukagaka community's, kept deliberately. Nothing else is:
 there is no compatibility with SHIORI, SSTP or SakuraScript, and this runs
@@ -99,6 +100,51 @@ back:
     haunt perms                 # what it asked for, what it has
     haunt perms revoke window   # stops within seconds, no restart
 
+## Doing things
+
+A ghost can act, not only talk. Its manifest declares the **MCP tool
+servers** it would like — the same servers editors and terminal agents use
+— and the driver runs them, so the ghost never holds a credential and
+nothing gets past the budgets:
+
+```toml
+[ghost]
+capabilities = ["llm", "tools"]
+
+[[tool]]
+name = "notes"                       # tools are then "notes.append", …
+command = ["mcp-server-notes", "--dir", "/home/me/notes"]
+env = ["NOTES_TOKEN"]                # named, not stored — as with API keys
+allow = ["append", "search"]         # optional: the manifest's own bound
+```
+
+That is the whole of it. There is no code to write: the tools are offered
+to your model during ordinary conversation, so a ghost that is art plus a
+persona can do things. A brain that wants a particular thing done at a
+particular moment has `act` for that.
+
+Permission is asked twice, deliberately. `tools` says the ghost may act at
+all; each individual tool is asked about the first time it is about to run,
+with the server's own description of it — a server offering "read a note"
+and "delete the note" is one line in a manifest and two very different
+questions. That second question is the only place **"just this once"** is
+offered, and it records nothing.
+
+    haunt perms                              # tools it has been allowed, per server
+    haunt perms revoke tool:notes.append     # take one back
+
+**Acting looks different from talking, always.** The ghost wears a working
+face while a tool runs, names in its balloon what it did afterwards and
+whether it worked, and writes it in its journal — so `haunt journal` and
+`haunt history -why` both show what it has been up to. None of that is
+configurable: an ambient process that quietly takes actions is a horror,
+and those marks are what make it a companion instead.
+
+The brakes are the driver's. `[ai.budget] tool_requests_per_hour` (60)
+caps how fast it may act; `[ai] max_tool_calls` (6) stops one exchange
+looping; and acting when nobody asked comes out of the same daily
+allowance as speaking first, which a restart does not refill.
+
 ## More than one
 
 A desktop can hold several ghosts. `haunt switch` picks one instead of the
@@ -154,8 +200,9 @@ Hyprland config if the service does not start.
 That scaffolds a whole ghost: a manifest and a persona. There is no brain
 in it and nothing to compile — a ghost that declares no brain runs on the
 driver's built-in one, which chats in your persona, draws when asked, keeps
-a journal, offers to notice what you are working on, and speaks first now
-and then. What is left to do is the art.
+a journal, offers to notice what you are working on, uses whatever tool
+servers you gave it, and speaks first now and then. What is left to do is
+the art.
 
     haunt new -brain mycompanion
 

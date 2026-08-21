@@ -108,6 +108,10 @@ const (
 	// Curiosity is initiative accounting: what was spent and what was
 	// refused.
 	Curiosity Topic = "curiosity"
+	// Tool is the tool servers a ghost acts through: what was started,
+	// what was run, and what refused. Not what a tool was *given* — that
+	// is the conversation, and belongs to Prompt if it belongs anywhere.
+	Tool Topic = "tool"
 	// Control is the socket other programs talk to, and everything that
 	// passes between ghosts: tells they address to each other, and what
 	// each one saw the others do.
@@ -118,7 +122,7 @@ const (
 // the documentation to stay honest about what exists.
 var Topics = []Topic{
 	Session, Brain, AI, Prompt, Balloon, Anim, Input,
-	Screen, Memory, Store, Wayland, Place, Curiosity, Control,
+	Screen, Memory, Store, Wayland, Place, Curiosity, Control, Tool,
 }
 
 // Logger writes lines that pass the level and topic filters. Filters are

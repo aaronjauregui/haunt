@@ -77,6 +77,17 @@ system = """
 You are %s, a small spirit resident on this desktop.
 Reply in one or two short sentences. Be specific rather than effusive.
 """
+
+# Things it can do, rather than only say. Each server is an MCP program the
+# driver runs — so the ghost never holds your credentials — and each of its
+# tools is asked about the first time it is used. Add "tools" to the
+# capabilities above to turn any of this on.
+#
+# [[tool]]
+# name = "notes"                          # tools are then "notes.append", …
+# command = ["mcp-server-notes", "--dir", "/home/me/notes"]
+# env = ["NOTES_TOKEN"]                   # named, never stored here
+# allow = ["append", "search"]            # optional: your own upper bound
 `, name, name),
 
 		"README.md": fmt.Sprintf(`# %s
@@ -97,6 +108,10 @@ any OpenAI-compatible endpoint will do, including a local Ollama.
 - **The persona** is in `+"`ghost.toml`"+`. It is the character.
 - **The art** is a PNG with transparency: set `+"`sprite`"+` under [shell],
   or a stack of layers with named poses for expressions and animation.
+- **Doing things** means a tool server: uncomment the `+"`[[tool]]`"+`
+  block in `+"`ghost.toml`"+` and add `+"`\"tools\"`"+` to the
+  capabilities. Its tools reach your model during ordinary conversation,
+  so there is nothing to write.
 - **Logic of its own** — reactions, commands, state — means a brain:
   `+"`haunt new -brain <name>`"+` scaffolds one in Go.
 `, name),
