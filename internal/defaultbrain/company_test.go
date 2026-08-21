@@ -117,3 +117,24 @@ func TestEmptyObservationsAreIgnored(t *testing.T) {
 		t.Errorf("reacted to nothing: %+v", chats)
 	}
 }
+
+// A remark about a neighbour says who it is about, so the driver can keep
+// what the ghost concluded under that name. Without it a ghost can react to
+// the one next door for months and keep no sense of who it is.
+func TestReactionNamesTheNeighbour(t *testing.T) {
+	intents := run(t, proto.Event{
+		Type: proto.EventObserved, From: "moth",
+		Name: proto.ActedDrew, Text: "a lighthouse",
+		Time: time.Now(),
+	})
+	chats := only(intents, proto.IntentChat)
+	if len(chats) != 1 {
+		t.Fatalf("emitted %+v, want one remark", chats)
+	}
+	if chats[0].About != "moth" {
+		t.Errorf("About = %q, want the neighbour it is talking about", chats[0].About)
+	}
+	if !chats[0].SelfPrompt {
+		t.Error("a remark nobody asked for must still be marked unprompted")
+	}
+}

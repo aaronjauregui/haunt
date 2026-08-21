@@ -97,8 +97,9 @@ A ghost: a personality and a picture.
     haunt run .
 
 Talk to it by right-clicking it, or from a script with `+"`haunt say`"+`.
-It answers to `+"`help`"+`, `+"`draw <something>`"+`, `+"`remember <fact>`"+`
-and `+"`look`"+` — the rest is conversation.
+It answers to `+"`help`"+`, `+"`draw <something>`"+`, `+"`remember <fact>`"+`,
+`+"`remind me in 10 minutes to <something>`"+` and `+"`look`"+` — the rest
+is conversation.
 
 Chatting needs an LLM in `+"`~/.config/haunt/config.toml`"+` ([ai.llm]);
 any OpenAI-compatible endpoint will do, including a local Ollama.

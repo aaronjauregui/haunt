@@ -130,10 +130,12 @@ func Run(ctx context.Context, members []Member, opts Options) error {
 		i, m := i, m
 		o := m.Opts
 		o.Logger = log
+		var seat *Seat
 		if !solo {
 			o.Logger = log.Named(m.Name)
 			o.Spots = room.For(m.Name)
-			o.Stage = stage.For(m.Name)
+			seat = stage.For(m.Name)
+			o.Stage = seat
 			o.Initiative = func(what string) bool { return budget.Spend(m.Name, what) }
 			o.AIBudgets = rations
 		}
@@ -155,6 +157,16 @@ func Run(ctx context.Context, members []Member, opts Options) error {
 			// walks up through the supervisor and takes the household with
 			// it, which is the failure mode a connection each was chosen to
 			// avoid.
+			// The seat is taken before the ghost is, so that a neighbour
+			// arriving meanwhile is queued rather than lost (see
+			// Stage.For). That makes vacating it this goroutine's job:
+			// ghost.Run leaves the stage on its own way out, but a ghost
+			// that fails or panics before it ever gets there would leave a
+			// seat the others go on announcing into for the whole session.
+			// Leaving twice is harmless.
+			if seat != nil {
+				defer seat.Leave()
+			}
 			defer func() {
 				if r := recover(); r != nil {
 					errs[i] = fmt.Errorf("ghost %q panicked: %v\n%s", m.Name, r, debug.Stack())

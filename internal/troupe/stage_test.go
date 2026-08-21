@@ -79,19 +79,69 @@ func TestEveryoneButYourself(t *testing.T) {
 	}
 }
 
-// A ghost that never took a seat is not in the room: announcing to it must
-// not queue anything for nobody to read.
-func TestAnnouncingToAGhostThatIsNotWatching(t *testing.T) {
+// A ghost still coming up hears what it missed.
+//
+// Every ghost boots on its own goroutine and takes its seat some way into
+// that, so the first one to finish greets while the others are still
+// starting. This test used to assert the opposite — that a seat hears only
+// what happens after Observe — which is how a two-ghost session could open
+// with one of them never learning the other had arrived, and how
+// TestTwoGhostsAtOnce came to fail under load.
+func TestASeatHearsWhatHappenedBeforeItListened(t *testing.T) {
 	stage := NewStage(hlog.Discard())
 	a, b := stage.For("wisp"), stage.For("whisper")
-	a.Announce(proto.ActedSpoke, "anyone there?") // b has not joined
+	a.Announce(proto.ActedSpoke, "anyone there?") // b is still booting
 
 	s := newSeen()
 	b.Observe(s.deliver)
 	a.Announce(proto.ActedSpoke, "now?")
-	s.wait(t, 1)
-	if got := s.all(); len(got) != 1 || got[0].detail != "now?" {
-		t.Errorf("saw %+v, want only what happened after it started watching", got)
+
+	s.wait(t, 2)
+	got := s.all()
+	if len(got) != 2 {
+		t.Fatalf("saw %+v, want both", got)
+	}
+	// In order, and the earlier one first: a greeting that arrives after
+	// the reply to it is worse than one that never arrives.
+	if got[0].detail != "anyone there?" || got[1].detail != "now?" {
+		t.Errorf("saw %+v, want them in the order they were said", got)
+	}
+}
+
+// The bound still holds while a ghost is coming up: a seat nobody is
+// draining fills and then drops, so one slow start cannot make the room
+// hold everything that happened in it.
+func TestAStartingGhostDoesNotQueueForever(t *testing.T) {
+	stage := NewStage(hlog.Discard())
+	a, b := stage.For("wisp"), stage.For("whisper")
+	for i := 0; i < queued*4; i++ {
+		a.Announce(proto.ActedMoved, "")
+	}
+
+	s := newSeen()
+	b.Observe(s.deliver)
+	s.wait(t, queued)
+	time.Sleep(50 * time.Millisecond)
+	if got := s.all(); len(got) != queued {
+		t.Errorf("saw %d observations, want the queue's %d", len(got), queued)
+	}
+}
+
+// A ghost that has left is not in the room, and a seat it has vacated must
+// not accumulate for nobody — including one that left without ever having
+// listened, which is what a ghost that failed on its way up looks like.
+func TestAnnouncingToAGhostThatHasLeft(t *testing.T) {
+	stage := NewStage(hlog.Discard())
+	a, b := stage.For("wisp"), stage.For("whisper")
+	b.Leave()
+	a.Announce(proto.ActedSpoke, "anyone there?")
+
+	s := newSeen()
+	b.Observe(s.deliver) // too late; the seat is gone
+	a.Announce(proto.ActedSpoke, "now?")
+	time.Sleep(50 * time.Millisecond)
+	if got := s.all(); len(got) != 0 {
+		t.Errorf("saw %+v, want nothing: that ghost has gone", got)
 	}
 }
 

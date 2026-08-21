@@ -147,6 +147,26 @@ func (em *Emitter) Initiate(direction string) {
 	em.emit(Intent{Type: proto.IntentChat, Text: direction, SelfPrompt: true})
 }
 
+// InitiateAbout is Initiate for something the ghost is speaking about a
+// named subject — most usefully another resident ghost it has just watched
+// do something. What it says is kept as one of the things it knows about
+// that subject, so a neighbour stops being a series of unconnected moments
+// and starts being somebody the ghost has opinions about. Those opinions
+// come back into context whenever the subject is mentioned again, by the
+// person or by the ghost itself.
+//
+// The subject is whatever the brain calls it; a ghost's name as it arrived
+// on an `observed` event is the obvious one. Nothing validates it, because
+// this is the ghost's own private sense of who is who.
+func (em *Emitter) InitiateAbout(subject, direction string) {
+	em.emit(Intent{
+		Type:       proto.IntentChat,
+		Text:       direction,
+		SelfPrompt: true,
+		About:      subject,
+	})
+}
+
 // Imagine generates an image (requires the imagine capability), shown as an
 // image balloon and reported by an ai_image event. Identical prompts are
 // served from the generation cache.
@@ -259,6 +279,36 @@ func (em *Emitter) Act(tag, tool string, args map[string]any) {
 		i.Args = b
 	}
 	em.emit(i)
+}
+
+// Intend takes on a standing purpose: something the ghost means to do and
+// has not done. Unlike SetTimer this survives a restart, and unlike Remember
+// it is not a fact but an outstanding obligation — the ghost carries it in
+// its own context, so it knows what it is holding and can say so if asked.
+//
+// name identifies it, and taking on the same name again replaces it rather
+// than adding a second, which is how a purpose is re-armed ("check again in
+// ten minutes") without the list filling with copies. delayMS is when it
+// should come due; zero means there is no moment and the ghost simply holds
+// it until something discharges it.
+//
+// When the moment arrives an `intention` event carries the name and the
+// text — possibly days later, possibly moments after a boot for something
+// that fell due while the ghost was switched off, because being switched
+// off is not a reason to forget what you were asked to do.
+//
+// Coming due does not discharge it. Call Resolve when the thing is actually
+// dealt with; until then the ghost goes on carrying it, which is what stops
+// a reminder raised into a quiet hour from being silently lost.
+func (em *Emitter) Intend(name, text string, delayMS int) {
+	em.emit(Intent{Type: proto.IntentIntend, Name: name, Text: text, DelayMS: delayMS})
+}
+
+// Resolve discharges a standing intention: the ghost stops carrying it and
+// stops mentioning it. Resolving something that is not there is not an
+// error.
+func (em *Emitter) Resolve(name string) {
+	em.emit(Intent{Type: proto.IntentResolve, Name: name})
 }
 
 // Note writes a private journal entry. Recent notes are injected into LLM

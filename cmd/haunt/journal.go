@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/aaronjauregui/haunt/internal/ghost"
 	"github.com/aaronjauregui/haunt/internal/library"
@@ -21,6 +22,7 @@ func cmdJournal(args []string) error {
 	fs := flag.NewFlagSet("journal", flag.ExitOnError)
 	state := fs.String("state", "", "override state directory")
 	entities := fs.Bool("entities", false, "print the entity index instead: subjects and what it knows about them")
+	intentions := fs.Bool("intentions", false, "print what it is still meaning to do")
 	fs.Parse(args)
 
 	stateDir, err := resolveStateDir(*state, fs.Args())
@@ -35,6 +37,9 @@ func cmdJournal(args []string) error {
 	defer s.Close()
 	if *entities {
 		return printEntities(s)
+	}
+	if *intentions {
+		return printIntentions(s)
 	}
 	raw, ok, err := s.Get(ghost.NotesStoreKey)
 	if err != nil {
@@ -105,4 +110,66 @@ func resolveStateDir(override string, args []string) (string, error) {
 		return "", err
 	}
 	return library.GhostDir(name)
+}
+
+// printIntentions lists what the ghost has taken on and not discharged.
+//
+// It belongs beside the journal rather than in a command of its own: the
+// journal is what the ghost has concluded, the entity index is who it
+// thinks people are, and this is what it is still meaning to do. All three
+// are the same question — what is my ghost carrying — asked about different
+// tenses, and a person checking one will want the others nearby.
+func printIntentions(s *store.Store) error {
+	raw, ok, err := s.Get(ghost.IntentionsStoreKey)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		fmt.Println("(it is not meaning to do anything)")
+		return nil
+	}
+	list, err := ghost.DecodeIntentions(raw)
+	if err != nil {
+		return fmt.Errorf("the intentions are corrupt: %w", err)
+	}
+	if len(list) == 0 {
+		fmt.Println("(it is not meaning to do anything)")
+		return nil
+	}
+	now := time.Now()
+	for _, it := range list {
+		mark := "  "
+		note := ""
+		switch {
+		case it.Fired:
+			// Worth flagging: its moment came and the ghost has not managed
+			// to hand it back — quiet hours, or a fullscreen game, or
+			// nobody was there. It is still owed.
+			mark = "! "
+			note = "  (its moment has passed and it has not said so yet)"
+		case it.Due.IsZero():
+			note = "  (no particular moment)"
+		default:
+			note = "  (due " + it.Due.Format("2006-01-02 15:04") + ")"
+		}
+		fmt.Printf("%s%s%s\n", mark, it.Text, note)
+		fmt.Printf("    taken on %s\n", humanAge(it.Made, now))
+	}
+	return nil
+}
+
+// humanAge says how long ago something was taken on, which is the thing a
+// person reading this list actually wants to know.
+func humanAge(t, now time.Time) string {
+	d := now.Sub(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%d minutes ago", int(d/time.Minute))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%d hours ago", int(d/time.Hour))
+	default:
+		return t.Format("2006-01-02")
+	}
 }

@@ -77,9 +77,14 @@ func (b *Brain) onObserved(e proto.Event, emit *brainkit.Emitter) {
 	// interesting thing about having two of them. It is also what makes
 	// the exchange finite — the reply is itself a public action the other
 	// ghost observes, and its own cooldown is what ends the conversation.
-	emit.Initiate("Another ghost is in the room with you. " + seen +
-		". Say one short thing about that, out loud, in your own character — " +
-		"or nothing much, if it would be tiresome. They are not you and " +
+	// About the neighbour by name, so what this ghost makes of it is kept
+	// under that name rather than dissolving into the pool. Months of
+	// occasional remarks then add up to a sense of who the other one is,
+	// which comes back the next time anybody mentions them — the difference
+	// between banter and a relationship.
+	emit.InitiateAbout(e.From, "Another ghost is in the room with you. "+seen+
+		". Say one short thing about that, out loud, in your own character — "+
+		"or nothing much, if it would be tiresome. They are not you and "+
 		"they are not the person you live with.")
 }
 

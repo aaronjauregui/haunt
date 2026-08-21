@@ -62,6 +62,13 @@ const (
 	// it is made from the same observations. See Event.Session.
 	EventSession EventType = "session"
 
+	// EventIntention is a standing intention coming due: Name identifies
+	// it, Text is what the ghost meant to do. Unlike EventTimer this
+	// survives a restart — the whole reason intentions exist — so it may
+	// arrive for something set days ago, and it may arrive moments after
+	// boot for something that fell due while the ghost was not running.
+	EventIntention EventType = "intention"
+
 	// EventActed answers an act intent: Name is the tool that ran
 	// ("notes.append"), Text is what it said, and Tag echoes the intent's.
 	// A tool that failed on its own terms — the file was not there, the
@@ -205,6 +212,8 @@ const (
 	IntentLook          IntentType = "look"           // show the focused window to a vision model
 	IntentWatch         IntentType = "watch"          // the user asked for window awareness; ask and start it
 	IntentAct           IntentType = "act"            // run one tool on a declared server
+	IntentIntend        IntentType = "intend"         // hold a purpose, across restarts
+	IntentResolve       IntentType = "resolve"        // that purpose is discharged
 )
 
 // Intent is one request emitted by a brain. The driver validates and
@@ -219,7 +228,9 @@ type Intent struct {
 	Y int `json:"y,omitempty"`
 	// Name identifies timers and KV keys.
 	Name string `json:"name,omitempty"`
-	// DelayMS is the timer delay for IntentSetTimer.
+	// DelayMS is the timer delay for IntentSetTimer, and when an
+	// IntentIntend falls due. Zero on an intention means it has no moment —
+	// it is simply carried until it is resolved.
 	DelayMS int `json:"delay_ms,omitempty"`
 	// Value is the payload for IntentKVSet.
 	Value string `json:"value,omitempty"`
@@ -259,6 +270,17 @@ type Intent struct {
 	// and the brain does not. Zero means the line stays until something
 	// replaces it.
 	LingerMS int `json:"linger_ms,omitempty"`
+	// About names the subject an utterance concerns, so that what the ghost
+	// concludes is filed under it in the entity index rather than only
+	// dissolving into the memory pool. It is how a ghost comes to know who
+	// its neighbour *is* rather than merely reacting to it each time: a
+	// remark made about another resident ghost becomes one of the handful
+	// of things this ghost would say about it if asked.
+	//
+	// The brain names the subject because the brain is the thing that knows
+	// what it is talking about; the driver only files it. Ignored on an
+	// intent that produces no words.
+	About string `json:"about,omitempty"`
 	// Args is the JSON arguments object for IntentAct, passed to the tool
 	// server unchanged. The driver does not validate it against the tool's
 	// schema: that contract is the server's, it will reject a bad call
@@ -356,6 +378,20 @@ func (i *Intent) Validate() error {
 	// watch carries nothing: it is a request to put a question, and every
 	// term of that question is the driver's.
 	case IntentWatch:
+	case IntentIntend:
+		if i.Name == "" {
+			return fmt.Errorf("intend intent with empty name")
+		}
+		if i.Text == "" {
+			return fmt.Errorf("intend intent with nothing to intend")
+		}
+		if i.DelayMS < 0 {
+			return fmt.Errorf("intend intent with a negative delay %d", i.DelayMS)
+		}
+	case IntentResolve:
+		if i.Name == "" {
+			return fmt.Errorf("resolve intent with empty name")
+		}
 	case IntentAct:
 		if err := ValidToolName(i.Name); err != nil {
 			return fmt.Errorf("act intent: %w", err)

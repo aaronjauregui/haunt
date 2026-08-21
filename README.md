@@ -47,6 +47,17 @@ vendor that speaks its own format, point `base_url` at a router like
 LiteLLM. Cloud keys are named, not stored — set `api_key_env = "..."` and
 the driver reads that variable from its own environment.
 
+It can also be asked to remember to *do* something:
+
+    remind me in 10 minutes to check the build
+
+That is not a timer. It outlives the process — a ghost restarted at
+lunchtime still means to tell you at four — the ghost carries it in mind
+and can tell you what it is holding, and it stays held until it has
+actually been handed back. So a reminder whose moment arrives during quiet
+hours, or over a fullscreen game, comes up next time you talk instead of
+evaporating. `haunt journal -intentions` lists what yours is carrying.
+
 With an embedding model configured, the ghost remembers past conversations
 and pulls the relevant ones back into context months later. It also
 *sleeps*: while you are away it takes a cluster of old exchanges, works out
@@ -173,8 +184,11 @@ times the interruptions or three times the model bill. Set it yourself with
 They can also see each other. What a ghost does in public — a line in its
 balloon, a picture, a flourish it was asked for, being poked — reaches the
 others as something they may react to without being spoken to, which is
-where dynamics nobody wrote come from. Only public things: a ghost can
-watch its neighbour and can never reach its neighbour's memory. Reacting
+where dynamics nobody wrote come from. What each makes of the other it
+keeps: months of occasional remarks accumulate into an opinion, filed under
+that ghost's name, which comes back the next time anybody mentions them.
+Only public things: a ghost can watch its neighbour and can never reach its
+neighbour's memory. Reacting
 is unprompted, so it comes out of the same allowance as speaking first,
 and the built-in ghost rations itself further on top of that — two
 characters noticing each other occasionally is company, and two characters

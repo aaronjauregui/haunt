@@ -1,6 +1,7 @@
 package ghost
 
 import (
+	"strings"
 	"sync"
 	"testing"
 
@@ -111,5 +112,64 @@ func TestObservationsReachTheBus(t *testing.T) {
 		}
 	default:
 		t.Fatal("nothing reached the bus")
+	}
+}
+
+// Knowing the neighbour.
+//
+// A ghost could react to the ghost next door for months and keep nothing
+// about who that ghost was: a reaction was a remark and then it was gone.
+// These cover the path that fixes it — the brain names the subject, the
+// driver files what the ghost concluded under that name, and the entity
+// index answers about it afterwards.
+
+// The names in the room are learned by watching, not told. That is the same
+// boundary everything else here draws: a ghost finds out about its
+// neighbours by seeing them act.
+func TestNeighboursAreLearnedByWatching(t *testing.T) {
+	g, _ := stagedGhost(t)
+	if g.isNeighbour("moth") {
+		t.Fatal("a ghost that has seen nothing already knows somebody")
+	}
+	g.observed("moth", proto.ActedSpoke, "hello")
+	if !g.isNeighbour("moth") {
+		t.Error("watching moth act did not make it a neighbour")
+	}
+	if g.subjectKind("moth") != "ghost" {
+		t.Errorf("subjectKind = %q, want it labelled a ghost", g.subjectKind("moth"))
+	}
+	// Everything else the ghost concludes about is a person, a project or a
+	// place, and which of those is the consolidating model's business.
+	if k := g.subjectKind("Sam"); k != "" {
+		t.Errorf("subjectKind(Sam) = %q, want no label invented for it", k)
+	}
+}
+
+// What the ghost says about a neighbour is what it knows about the
+// neighbour: six of those is a character sketch, which is what the entity
+// index is for.
+func TestRemarksAboutANeighbourBecomeFacts(t *testing.T) {
+	g, _ := stagedGhost(t)
+	g.store = &memStore{m: map[string]string{}}
+	g.observed("moth", proto.ActedDrew, "a lighthouse")
+	g.recordEntity("moth", g.subjectKind("moth"),
+		[]string{"moth draws lighthouses when it is quiet"})
+
+	ents := g.loadEntities()
+	if len(ents) != 1 {
+		t.Fatalf("stored %d entities, want the neighbour: %+v", len(ents), ents)
+	}
+	if ents[0].Kind != "ghost" {
+		t.Errorf("kind = %q, want ghost", ents[0].Kind)
+	}
+	// And it comes back the next time anybody mentions them, which is the
+	// whole point: recall answers by resemblance and cannot answer "who is
+	// moth".
+	ctx := g.entityContext("what do you make of moth these days?")
+	if !strings.Contains(ctx, "lighthouse") {
+		t.Errorf("context does not carry what it knows about moth:\n%s", ctx)
+	}
+	if !strings.Contains(ctx, "ghost") {
+		t.Errorf("context does not say moth is a ghost:\n%s", ctx)
 	}
 }

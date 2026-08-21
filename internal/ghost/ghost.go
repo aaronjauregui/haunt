@@ -249,6 +249,11 @@ type Ghost struct {
 	// Under sessMu because it is written by the same loop.
 	seenWindow WhyWindow
 
+	// room is the other ghosts this one has watched act, learned from the
+	// stage rather than told (see sociality.go).
+	roomMu sync.Mutex
+	room   map[string]bool
+
 	// Initiative accounting (see curiosity.go).
 	curiosity *allowance
 	// sleep is the separate allowance for consolidation, and sleeper the
@@ -270,6 +275,11 @@ type Ghost struct {
 
 	timersMu sync.Mutex
 	timers   map[string]*time.Timer
+	// intentTimers are the standing intentions waiting for their moment
+	// (see intention.go). Under the same lock as the brain's timers and in
+	// a map of their own, because a brain naming a timer "check" must not
+	// silently cancel an intention of the same name.
+	intentTimers map[string]*time.Timer
 
 	log *hlog.Logger
 	// intents remembers the last one executed, for crash reports.
@@ -657,6 +667,11 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		opts.OnReady()
 	}
 
+	// Whatever it was still meaning to do when it last stopped. After the
+	// boot event, so the greeting is the first thing said and a reminder
+	// the ghost has been holding since yesterday does not land on top of it.
+	g.armIntentions()
+
 	// Watching the focused window, if the ghost asked for that and the user
 	// agreed to it. Startable again later, because the user may say yes
 	// during the session (see execWatch).
@@ -722,6 +737,9 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	g.publish(proto.Event{Type: proto.EventShutdown})
 	g.timersMu.Lock()
 	for _, t := range g.timers {
+		t.Stop()
+	}
+	for _, t := range g.intentTimers {
 		t.Stop()
 	}
 	g.timersMu.Unlock()
@@ -995,6 +1013,10 @@ func (g *Ghost) execIntent(in proto.Intent) {
 		// question is on screen, and the intent loop is not a thing to
 		// stall while somebody reads.
 		g.go_(hlog.Screen, "watch", func() { g.execWatch() })
+	case proto.IntentIntend:
+		g.execIntend(in)
+	case proto.IntentResolve:
+		g.execResolve(in.Name)
 	case proto.IntentNote:
 		g.execNote(in.Text)
 	case proto.IntentTell:

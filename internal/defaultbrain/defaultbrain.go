@@ -61,7 +61,8 @@ Request: `
 // wrote it and there is no source for the user to read.
 const helpText = "Talk to me and I'll answer. `draw <something>` paints a picture, " +
 	"`draw again` repaints it differently, `remember <fact>` keeps something " +
-	"in mind, `look` glances at your screen."
+	"in mind, `remind me in 10 minutes to <something>` comes back to you, " +
+	"`look` glances at your screen."
 
 // toolsHelp is added to that when the ghost has tools. It is deliberately
 // vague about *how* to ask: there is no command for acting, because the
@@ -164,6 +165,11 @@ type Brain struct {
 	// Dialogue moves the face too and this does not track that; the cost
 	// of being wrong is one redundant intent the driver drops.
 	worn string
+	// errands counts the reminders taken on, so two of them get distinct
+	// names instead of replacing each other. Not persisted: a collision
+	// after a restart replaces an errand from a previous session, which is
+	// a smaller wrong than a store key spent on a counter.
+	errands int
 	// tools are the things this ghost can do, learned at boot. The brain
 	// never calls any of them: they reach the model during ordinary chat,
 	// and this list exists so the ghost can *say* what it is able to do.
@@ -355,7 +361,20 @@ func (b *Brain) OnEvent(e brainkit.Event, emit *brainkit.Emitter) {
 	case "message":
 		b.onMessage(strings.TrimSpace(e.Text), emit)
 
+	case "intention":
+		// Something it took on earlier has come due — possibly days ago,
+		// possibly while it was switched off. See intention.go.
+		b.onIntentionDue(e.Name, e.Text, emit)
+
 	case "ai_reply":
+		// An errand is discharged when it has actually been handed back,
+		// not when its moment arrived: a reminder the driver refused —
+		// quiet hours, something fullscreen — is still owed, and stays on
+		// the books to be brought up next time they talk.
+		if name, ok := strings.CutPrefix(e.Tag, intentionTag); ok {
+			emit.Resolve(name)
+			return
+		}
 		if e.Tag == rewriteTag {
 			b.lastPrompt = cleanPrompt(e.Text, b.lastRequest)
 			b.prompts[b.lastRequest] = b.lastPrompt
@@ -421,6 +440,13 @@ func (b *Brain) onMessage(text string, emit *brainkit.Emitter) {
 		}
 		emit.Say("Composing…")
 		emit.Ask(rewriteTag, rewriteInstruction+request)
+		return
+	}
+	// "remind me [in <when>] to <what>" is the plain path to an intention:
+	// something the ghost is meaning to do rather than something it knows.
+	// Checked before `remember`, since the two read alike and only one of
+	// them comes back later on its own.
+	if b.onRemind(text, emit) {
 		return
 	}
 	if fact, ok := strings.CutPrefix(text, "remember "); ok {

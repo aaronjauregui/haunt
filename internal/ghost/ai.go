@@ -87,7 +87,12 @@ func (g *Ghost) execChat(in proto.Intent, userDriven bool) {
 		for _, r := range recalled {
 			picked = append(picked, r.m)
 		}
-		system += notes + g.entityContext(text) + g.recallContext(picked)
+		// And what it is still meaning to do. Last, because it is the
+		// shortest and the most immediate: the journal is who the ghost has
+		// become, recall is what this reminds it of, and this is what it
+		// has not got round to yet.
+		system += notes + g.entityContext(text) + g.recallContext(picked) +
+			g.intentionsContext()
 	}
 	msgs = append(msgs, ai.Message{Role: "system", Content: system})
 	msgs = append(msgs, history...)
@@ -224,6 +229,23 @@ func (g *Ghost) execChat(in proto.Intent, userDriven bool) {
 	// embeddings endpoint had stopped answering swallowed every reply.)
 	g.publishAIResult(proto.Event{Type: proto.EventAIReply, Text: full, Tag: tag}, userDriven)
 
+	// And the second retrieval path: what the ghost just concluded about the
+	// subject, filed under its name. Recall would find this only by
+	// resemblance; the entity index answers "who is moth" completely, which
+	// is the question a ghost with a neighbour actually has.
+	//
+	// The reply itself is the fact, because the reply is the ghost's own
+	// judgement and the driver has no business inventing a better one. Six
+	// of them is a character sketch, which is exactly what entity.go is for.
+	if subject := strings.TrimSpace(in.About); subject != "" {
+		kind := g.subjectKind(subject)
+		g.go_(hlog.Memory, "filing what it thinks of "+subject, func() {
+			g.memMu.Lock()
+			defer g.memMu.Unlock()
+			g.recordEntity(subject, kind, []string{full})
+		})
+	}
+
 	// The exchange leaves the history window eventually; this is what
 	// outlives it. Labelled, because recall pastes it into a prompt months
 	// later where two bare lines would be ambiguous about who said what.
@@ -235,6 +257,14 @@ func (g *Ghost) execChat(in proto.Intent, userDriven bool) {
 	note := "The user said: " + text + "\nYou answered: " + full
 	if in.SelfPrompt {
 		note = "Unprompted, you said: " + full
+	}
+	// Who it was about, when the brain said. Without this a remark about a
+	// neighbour dissolves into the pool as an unattributed thing the ghost
+	// once said, and consolidation has no name to cluster it under — which
+	// is the whole of why a ghost could react to the ghost next door for
+	// months and keep no sense of who it was.
+	if subject := strings.TrimSpace(in.About); subject != "" {
+		note = "About " + subject + ": " + note
 	}
 	// What it did in the course of answering is part of what happened, and
 	// the journal already has an entry per action; this is what makes the

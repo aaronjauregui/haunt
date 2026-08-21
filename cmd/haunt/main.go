@@ -103,7 +103,7 @@ func usage() {
   haunt switch <name> | add <name> | drop <name>
   haunt perms [name] | perms grant|revoke <capability> [name]
   haunt shush [duration] | unshush
-  haunt journal [-entities] [name | -state DIR]
+  haunt journal [-entities|-intentions] [name | -state DIR]
   haunt history [-n N] [-why [-prompt]] [name | -state DIR]`)
 }
 
