@@ -11,7 +11,7 @@ The terms are the ukagaka community's, kept deliberately. Nothing else is:
 there is no compatibility with SHIORI, SSTP or SakuraScript, and this runs
 on wlroots-based Wayland compositors (sway, Hyprland) and others that
 implement `zwlr_layer_shell_v1`. See `DESIGN.md` for the whole design and
-its reasoning.
+its reasoning, and `BACKLOG.md` for what is still open.
 
 ## Try it
 
