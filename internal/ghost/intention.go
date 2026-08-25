@@ -79,6 +79,54 @@ type Intention struct {
 	// on the list until it is resolved: an intention raised into a quiet
 	// hour is still one the ghost is holding.
 	Fired bool `json:"f,omitempty"`
+	// Watch is what to look for on screen, for a goal: the goal's own
+	// words with the filler taken out (see goal.go). Empty on an errand,
+	// which has a moment instead, and on a goal whose words were all
+	// filler — a goal nothing can be recorded against, which is honest
+	// about what it can do rather than pretending.
+	Watch []string `json:"w,omitempty"`
+	// Seen is when this goal was noticed on screen, oldest first. It is
+	// timestamps and nothing else: the goal is the filter at record time,
+	// so what is kept is "this named thing was in front of you then" and
+	// never what the window was. A person can read the whole of it back in
+	// `haunt journal -intentions`, which is the point.
+	Seen []time.Time `json:"e,omitempty"`
+	// Said is when this goal last produced a remark, so it does not produce
+	// another for a good long while. Nagging is the failure mode this whole
+	// mechanism can most easily have.
+	Said time.Time `json:"q,omitzero"`
+	// Aside says the person has stopped caring whether this happens. It is
+	// not resolved — it was never done, and recording it as done would be a
+	// lie — it is simply no longer watched, no longer checked and no longer
+	// brought up. See execSetAside.
+	Aside bool `json:"s,omitempty"`
+	// Asked says a person was talking to the ghost when this was taken on,
+	// which is what makes raising it an obligation rather than a whim (see
+	// markObliged in curiosity.go). Decided driver-side from
+	// respondingToUser at the moment of creation and never from anything
+	// the brain says, because a brain that could set this could mint itself
+	// an allowance out of the user's reminders.
+	Asked bool `json:"a,omitempty"`
+}
+
+// Goal reports whether this is a goal rather than an errand: something
+// taken on with no particular moment, which is what a person means when
+// they say the thesis matters. The distinction is one field and no second
+// lifecycle — see the top of goal.go for why that is the whole of it.
+func (i Intention) Goal() bool { return i.Due.IsZero() }
+
+// Watched reports whether the ghost is still recording sightings of this
+// goal: it has to be a goal, it has to have something to look for, and the
+// person must not have set it aside.
+func (i Intention) Watched() bool { return i.Goal() && !i.Aside && len(i.Watch) > 0 }
+
+// LastSeen is when this goal was last in front of the person, or the zero
+// time if it never has been.
+func (i Intention) LastSeen() time.Time {
+	if len(i.Seen) == 0 {
+		return time.Time{}
+	}
+	return i.Seen[len(i.Seen)-1]
 }
 
 // Overdue reports whether this intention's moment has passed unmarked.
@@ -97,34 +145,67 @@ func (g *Ghost) execIntend(in proto.Intent) {
 	}
 	now := time.Now()
 	made := now
+	var prior Intention
 	list := g.loadIntentions()
 	kept := make([]Intention, 0, len(list)+1)
 	for _, it := range list {
 		if it.Name == in.Name {
 			made = it.Made // taken on when it was first taken on
+			prior = it
 			continue
 		}
 		kept = append(kept, it)
 	}
-	next := Intention{Name: in.Name, Text: text, Made: made}
+	// Whether this is on the ghost's books or is its own idea. Asked now
+	// rather than when it comes due, because by then the answer would be
+	// about whoever happens to be at the desk at four o'clock.
+	//
+	// Two ways to be on the books, and they are the two named in
+	// curiosity.go: a person was there when it was taken on, or the ghost
+	// was in the middle of discharging something already on them — a
+	// manifest trigger's occasion, a poll's answer (poll.go), an errand
+	// coming due and being re-armed for later. A brain can forge neither,
+	// because both windows are opened driver-side by things a brain cannot
+	// cause: the person acting, and the clock.
+	next := Intention{Name: in.Name, Text: text, Made: made, Asked: g.respondingToUser() || g.obliged()}
 	if in.DelayMS > 0 {
 		next.Due = now.Add(time.Duration(in.DelayMS) * time.Millisecond)
+	}
+	if next.Goal() {
+		// What the ghost will look for on screen, worked out once here
+		// rather than on every poll or every pass. Re-stating a goal in
+		// different words is a person saying the same thing again, so the
+		// evidence and the quiet period carry over rather than a rephrasing
+		// silently buying a fresh week of not being asked about it.
+		next.Watch = watchWords(text)
+		next.Seen, next.Said, next.Aside = prior.Seen, prior.Said, prior.Aside
 	}
 	kept = append(kept, next)
 	// Oldest out first. Not by strength as memory does: an intention is not
 	// remembered, it is owed, and the one that has been owed longest is the
 	// one that has most obviously not been discharged.
 	sort.SliceStable(kept, func(a, b int) bool { return kept[a].Made.Before(kept[b].Made) })
-	if len(kept) > maxIntentions {
-		for _, dropped := range kept[:len(kept)-maxIntentions] {
-			g.log.Info(hlog.Memory, "letting go of an intention: %s", dropped.Text)
-			g.cancelIntention(dropped.Name)
-		}
-		kept = kept[len(kept)-maxIntentions:]
-	}
+	kept = g.capIntentions(kept)
 	g.saveIntentions(kept)
 	g.log.Info(hlog.Memory, "intending: %s", text)
 	g.armIntention(next)
+}
+
+// capIntentions enforces both caps on a list already sorted oldest first:
+// the goal cap, which is small and has its own argument, and then the
+// overall one. Shared with the goal check, because a run of findings the
+// brain never resolves would otherwise be the one path that could grow the
+// list past the bound everything else respects.
+func (g *Ghost) capIntentions(kept []Intention) []Intention {
+	kept = g.trimGoals(kept)
+	if len(kept) <= maxIntentions {
+		return kept
+	}
+	for _, dropped := range kept[:len(kept)-maxIntentions] {
+		g.log.Info(hlog.Memory, "letting go of an intention: %s", dropped.Text)
+		g.cancelIntention(dropped.Name)
+	}
+	return kept[len(kept)-maxIntentions:]
 }
 
 // execResolve discharges an intention. Unknown names are ignored: a brain
@@ -149,6 +230,41 @@ func (g *Ghost) execResolve(name string) {
 	g.log.Info(hlog.Memory, "intention discharged: %s", name)
 }
 
+// execSetAside stops a goal being watched, without discharging it.
+//
+// The other exit, and deliberately not the same one. `resolve` says the
+// thing was done; this says the person has stopped caring whether it is.
+// A goal that is finished or abandoned and still producing "you have not
+// touched this in eleven days" is the worst thing goals can do, and users
+// punish it much harder than they punish silence — so giving up has to be
+// sayable, and has to be recorded as giving up rather than as success.
+//
+// What is set aside stays on the list. Deleting it would write a discharge
+// into the record that never happened; it just stops being watched, stops
+// being checked and stops reaching a prompt.
+func (g *Ghost) execSetAside(name string) {
+	list := g.loadIntentions()
+	found := false
+	for i := range list {
+		if list[i].Name != name || list[i].Aside {
+			continue
+		}
+		list[i].Aside = true
+		// Nothing more will be recorded against it, and what was recorded
+		// was only ever useful for the check that is no longer going to
+		// run. Dropped rather than kept, because the smallest honest amount
+		// of history is the one nobody has to be reassured about.
+		list[i].Seen = nil
+		found = true
+	}
+	if !found {
+		return
+	}
+	g.cancelIntention(name)
+	g.saveIntentions(list)
+	g.log.Info(hlog.Memory, "no longer watching: %s", name)
+}
+
 // armIntentions schedules everything the ghost was still holding when it
 // last stopped. Called once, at boot, after the brain exists to hear the
 // results.
@@ -159,6 +275,9 @@ func (g *Ghost) execResolve(name string) {
 // do, and firing during startup would put it under the greeting.
 func (g *Ghost) armIntentions() {
 	list := g.loadIntentions()
+	// Before the early return: a ghost with nothing but goals still has
+	// something to watch for, and the watch loop is about to start.
+	g.refreshGoalWatch(list)
 	if len(list) == 0 {
 		return
 	}
@@ -239,6 +358,15 @@ func (g *Ghost) fireIntention(name string) {
 	g.saveIntentions(list)
 	g.cancelIntention(name)
 	g.log.Info(hlog.Memory, "intention due: %s", raised.Text)
+	// An errand the person asked for is theirs, and raising it spends from
+	// the obligation allowance rather than competing with the ghost's small
+	// talk. One the ghost set itself is its own idea and is charged like
+	// one. Marked here rather than in publishExternal because the answer is
+	// on the intention, and putting it on the event would put it where a
+	// brain could read it.
+	if raised.Asked {
+		g.markObliged()
+	}
 	g.publish(proto.Event{
 		Type: proto.EventIntention,
 		Name: raised.Name,
@@ -251,28 +379,71 @@ func (g *Ghost) fireIntention(name string) {
 // ghost knows what it has taken on, so it can be asked about it, and it
 // answers from the same place the reminder will come from rather than from
 // a guess.
-func (g *Ghost) intentionsContext() string {
+func (g *Ghost) intentionsContext(said string) string {
 	list := g.loadIntentions()
 	if len(list) == 0 {
 		return ""
 	}
 	now := time.Now()
 	var b strings.Builder
-	b.WriteString("\n\nWhat you are meaning to do (you took these on; " +
-		"mention one only if it is relevant or its moment has come):\n")
 	for _, it := range list {
+		if !g.inContext(it, said) {
+			continue
+		}
+		if b.Len() == 0 {
+			b.WriteString("\n\nWhat you are meaning to do (you took these on; " +
+				"mention one only if it is relevant or its moment has come):\n")
+		}
 		b.WriteString("- " + it.Text)
 		switch {
 		case it.Fired:
 			b.WriteString(" (its moment has come and you have not dealt with it yet)")
-		case it.Due.IsZero():
-			b.WriteString(" (no particular moment)")
+		case it.Goal():
+			b.WriteString(" (no particular moment; they said this matters to them)")
 		default:
 			b.WriteString(" (due " + when(it.Due, now) + ")")
 		}
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+// inContext decides whether one intention rides into this request.
+//
+// Errands go in unconditionally, which is right for something due in an
+// hour: it should be in front of the model constantly, because its whole
+// value is being raised at the right moment. A goal is the opposite trade —
+// it would pay rent on every request for six months in order to be relevant
+// on perhaps one of them — so it goes in only when something has put it
+// there: the person just mentioned it, or the drift check turned it into an
+// errand of its own, which is then unconditional like any other.
+//
+// Two goals still go in unasked. One the person has set aside goes in never
+// — that is what setting it aside means. And one with nothing to watch for
+// goes in always, because nothing else can ever surface it, and a purpose
+// the ghost is carrying and structurally cannot mention is worse than one
+// that costs a line.
+func (g *Ghost) inContext(it Intention, said string) bool {
+	// Anything whose moment has come and gone unanswered is outstanding,
+	// and outstanding is unconditional whatever shape it started as. This
+	// is what a drift finding becomes, and it is why the finding is the
+	// thing that reaches a prompt rather than the goal behind it.
+	if !it.Goal() || it.Fired {
+		return true
+	}
+	if it.Aside {
+		return false
+	}
+	if len(it.Watch) == 0 {
+		return true
+	}
+	lower := strings.ToLower(said)
+	for _, w := range it.Watch {
+		if mentions(lower, w) {
+			return true
+		}
+	}
+	return false
 }
 
 // when renders a due time the way a person would say it. Absolute dates
@@ -302,6 +473,10 @@ func (g *Ghost) loadIntentions() []Intention {
 }
 
 func (g *Ghost) saveIntentions(list []Intention) {
+	// Whatever the watch loop should be looking for now, worked out here
+	// because this is every path by which the list changes. It costs a
+	// short slice; the alternative is the poll reading the store.
+	g.refreshGoalWatch(list)
 	b, err := json.Marshal(list)
 	if err != nil {
 		return

@@ -1,6 +1,7 @@
 package quiet
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -86,5 +87,41 @@ func TestBadWindowRejected(t *testing.T) {
 		if _, err := New(Config{Hours: []string{bad}}); err == nil {
 			t.Errorf("window %q accepted", bad)
 		}
+	}
+}
+
+// Presence: a house that knows you left is a better answer to "should the
+// ghost be talking" than a clock is.
+func TestAwayIsQuiet(t *testing.T) {
+	now := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	c := checker(t)
+	c.now = func() time.Time { return now }
+
+	if muted, _ := c.Active(); muted {
+		t.Fatal("quiet at noon with no windows and nobody away")
+	}
+	if !c.Away(now.Add(30 * time.Minute)) {
+		t.Error("the first reading that nobody is home was not news")
+	}
+	muted, why := c.Active()
+	if !muted || !strings.Contains(why, "home") {
+		t.Errorf("Active() = %v, %q; want quiet, and a reason saying why", muted, why)
+	}
+
+	// It wears off on its own. A machine that stops polling — asleep, off
+	// the network, the server gone — must not leave a ghost mute for good
+	// on the strength of one half-hour-old reading.
+	now = now.Add(31 * time.Minute)
+	if muted, why := c.Active(); muted {
+		t.Errorf("still quiet after the reading expired (%s)", why)
+	}
+
+	// And coming home is believed at once, unlike leaving.
+	c.Away(now.Add(30 * time.Minute))
+	if !c.Home() {
+		t.Error("coming home while away was not news")
+	}
+	if muted, why := c.Active(); muted {
+		t.Errorf("still quiet after coming home (%s)", why)
 	}
 }

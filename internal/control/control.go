@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/proto"
@@ -88,11 +89,23 @@ func (s *Server) accept() {
 
 // serve reads JSONL events; each line is either accepted and published or
 // answered with an error line. The reply is "ok" or "error: ...".
+// idleTimeout is how long a connected client may say nothing before the
+// connection is dropped. Generous: `haunt say` writes immediately, and the
+// only thing this has to catch is a client that never writes at all.
+const idleTimeout = 30 * time.Second
+
 func (s *Server) serve(conn net.Conn) {
 	defer conn.Close()
 	sc := bufio.NewScanner(conn)
 	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
 	for sc.Scan() {
+		// Refreshed per line rather than set once, so a client holding the
+		// connection open between messages is fine and one that connects
+		// and then says nothing is not. Without it, a process that opened
+		// the socket and went away left a goroutine here for the life of
+		// the session. Same-user and so not much of an attack, but it is a
+		// leak with no upside.
+		conn.SetReadDeadline(time.Now().Add(idleTimeout))
 		if len(sc.Bytes()) == 0 {
 			continue
 		}

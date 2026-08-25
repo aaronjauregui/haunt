@@ -174,3 +174,70 @@ name = "notes"
 		t.Fatal("a tool server with nothing to run was accepted")
 	}
 }
+
+// A trigger that names a tool is the whole of haunt's integration story, so
+// it loads with its arguments intact.
+func TestManifestTriggerCanPollATool(t *testing.T) {
+	dir := writeManifest(t, `[ghost]
+name = "wisp"
+capabilities = ["llm", "tools"]
+
+[[tool]]
+name = "calendar"
+command = ["mcp-caldav"]
+
+[[trigger]]
+cron = "*/15 * * * *"
+name = "calendar"
+tool = "calendar.upcoming"
+args = { within = "2h" }
+`)
+	m, err := LoadManifest(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := m.Triggers[0]
+	if tr.Tool != "calendar.upcoming" || tr.Args["within"] != "2h" {
+		t.Errorf("trigger = %+v, want the tool and its arguments", tr)
+	}
+}
+
+// A typo in a scheduled call would otherwise be a thing that silently never
+// happens, discovered — if ever — in a log.
+func TestManifestTriggerToolMustBeDeclared(t *testing.T) {
+	dir := writeManifest(t, `[ghost]
+name = "wisp"
+capabilities = ["llm", "tools"]
+
+[[tool]]
+name = "calendar"
+command = ["mcp-caldav"]
+
+[[trigger]]
+cron = "*/15 * * * *"
+name = "calendar"
+tool = "calender.upcoming"
+`)
+	_, err := LoadManifest(dir)
+	if err == nil || !strings.Contains(err.Error(), "calender") {
+		t.Fatalf("err = %v, want a complaint about the undeclared server", err)
+	}
+}
+
+// Arguments with nothing to give them to are a manifest that thinks it is
+// polling and is not.
+func TestManifestTriggerArgsNeedATool(t *testing.T) {
+	dir := writeManifest(t, `[ghost]
+name = "wisp"
+capabilities = ["llm"]
+
+[[trigger]]
+cron = "0 9 * * *"
+name = "morning"
+args = { within = "2h" }
+`)
+	_, err := LoadManifest(dir)
+	if err == nil || !strings.Contains(err.Error(), "args") {
+		t.Fatalf("err = %v, want a complaint about args with no tool", err)
+	}
+}

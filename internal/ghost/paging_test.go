@@ -20,7 +20,7 @@ func pagingGhost(t *testing.T) *Ghost {
 	if err != nil {
 		t.Fatal(err)
 	}
-	q, err := quiet.Load()
+	q, err := quiet.New(quiet.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}

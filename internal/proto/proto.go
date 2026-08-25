@@ -35,7 +35,14 @@ const (
 	EventMessage EventType = "message" // inbound text (chat, CLI, socket)
 
 	// System.
-	EventCron   EventType = "cron"   // a manifest-scheduled trigger fired
+	// EventCron is a manifest-scheduled trigger firing. Name is the
+	// trigger's. Text is empty for an occasion — a morning greeting, an
+	// anniversary — where the manifest names the moment and the brain finds
+	// the words. A trigger that names a tool is a poll instead, and Text is
+	// what the tool said: what a brain should do with that is take on an
+	// intention, never speak, because a schedule silently skips the runs a
+	// closed laptop was away for and an intention does not.
+	EventCron   EventType = "cron"
 	EventIdle   EventType = "idle"   // user went idle
 	EventActive EventType = "active" // user came back
 	// EventWindow reports the focused window changing: Name is the
@@ -130,7 +137,8 @@ type Event struct {
 	Y int `json:"y,omitempty"`
 	// Name identifies a timer for EventTimer.
 	Name string `json:"name,omitempty"`
-	// Text carries message payloads for EventMessage.
+	// Text carries message payloads for EventMessage, and what a tool said
+	// for a polling EventCron.
 	Text string `json:"text,omitempty"`
 	// From identifies the sending ghost for cross-ghost messages.
 	From string `json:"from,omitempty"`
@@ -214,6 +222,7 @@ const (
 	IntentAct           IntentType = "act"            // run one tool on a declared server
 	IntentIntend        IntentType = "intend"         // hold a purpose, across restarts
 	IntentResolve       IntentType = "resolve"        // that purpose is discharged
+	IntentSetAside      IntentType = "set_aside"      // stop watching a goal, without pretending it was done
 )
 
 // Intent is one request emitted by a brain. The driver validates and
@@ -391,6 +400,14 @@ func (i *Intent) Validate() error {
 	case IntentResolve:
 		if i.Name == "" {
 			return fmt.Errorf("resolve intent with empty name")
+		}
+	// Setting a goal aside is not resolving it. A goal the person has given
+	// up on was never discharged, and a driver that quietly deleted it
+	// would be writing a lie into the journal; what changes is only that it
+	// stops being watched and stops being brought up.
+	case IntentSetAside:
+		if i.Name == "" {
+			return fmt.Errorf("set_aside intent with empty name")
 		}
 	case IntentAct:
 		if err := ValidToolName(i.Name); err != nil {

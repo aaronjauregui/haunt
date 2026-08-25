@@ -54,8 +54,21 @@ type Budget struct {
 // today. A limit of zero switches unprompted action off for the whole room.
 func NewBudget(dir string, limit int, log *hlog.Logger) *Budget {
 	b := &Budget{limit: limit, path: filepath.Join(dir, roomFile), log: log, now: time.Now}
+	// A ledger that will not parse is reported rather than shrugged at:
+	// silently starting from an empty one refills the room's allowance,
+	// which is the single thing this file exists to prevent. Carrying on
+	// with nothing spent is still the only thing to do — there is no
+	// recovering what the file said — but it should not happen quietly.
 	if data, err := os.ReadFile(b.path); err == nil {
-		json.Unmarshal(data, &b.spends)
+		if err := json.Unmarshal(data, &b.spends); err != nil {
+			b.spends = nil
+			log.Warn(hlog.Curiosity,
+				"the room's spend ledger at %s is unreadable (%v); today's allowance starts full",
+				b.path, err)
+		}
+	} else if !os.IsNotExist(err) {
+		log.Warn(hlog.Curiosity,
+			"reading the room's spend ledger at %s: %v; today's allowance starts full", b.path, err)
 	}
 	return b
 }

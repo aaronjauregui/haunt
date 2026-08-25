@@ -146,3 +146,97 @@ func TestPlainly(t *testing.T) {
 		}
 	}
 }
+
+// "remind me the thesis matters" is the plain path to a goal: an intention
+// with no moment, which the ghost carries and watches for rather than
+// scheduling.
+func TestAGoalIsAnIntentionWithNoMoment(t *testing.T) {
+	intents := run(t, proto.Event{
+		Type: proto.EventMessage, Text: "remind me the thesis matters",
+	})
+	held := only(intents, proto.IntentIntend)
+	if len(held) != 1 {
+		t.Fatalf("emitted %+v, want one intention", intents)
+	}
+	if held[0].DelayMS != 0 {
+		t.Errorf("delay = %d ms, want no moment invented for it", held[0].DelayMS)
+	}
+	// And it says nothing about having noticed anything, because it has not
+	// noticed anything: the first useful remark is a fortnight out, and one
+	// on the day would mean it had been watching before it was asked.
+	for _, s := range only(intents, proto.IntentSay) {
+		if strings.Contains(strings.ToLower(s.Text), "you have") {
+			t.Errorf("said %q on the day the goal was stated", s.Text)
+		}
+	}
+}
+
+// The other exit: giving up on something is not the same as having done it,
+// and has to be as easy to say as taking it on was.
+func TestNeverMindSetsAGoalAside(t *testing.T) {
+	intents := run(t,
+		proto.Event{Type: proto.EventBoot},
+		proto.Event{Type: proto.EventMessage, Text: "remind me the thesis matters"},
+		proto.Event{Type: proto.EventMessage, Text: "never mind about the thesis"},
+	)
+	held := only(intents, proto.IntentIntend)
+	aside := only(intents, proto.IntentSetAside)
+	if len(aside) != 1 {
+		t.Fatalf("emitted %+v, want one set_aside", intents)
+	}
+	if len(held) != 1 || aside[0].Name != held[0].Name {
+		t.Errorf("set aside %q, want the goal it took on (%+v)", aside[0].Name, held)
+	}
+	// And it is never resolved: it was not done.
+	if done := only(intents, proto.IntentResolve); len(done) != 0 {
+		t.Errorf("resolved %+v — giving up is not discharging", done)
+	}
+}
+
+// Nothing to give up on is said rather than silently ignored: a person who
+// asks a ghost to stop and hears nothing back asks again.
+func TestNeverMindAboutNothing(t *testing.T) {
+	intents := run(t, proto.Event{Type: proto.EventMessage, Text: "never mind about the thesis"})
+	if aside := only(intents, proto.IntentSetAside); len(aside) != 0 {
+		t.Errorf("set aside %+v, want nothing", aside)
+	}
+	said := only(intents, proto.IntentSay)
+	if len(said) != 1 || !strings.Contains(said[0].Text, "holding anything") {
+		t.Errorf("said %+v, want it saying it is not holding one", said)
+	}
+}
+
+// The names are private, so they have to survive a restart: a counter that
+// began at zero every morning would file today's errand under yesterday's
+// goal and silently replace it.
+func TestErrandNamesSurviveARestart(t *testing.T) {
+	first := run(t,
+		proto.Event{Type: proto.EventBoot},
+		proto.Event{Type: proto.EventMessage, Text: "remind me the thesis matters"},
+	)
+	name := only(first, proto.IntentIntend)[0].Name
+	kv := map[string]string{}
+	for _, i := range only(first, proto.IntentKVSet) {
+		kv[i.Name] = i.Value
+	}
+
+	second := run(t,
+		proto.Event{Type: proto.EventBoot, KV: kv},
+		proto.Event{Type: proto.EventMessage, Text: "remind me in 10 minutes to check the build"},
+	)
+	if again := only(second, proto.IntentIntend)[0].Name; again == name {
+		t.Errorf("both filed under %q; the new errand replaced the goal", name)
+	}
+	// And the goal is still reachable by the words the person used.
+	if aside := only(second, proto.IntentSetAside); len(aside) != 0 {
+		t.Fatalf("unexpected %+v", aside)
+	}
+	third := run(t,
+		proto.Event{Type: proto.EventBoot, KV: kv},
+		proto.Event{Type: proto.EventMessage, Text: "never mind about the thesis"},
+	)
+	aside := only(third, proto.IntentSetAside)
+	if len(aside) != 1 || aside[0].Name != name {
+		t.Errorf("set aside %+v, want %q from the previous session", aside, name)
+	}
+}

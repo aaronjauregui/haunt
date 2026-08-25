@@ -62,6 +62,8 @@ Request: `
 const helpText = "Talk to me and I'll answer. `draw <something>` paints a picture, " +
 	"`draw again` repaints it differently, `remember <fact>` keeps something " +
 	"in mind, `remind me in 10 minutes to <something>` comes back to you, " +
+	"`remind me <something> matters` is a thing I'll keep an eye on and " +
+	"`never mind about <something>` is me letting it go, " +
 	"`look` glances at your screen."
 
 // toolsHelp is added to that when the ghost has tools. It is deliberately
@@ -166,10 +168,14 @@ type Brain struct {
 	// of being wrong is one redundant intent the driver drops.
 	worn string
 	// errands counts the reminders taken on, so two of them get distinct
-	// names instead of replacing each other. Not persisted: a collision
-	// after a restart replaces an errand from a previous session, which is
-	// a smaller wrong than a store key spent on a counter.
+	// names instead of replacing each other. Restored at boot from the
+	// errand keys, because a goal is meant to be held for months across a
+	// great many restarts and a counter starting at zero every morning
+	// would quietly replace yesterday's goal with today's errand.
 	errands int
+	// errandTexts is what each of those names was about, so the person can
+	// say "never mind about the thesis" without ever having seen a name.
+	errandTexts map[string]string
 	// tools are the things this ghost can do, learned at boot. The brain
 	// never calls any of them: they reach the model during ordinary chat,
 	// and this list exists so the ghost can *say* what it is able to do.
@@ -229,7 +235,9 @@ func (b *Brain) onChoice(picked string, emit *brainkit.Emitter) {
 }
 
 // New returns a fresh built-in brain.
-func New() *Brain { return &Brain{prompts: map[string]string{}} }
+func New() *Brain {
+	return &Brain{prompts: map[string]string{}, errandTexts: map[string]string{}}
+}
 
 // Run drives a built-in brain over the given event/intent streams. This is
 // the entry point internal/brain.StartBuiltin calls; it is the same loop a
@@ -252,6 +260,7 @@ func (b *Brain) OnEvent(e brainkit.Event, emit *brainkit.Emitter) {
 				b.prompts[request] = v
 			}
 		}
+		b.restoreErrands(e.KV)
 		// Boot opens only a couple of seconds of free speech, so the
 		// greeting is said rather than generated: a model that took ten
 		// seconds to answer would arrive after the ghost had gone quiet.
@@ -352,14 +361,23 @@ func (b *Brain) OnEvent(e brainkit.Event, emit *brainkit.Emitter) {
 		emit.Initiate(direction)
 
 	case "cron":
-		// A manifest trigger fired — a morning greeting, an anniversary.
-		// The manifest names the occasion; the model finds the words, so an
+		// A manifest trigger fired. With something in Text it is a poll —
+		// the driver called a tool on schedule and this is what came back —
+		// which is taken on rather than said (see poll.go).
+		if text := strings.TrimSpace(e.Text); text != "" {
+			b.onPoll(e.Name, text, emit)
+			return
+		}
+		// Otherwise an occasion — a morning greeting, an anniversary. The
+		// manifest names the occasion; the model finds the words, so an
 		// author gets scheduled dialogue without writing any.
 		emit.Initiate("The occasion is: " + e.Name +
 			". Say one short thing to them about it, unprompted.")
 
 	case "message":
-		b.onMessage(strings.TrimSpace(e.Text), emit)
+		// With who sent it. A message from another ghost is not the person
+		// talking, and the two must not be handled alike — see onMessage.
+		b.onMessage(strings.TrimSpace(e.Text), e.From, emit)
 
 	case "intention":
 		// Something it took on earlier has come due — possibly days ago,
@@ -404,9 +422,27 @@ func (b *Brain) OnEvent(e brainkit.Event, emit *brainkit.Emitter) {
 	}
 }
 
-// onMessage handles text from a person: a few spoken commands, and
-// otherwise conversation.
-func (b *Brain) onMessage(text string, emit *brainkit.Emitter) {
+// onMessage handles text addressed to the ghost. from is empty when it came
+// from a person (`haunt say`, the typing line) and is the sender's name when
+// another resident ghost sent it with `tell`.
+//
+// That distinction is load-bearing and used to be thrown away here. The
+// driver is careful to keep it — sendTell stamps the name from the sender's
+// own manifest so a brain cannot forge it, and the initiative accounting
+// reads it specifically so that two ghosts cannot talk each other into an
+// unlimited allowance (curiosity.go, promptedEvent). Dropping it on arrival
+// handed a neighbour the whole command vocabulary below: another ghost
+// could say "look" and have this one photograph the user's screen for a
+// vision model, or "draw a cat" and spend their image budget, exactly as
+// though the person had typed it.
+//
+// So the commands are the person's alone. A neighbour gets conversation,
+// filed under its name the way anything else it does is.
+func (b *Brain) onMessage(text, from string, emit *brainkit.Emitter) {
+	if from != "" {
+		b.onTold(text, from, emit)
+		return
+	}
 	switch strings.ToLower(text) {
 	case "help", "?":
 		b.offerMenu(emit)
@@ -449,6 +485,13 @@ func (b *Brain) onMessage(text string, emit *brainkit.Emitter) {
 	if b.onRemind(text, emit) {
 		return
 	}
+	// And the way back out of one. Checked here rather than left to the
+	// model, for the reason onRemind is: a person who has given up on
+	// something should be able to say so and be believed, without it
+	// depending on a backend being reachable.
+	if b.onNeverMind(text, emit) {
+		return
+	}
 	if fact, ok := strings.CutPrefix(text, "remember "); ok {
 		emit.Note(fact)
 		emit.SayFor("Noted, I'll keep that in mind.", lingerNote)
@@ -463,6 +506,26 @@ func (b *Brain) onMessage(text string, emit *brainkit.Emitter) {
 		Wait:     thinkingText,
 		LingerMS: lingerReply,
 	})
+}
+
+// onTold handles being spoken to by another resident ghost. Unprompted, so
+// it comes out of the daily allowance and the driver may refuse it: nobody
+// asked for this exchange, and a pair of ghosts left alone together should
+// not be able to fill the person's screen between them.
+//
+// Said aloud rather than told back, for the reason onObserved gives: two
+// ghosts talking where the person can see them is the point, and it is the
+// reply being a public action with its own cooldown that makes the
+// conversation finite.
+func (b *Brain) onTold(text, from string, emit *brainkit.Emitter) {
+	if text == "" {
+		return
+	}
+	b.lastSeen = from + " said something to you"
+	emit.InitiateAbout(from, from+", another ghost in the room, has just said to you: "+
+		text+". Say one short thing back, out loud, in your own character — "+
+		"or nothing much, if there is nothing worth saying. They are not you "+
+		"and they are not the person you live with.")
 }
 
 // help is the ghost explaining itself, including what it can do in the

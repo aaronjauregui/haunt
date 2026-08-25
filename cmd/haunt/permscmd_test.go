@@ -118,6 +118,51 @@ wasm = "brain.wasm"
 	if out := fails("perms", "nosuchghost"); !strings.Contains(out, "is not installed") {
 		t.Errorf("unknown ghost: %s", out)
 	}
+
+	// A ghost that checks something on a schedule says so here, which is
+	// the one place a person can settle a standing arrangement in advance:
+	// a poll asks in the balloon, but only while somebody is at the desk.
+	moth := filepath.Join(dir, "moth")
+	if err := os.MkdirAll(moth, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pollster := `[ghost]
+name = "moth"
+version = "0.1.0"
+capabilities = ["llm", "tools"]
+
+[persona]
+system = "You are Moth."
+
+[[tool]]
+name = "calendar"
+command = ["mcp-caldav"]
+
+[[trigger]]
+cron = "*/15 * * * *"
+name = "calendar"
+tool = "calendar.upcoming"
+args = { within = "2h" }
+`
+	if err := os.WriteFile(filepath.Join(moth, "ghost.toml"), []byte(pollster), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mothPkg := filepath.Join(dir, "moth.haunt")
+	run("pack", "-o", mothPkg, moth)
+	run("install", mothPkg)
+
+	out = run("perms", "moth")
+	for _, want := range []string{"on a schedule", "calendar.upcoming", "*/15 * * * *", "[no ]"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("perms listing for a polling ghost missing %q:\n%s", want, out)
+		}
+	}
+	if out := run("perms", "grant", "tool:calendar.upcoming", "moth"); !strings.Contains(out, "granted") {
+		t.Errorf("granting a scheduled tool in advance: %s", out)
+	}
+	if out := run("perms", "moth"); !strings.Contains(out, "[yes] calendar") {
+		t.Errorf("the granted poll is not marked as allowed:\n%s", out)
+	}
 }
 
 // TestPermsAppliesToARunningGhost is the whole point of the feature: a

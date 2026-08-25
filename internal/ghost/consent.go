@@ -43,6 +43,15 @@ import (
 //     of it. A permission popup at login, about nothing in particular, is
 //     exactly the pattern this is meant to replace.
 //
+// A manifest trigger that polls a tool is the case that tests that last
+// rule, since it is a background loop by construction and has to be
+// consented to somehow. It asks, and what makes the question honest is that
+// it is asked only while the person is at the desk and says out loud what it
+// is about — "would like to check calendar.upcoming on a schedule, without
+// being asked each time" is a question about a standing arrangement, not a
+// popup about nothing. A poll that fires while they are away asks nothing
+// and does nothing; the next one asks. See poll.go.
+//
 // Window awareness was the awkward case for that last rule, since the thing
 // that needs it *is* a background loop, and it sat behind `haunt perms`
 // alone for exactly that reason. It is asked for now, but only through

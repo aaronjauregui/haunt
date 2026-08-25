@@ -21,6 +21,7 @@ import (
 	"github.com/aaronjauregui/haunt/internal/balloon"
 	"github.com/aaronjauregui/haunt/internal/brain"
 	"github.com/aaronjauregui/haunt/internal/bus"
+	"github.com/aaronjauregui/haunt/internal/config"
 	"github.com/aaronjauregui/haunt/internal/control"
 	"github.com/aaronjauregui/haunt/internal/defaultbrain"
 	"github.com/aaronjauregui/haunt/internal/desktop"
@@ -155,6 +156,28 @@ type Options struct {
 }
 
 // Ghost is a running instance.
+//
+// # Locking
+//
+// There are a dozen small locks here rather than one big one, because the
+// things they guard genuinely move independently: animation frames, a
+// balloon being redrawn at a new scale, an AI request, the watch loop's
+// session model, the daily allowances. A single lock would put a blink
+// behind a language model.
+//
+// The rule that keeps that affordable is: **no lock here is ever held while
+// another is acquired.** Every one of them guards a short critical section
+// over its own fields — read the state, or write it, and get out — and
+// anything slow (a backend call, a compositor round trip, a question on
+// screen) happens outside them. There is therefore no lock order to get
+// wrong, and adding one is how this stops being true.
+//
+// The two that look like exceptions are not. aiMu is not a data lock at all:
+// it is the ghost's single work slot, held across a whole request so that
+// two of them cannot wear one body, and the code under it takes the small
+// locks freely. memMu is the same thing for memory, kept separate from aiMu
+// precisely so that writing down what was said cannot delay saying the next
+// thing.
 type Ghost struct {
 	manifest *Manifest
 	opts     Options
@@ -237,7 +260,7 @@ type Ghost struct {
 	// awareness is what the ghost may notice about the screen, and
 	// watching guards its poll loop so exactly one runs however many times
 	// it is started (see awareness.go).
-	awareness AwarenessConfig
+	awareness config.AwarenessConfig
 	watching  atomic.Bool
 	// sess is the session model the watch loop is feeding, reachable from
 	// here so teardown can write its state out while the store is still
@@ -249,6 +272,15 @@ type Ghost struct {
 	// Under sessMu because it is written by the same loop.
 	seenWindow WhyWindow
 
+	// idle says the compositor has reported the person away from the
+	// machine. Kept as a flag because the one thing that reads it — whether
+	// there is anybody there to put a consent question to — is a scheduled
+	// poll, which happens on nobody's timetable but its own (see poll.go).
+	idle atomic.Bool
+	// polls is what each manifest trigger last reported, so an answer that
+	// has not changed is not delivered to the brain again (see poll.go).
+	polls polls
+
 	// room is the other ghosts this one has watched act, learned from the
 	// stage rather than told (see sociality.go).
 	roomMu sync.Mutex
@@ -258,11 +290,28 @@ type Ghost struct {
 	curiosity *allowance
 	// sleep is the separate allowance for consolidation, and sleeper the
 	// state of the pass itself (see consolidate.go).
-	sleep           *allowance
-	sleeper         sleeper
+	sleep   *allowance
+	sleeper sleeper
+	// drifter is the state of the goal check, the other pass that happens
+	// while nobody is there, and goalWatch is what the watch loop is
+	// looking for on the person's screen — held in memory so a poll every
+	// three seconds costs a walk over at most seven short word lists
+	// rather than a scan of the store (see goal.go).
+	drifter   drifter
+	goalMu    sync.Mutex
+	goalWatch []watcher
+	// late says the goal check produced a finding that it deliberately did
+	// not arm, because it ran while nobody was there. Read on every
+	// EventActive, so it is a flag rather than a look at the store.
+	late atomic.Bool
+	// obligation is the third allowance: things a person put on the ghost's
+	// books, kept apart from curiosity because they ration different
+	// things. See markObliged in curiosity.go for the line between them.
+	obligation      *allowance
 	initMu          sync.Mutex
 	promptedUntil   time.Time
 	initiativeUntil time.Time
+	obligedUntil    time.Time
 
 	// asked tracks in-the-moment consent questions, so a refusal is
 	// respected for a while and the same question is never on screen twice
@@ -280,6 +329,10 @@ type Ghost struct {
 	// a map of their own, because a brain naming a timer "check" must not
 	// silently cancel an intention of the same name.
 	intentTimers map[string]*time.Timer
+
+	// bg counts the goroutines go_ starts, so teardown can let them finish
+	// before the store closes (see panic.go).
+	bg background
 
 	log *hlog.Logger
 	// intents remembers the last one executed, for crash reports.
@@ -309,6 +362,13 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	if err != nil {
 		return err
 	}
+	// Before anything is opened: a config file nobody can parse should fail
+	// on the terminal the person is standing at, not halfway through
+	// putting a window on their screen.
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
 	g := &Ghost{
 		manifest: m,
 		dir:      dir,
@@ -321,36 +381,179 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	}
 	defer close(g.done)
 
-	// State: the injected backend, or SQLite in the state directory.
-	if opts.Store != nil {
-		g.store = opts.Store
-	} else {
-		stateDir := opts.StateDir
-		if stateDir == "" {
-			base := os.Getenv("XDG_DATA_HOME")
-			if base == "" {
-				home, err := os.UserHomeDir()
-				if err != nil {
-					return err
-				}
-				base = filepath.Join(home, ".local", "share")
-			}
-			stateDir = filepath.Join(base, "haunt", "ghosts", m.Ghost.Name)
-		}
-		if err := os.MkdirAll(stateDir, 0o755); err != nil {
-			return err
-		}
-		if g.store, err = store.Open(filepath.Join(stateDir, "state.db")); err != nil {
-			return err
-		}
+	if err := g.openStore(); err != nil {
+		return err
 	}
 	defer g.store.Close()
 
+	if err := g.openScreen(); err != nil {
+		return err
+	}
+	defer g.app.Close()
+	if opts.Spots != nil {
+		defer opts.Spots.Release()
+	}
+
+	// Bus, optionally recording.
+	g.bus = bus.New(64)
+	if opts.RecordTo != "" {
+		if g.recordF, err = os.Create(opts.RecordTo); err != nil {
+			return err
+		}
+		defer g.recordF.Close()
+		g.bus.SetRecorder(g.recordF)
+	}
+
+	if err := g.applySettings(cfg); err != nil {
+		return err
+	}
+
+	if err := g.startBrain(ctx); err != nil {
+		return err
+	}
+
+	g.wireInput()
+
+	// Bus -> brain.
+	deliveryDone := make(chan struct{})
+	go func() {
+		defer close(deliveryDone)
+		defer g.recoverPanic(hlog.Brain, "event delivery")
+		for e := range g.bus.Events() {
+			if err := g.brain.Deliver(e); err != nil {
+				log.Error(hlog.Brain, "brain delivery failed: %v", err)
+				return
+			}
+		}
+	}()
+
+	// Control socket: external programs push events in (haunt say, hooks).
+	// Requires the "message" capability: declared in the manifest and
+	// granted by the user (dev runs auto-grant declared capabilities).
+	if g.capabilityActive("message") {
+		// Through g.publishFromControl, not the bus directly: `haunt say` is
+		// a person addressing the ghost, and the reply must not be charged
+		// to the ghost's own initiative.
+		ctl, err := control.Listen(m.Ghost.Name, g.publishFromControl, log)
+		if err != nil {
+			return err
+		}
+		defer ctl.Close()
+		defer control.Forget(m.Ghost.Name)
+	}
+
+	stopTriggers, err := g.startTriggers(opts.IdleTimeoutMS)
+	if err != nil {
+		return err
+	}
+	defer stopTriggers()
+
+	// Take a seat on the stage before booting, so a ghost that comes up
+	// second sees whatever its neighbours do from its first moment rather
+	// than from whenever the last of them finished starting.
+	if opts.Stage != nil {
+		opts.Stage.Observe(g.observed)
+		defer opts.Stage.Leave()
+	}
+
+	// Tool servers, if the ghost declares any and may use them. Before the
+	// boot event because the boot event carries what they offer, and
+	// startable again later for the same reason window awareness is: the
+	// person may say yes during the session (see execAct).
+	g.startToolServers()
+	defer g.stopToolServers()
+
+	if err := g.boot(); err != nil {
+		return err
+	}
+	defer g.stopAnimation()
+
+	// Wayland event loop until cancelled.
+	dispatchErr := make(chan error, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				// With the stack and the breadcrumbs: a panic in here ends
+				// the session, and "slice bounds out of range" on its own
+				// is not enough to find anything.
+				dispatchErr <- g.crashReport("the compositor dispatch loop", r, debug.Stack())
+			}
+		}()
+		for {
+			if err := g.app.Dispatch(); err != nil {
+				// The library unregisters proxies on Destroy without
+				// waiting for the server's delete confirmation, so events
+				// already in flight for a destroyed surface (balloon
+				// swaps) surface as "unable find sender". Benign: skip.
+				if strings.Contains(err.Error(), "unable find sender") {
+					continue
+				}
+				dispatchErr <- err
+				return
+			}
+		}
+	}()
+
+	var runErr error
+	select {
+	case <-ctx.Done():
+	case err := <-dispatchErr:
+		runErr = fmt.Errorf("wayland session: %w", err)
+	}
+	return g.shutdown(deliveryDone, runErr)
+}
+
+// openStore opens the ghost's persistence: the injected backend, or SQLite
+// in the state directory. It also settles where generated images are
+// cached, which belongs here because the cache is state and lives beside
+// the database that holds the rest of it.
+func (g *Ghost) openStore() error {
+	// The resolved directory, not opts.StateDir: with the option left empty
+	// — which is every ordinary run — the two differ, and the cache used to
+	// be sent to a temp directory while the database went to XDG. That
+	// quietly threw away every generated image on reboot, and with it the
+	// point of the built-in brain reusing a stored prompt so that asking
+	// for the same picture twice costs one generation.
+	stateDir := g.opts.StateDir
+	if stateDir == "" {
+		base := os.Getenv("XDG_DATA_HOME")
+		if base == "" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return err
+			}
+			base = filepath.Join(home, ".local", "share")
+		}
+		stateDir = filepath.Join(base, "haunt", "ghosts", g.manifest.Ghost.Name)
+	}
+	g.cacheDir = filepath.Join(stateDir, "cache")
+
+	if g.opts.Store != nil {
+		g.store = g.opts.Store
+		return nil
+	}
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		return err
+	}
+	var err error
+	g.store, err = store.Open(filepath.Join(stateDir, "state.db"))
+	return err
+}
+
+// openScreen loads the shell, connects to the compositor, decides where the
+// ghost opens, and gets it there with a balloon renderer at the right
+// scale. On success the caller owns g.app and, if there is a room to be
+// arbitrated, the claimed spot.
+func (g *Ghost) openScreen() error {
+	opts, log := g.opts, g.log
+	m := g.manifest
+
 	// Shell: a layer stack with named poses, or a single image, or the
 	// built-in placeholder — all three arrive here as the same thing.
+	var err error
 	if m.Shell.Sprite == "" && len(m.Shell.Layers) == 0 {
 		g.shell = shell.Builtin(160)
-	} else if g.shell, err = shell.Load(dir, m.Shell); err != nil {
+	} else if g.shell, err = shell.Load(g.dir, m.Shell); err != nil {
 		return err
 	}
 	sp := g.shell.Sprite()
@@ -359,7 +562,6 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	if g.app, err = wlclient.Connect(); err != nil {
 		return err
 	}
-	defer g.app.Close()
 	// Pointer, keyboard and surface traffic, when someone asks for it by
 	// name. It is a line per input event, which is unreadable as ordinary
 	// output and indispensable when a click is landing somewhere it should
@@ -391,7 +593,6 @@ func Run(ctx context.Context, dir string, opts Options) error {
 				startX, startY, claimedX, claimedY)
 		}
 		startX, startY = claimedX, claimedY
-		defer opts.Spots.Release()
 	}
 	if g.surface, err = g.app.CreateSpriteOpts(sp, int32(startX), int32(startY),
 		wlclient.SurfaceOptions{Output: outName}); err != nil {
@@ -437,94 +638,76 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		g.blnRend = r
 		g.blnMu.Unlock()
 	}
+	return nil
+}
 
-	// Bus, optionally recording.
-	g.bus = bus.New(64)
-	if opts.RecordTo != "" {
-		if g.recordF, err = os.Create(opts.RecordTo); err != nil {
-			return err
-		}
-		defer g.recordF.Close()
-		g.bus.SetRecorder(g.recordF)
-	}
-
+// applySettings takes the parsed config file and everything derived from
+// it: do-not-disturb, what the ghost may notice, its two daily allowances,
+// and the AI service it spends them through.
+func (g *Ghost) applySettings(cfg *config.File) error {
+	var err error
 	// Quiet hours (config windows + manual shush).
-	if g.quiet, err = quiet.Load(); err != nil {
+	if g.quiet, err = quiet.New(cfg.Quiet); err != nil {
 		return err
 	}
 	// Fullscreen awareness: the ghost keeps out of the way of games and
 	// films, which is both courtesy and — for image generation — leaving
 	// the GPU alone.
-	g.desktop = desktop.New(log)
+	g.desktop = desktop.New(g.log)
 
-	anim, err := loadAnimationConfig()
-	if err != nil {
-		return err
-	}
-	g.reducedMotion = anim.ReducedMotion
-
-	if g.awareness, err = loadAwarenessConfig(); err != nil {
-		return err
-	}
+	g.reducedMotion = cfg.Animation.ReducedMotion
+	g.awareness = cfg.Awareness
 
 	// Initiative allowance. Persisted, so restarting the ghost is not a way
 	// to refill it.
-	actionsPerDay, _, err := Curiosity()
-	if err != nil {
-		return err
-	}
-	g.curiosity = newCuriosity(actionsPerDay, g.store, log)
+	actionsPerDay, _ := cfg.Allowances()
+	g.curiosity = newCuriosity(actionsPerDay, g.store, g.log)
 
 	// And the separate one for consolidation: it rations the user's bill
 	// rather than their attention, so a ghost that spent the night
 	// thinking still has things to say in the morning.
-	sleepsPerDay, err := loadMemoryConfig()
-	if err != nil {
-		return err
-	}
-	g.sleep = newAllowance(sleepKey, sleepsPerDay, g.store, log, hlog.Memory)
+	g.sleep = newAllowance(sleepKey, cfg.ConsolidationsPerDay(), g.store, g.log, hlog.Memory)
+
+	// And the third: what the person asked for, which must not compete with
+	// what the ghost thought of.
+	g.obligation = newObligation(cfg.ObligationsPerDay(), g.store, g.log)
 
 	// AI services (backends are user-configured; absent config just means
 	// the capabilities error out when used).
-	aiCfg, err := ai.LoadConfig()
-	if err != nil {
-		return err
-	}
-	g.aiSvc = ai.NewServiceWith(aiCfg, log, opts.AIBudgets)
-	g.cacheDir = filepath.Join(opts.StateDir, "cache")
-	if opts.StateDir == "" {
-		g.cacheDir = filepath.Join(os.TempDir(), "haunt-cache-"+m.Ghost.Name)
-	}
+	g.aiSvc = ai.NewServiceWith(cfg.AI, g.log, g.opts.AIBudgets)
+	return nil
+}
 
-	// Brain: the driver's built-in one when the manifest declares none,
-	// sandboxed WASM when it does, a native process only when the manifest
-	// declares (and the user granted) the native-brain capability. All three
-	// speak the same event/intent schema down the same pipe: the built-in
-	// brain is hosted, not privileged.
+// startBrain starts the ghost's logic: the driver's built-in brain when the
+// manifest declares none, sandboxed WASM when it does, a native process
+// only when the manifest declares (and the user granted) the native-brain
+// capability. All three speak the same event/intent schema down the same
+// pipe: the built-in brain is hosted, not privileged.
+func (g *Ghost) startBrain(ctx context.Context) error {
+	m := g.manifest
+	var err error
 	switch {
 	case m.Brain.Builtin():
-		log.Info(hlog.Brain, "no brain declared; running the built-in brain")
-		if g.brain, err = brain.StartBuiltin(defaultbrain.Run, g.execIntent, brain.Options{}); err != nil {
-			return err
-		}
+		g.log.Info(hlog.Brain, "no brain declared; running the built-in brain")
+		g.brain, err = brain.StartBuiltin(defaultbrain.Run, g.execIntent, brain.Options{})
 	case len(m.Brain.Command) > 0:
 		if !g.capabilityActive("native-brain") {
 			return fmt.Errorf("ghost %q wants a native brain but the native-brain capability is not granted", m.Ghost.Name)
 		}
-		if g.brain, err = brain.StartProcess(dir, m.Brain.Command, g.execIntent, brain.Options{}); err != nil {
-			return err
-		}
+		g.brain, err = brain.StartProcess(g.dir, m.Brain.Command, g.execIntent, brain.Options{})
 	default:
-		wasmBytes, err := os.ReadFile(filepath.Join(dir, m.Brain.Wasm))
-		if err != nil {
+		var wasmBytes []byte
+		if wasmBytes, err = os.ReadFile(filepath.Join(g.dir, m.Brain.Wasm)); err != nil {
 			return err
 		}
-		if g.brain, err = brain.Start(ctx, wasmBytes, g.execIntent, brain.Options{}); err != nil {
-			return err
-		}
+		g.brain, err = brain.Start(ctx, wasmBytes, g.execIntent, brain.Options{})
 	}
+	return err
+}
 
-	// Input -> bus.
+// wireInput connects the renderer's pointer and keyboard callbacks to the
+// event bus. Everything here runs on the dispatch goroutine.
+func (g *Ghost) wireInput() {
 	g.surface.OnClick = func(x, y int) {
 		// Poking the ghost puts away whatever was half-typed, the way
 		// clicking off an input box does anywhere else — and does it first,
@@ -558,49 +741,24 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		g.publish(proto.Event{Type: proto.EventDragEnd, X: x, Y: y, Region: g.shell.RegionAt(x, y)})
 		// Dragging is how a person says where they want it, so that is
 		// what gets remembered.
-		if sx, sy, sw, sh := g.surface.Geometry(); true {
-			g.savePlace(int(sx), int(sy))
-			if opts.Spots != nil {
-				opts.Spots.Moved(g.outputName, int(sx), int(sy), int(sw), int(sh))
-			}
+		sx, sy, sw, sh := g.surface.Geometry()
+		g.savePlace(int(sx), int(sy))
+		if g.opts.Spots != nil {
+			g.opts.Spots.Moved(g.outputName, int(sx), int(sy), int(sw), int(sh))
 		}
 	}
 	// The balloon belongs to the ghost: it follows the sprite while dragged.
 	g.surface.OnMove = func(x, y int) {
 		g.placeBalloon()
 	}
+}
 
-	// Bus -> brain.
-	deliveryDone := make(chan struct{})
-	go func() {
-		defer close(deliveryDone)
-		defer g.recoverPanic(hlog.Brain, "event delivery")
-		for e := range g.bus.Events() {
-			if err := g.brain.Deliver(e); err != nil {
-				log.Error(hlog.Brain, "brain delivery failed: %v", err)
-				return
-			}
-		}
-	}()
-
-	// Control socket: external programs push events in (haunt say, hooks).
-	// Requires the "message" capability: declared in the manifest and
-	// granted by the user (dev runs auto-grant declared capabilities).
-	if g.capabilityActive("message") {
-		// Through g.publishExternal, not the bus directly: `haunt say` is a
-		// person addressing the ghost, and the reply must not be charged to
-		// the ghost's own initiative.
-		ctl, err := control.Listen(m.Ghost.Name, g.publishFromControl, log)
-		if err != nil {
-			return err
-		}
-		defer ctl.Close()
-		defer control.Forget(m.Ghost.Name)
-	}
-
+// startTriggers arms the two clocks that speak to the ghost without anybody
+// touching it: the compositor's idle notifications, and the manifest's cron
+// entries. The returned function stops the schedule.
+func (g *Ghost) startTriggers(idleTimeoutMS uint32) (func(), error) {
 	// Idle awareness: after inactivity brains hear idle, and active when
 	// the user returns. Compositor support is optional.
-	idleTimeoutMS := opts.IdleTimeoutMS
 	if idleTimeoutMS == 0 {
 		idleTimeoutMS = 2 * 60 * 1000
 	}
@@ -609,42 +767,52 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		func() { g.publish(proto.Event{Type: proto.EventActive}) },
 	)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !supported {
-		log.Info(hlog.Session, "compositor lacks ext-idle-notify; idle events disabled")
+		g.log.Info(hlog.Session, "compositor lacks ext-idle-notify; idle events disabled")
 	}
 
 	// Scheduled triggers from the manifest.
-	if len(m.Triggers) > 0 {
-		sched := cron.New()
-		for _, tr := range m.Triggers {
-			name := tr.Name
+	if len(g.manifest.Triggers) == 0 {
+		return func() {}, nil
+	}
+	sched := cron.New()
+	for _, tr := range g.manifest.Triggers {
+		name := tr.Name
+		if tr.Tool != "" {
+			// A poll rather than an occasion: the driver calls somebody
+			// else's server and the brain hears what it said (see poll.go).
+			// On a goroutine of its own, because a tool call takes as long
+			// as the far end takes and the triggers behind it must not
+			// queue up waiting for it — or, worse, wait behind a consent
+			// question somebody is reading.
 			if _, err := sched.AddFunc(tr.Cron, func() {
-				g.publish(proto.Event{Type: proto.EventCron, Name: name})
+				g.go_(hlog.Tool, "poll "+name, func() { g.pollTrigger(tr) })
 			}); err != nil {
-				return fmt.Errorf("trigger %q: %w", name, err)
+				return nil, fmt.Errorf("trigger %q: %w", name, err)
 			}
+			continue
 		}
-		sched.Start()
-		defer sched.Stop()
+		if _, err := sched.AddFunc(tr.Cron, func() {
+			// An obligation: the author declared this occasion and the
+			// person accepted it when they installed the ghost, so a
+			// morning greeting is not the ghost deciding to speak. A brain
+			// cannot add one, which is what keeps that honest.
+			g.markObliged()
+			g.publish(proto.Event{Type: proto.EventCron, Name: name})
+		}); err != nil {
+			return nil, fmt.Errorf("trigger %q: %w", name, err)
+		}
 	}
+	sched.Start()
+	return func() { sched.Stop() }, nil
+}
 
-	// Take a seat on the stage before booting, so a ghost that comes up
-	// second sees whatever its neighbours do from its first moment rather
-	// than from whenever the last of them finished starting.
-	if opts.Stage != nil {
-		opts.Stage.Observe(g.observed)
-		defer opts.Stage.Leave()
-	}
-
-	// Tool servers, if the ghost declares any and may use them. Before the
-	// boot event because the boot event carries what they offer, and
-	// startable again later for the same reason window awareness is: the
-	// person may say yes during the session (see execAct).
-	g.startToolServers()
-	defer g.stopToolServers()
-
+// boot tells the brain the session has started and starts everything that
+// should only run once it has: standing intentions, window awareness, idle
+// animation, and the index repair. The caller owns stopping the animation.
+func (g *Ghost) boot() error {
 	// Boot with the persisted KV snapshot, with the faces this shell can
 	// wear, and with the tools it may act through: a brain choosing an
 	// expression or an action is otherwise guessing names at a driver that
@@ -663,8 +831,8 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		Poses: poses,
 		Tools: g.toolNames(),
 	})
-	if opts.OnReady != nil {
-		opts.OnReady()
+	if g.opts.OnReady != nil {
+		g.opts.OnReady()
 	}
 
 	// Whatever it was still meaning to do when it last stopped. After the
@@ -679,52 +847,21 @@ func Run(ctx context.Context, dir string, opts Options) error {
 
 	// Idle animation: blinking and the like, on the shell's own schedule.
 	g.startAnimation()
-	defer g.stopAnimation()
 
 	// Repair the memory index if the embedding model changed since it was
 	// written. In the background: it is a long job on a large index, and
 	// the ghost should be talking meanwhile.
-	g.go_(hlog.Memory, "re-embedding", func() { g.reembedStale(ctx) })
+	g.go_(hlog.Memory, "re-embedding", func() { g.reembedStale(g.runCtx) })
+	return nil
+}
 
-	// Wayland event loop until cancelled.
-	dispatchErr := make(chan error, 1)
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				// With the stack and the breadcrumbs: a panic in here ends
-				// the session, and "slice bounds out of range" on its own
-				// is not enough to find anything.
-				dispatchErr <- g.crashReport("the compositor dispatch loop", r, debug.Stack())
-			}
-		}()
-		for {
-			if err := g.app.Dispatch(); err != nil {
-				// The library unregisters proxies on Destroy without
-				// waiting for the server's delete confirmation, so events
-				// already in flight for a destroyed surface (balloon
-				// swaps) surface as "unable find sender". Benign: skip.
-				if strings.Contains(err.Error(), "unable find sender") {
-					continue
-				}
-				dispatchErr <- err
-				return
-			}
-		}
-	}()
-
-	var runErr error
-	select {
-	case <-ctx.Done():
-	case err := <-dispatchErr:
-		runErr = fmt.Errorf("wayland session: %w", err)
-	}
-
-	// Orderly shutdown: stop painting and waiting first, then tell the
-	// brain, stop timers, drain deliveries, and close the brain last so the
-	// shutdown event is not lost to a closed pipe. The order matters: a
-	// balloon being animated into a connection that is about to close, or
-	// an AI request nobody is left to hear, will otherwise hold the whole
-	// teardown open.
+// shutdown is the orderly teardown: stop painting and waiting first, then
+// tell the brain, stop timers, let the background work finish, drain
+// deliveries, and close the brain last so the shutdown event is not lost to
+// a closed pipe. The order matters: a balloon being animated into a
+// connection that is about to close, or an AI request nobody is left to
+// hear, will otherwise hold the whole teardown open.
+func (g *Ghost) shutdown(deliveryDone <-chan struct{}, runErr error) error {
 	close(g.stopping)
 	// What the day looked like, while there is still a store to put it in:
 	// the watch loop's own exit runs after the store has been closed, so
@@ -732,8 +869,10 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	g.saveSessionState()
 	// Whatever the ghost was thinking about in its sleep, it is not
 	// finishing it now: the cancel is what stops teardown waiting on a
-	// model call nobody will read (consolidate.go).
+	// model call nobody will read (consolidate.go). The goal check goes the
+	// same way, though it has nothing to cancel but a timer.
 	g.wakeUp()
+	g.endGoalCheck()
 	g.publish(proto.Event{Type: proto.EventShutdown})
 	g.timersMu.Lock()
 	for _, t := range g.timers {
@@ -743,6 +882,10 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		t.Stop()
 	}
 	g.timersMu.Unlock()
+	// The background work, before the store it writes into goes away. See
+	// waitForBackground: the ghost has usually just been told to stop by
+	// somebody who wants their terminal back, so this is bounded.
+	g.waitForBackground()
 	g.bus.Close()
 	<-deliveryDone
 	if err := g.brain.Close(); err != nil && runErr == nil {
@@ -794,6 +937,12 @@ func (g *Ghost) publishExternal(e proto.Event) error {
 	// in which whatever the ghost does next is a response rather than an
 	// interruption. The bit stays driver-side — brains never see it and so
 	// cannot claim to have been provoked.
+	//
+	// The obligation window is the same idea and is opened at its two
+	// sources instead of here (fireIntention, and the cron closure in
+	// startTriggers), because whether a due intention is an obligation is a
+	// fact recorded on the intention rather than carried on the event —
+	// putting it on the event would put it somewhere a brain could read.
 	switch {
 	case e.Type == proto.EventBoot:
 		g.markPromptedFor(bootWindow)
@@ -807,12 +956,22 @@ func (g *Ghost) publishExternal(e proto.Event) error {
 			control.Touch(g.manifest.Ghost.Name)
 		}
 	case e.Type == proto.EventIdle:
+		g.idle.Store(true)
 		g.endResponding()
 		// Nobody is waiting, so this is when the ghost gets to think about
-		// what it already knows (consolidate.go).
+		// what it already knows (consolidate.go), and when it looks at
+		// whether a goal has gone quiet (goal.go). Both are work that must
+		// not happen over somebody's shoulder; neither of them speaks.
 		g.beginSleeping()
+		g.beginGoalCheck()
 	case e.Type == proto.EventActive:
+		g.idle.Store(false)
 		g.wakeUp()
+		g.endGoalCheck()
+		// And there is somebody to raise things with again. A drift finding
+		// is deliberately left unarmed by the pass that made it, because
+		// the pass runs precisely when nobody is there to hear it.
+		g.armLateIntentions()
 	}
 	return g.bus.Publish(e)
 }
@@ -832,6 +991,70 @@ func (g *Ghost) publishFromControl(e proto.Event) error {
 		return fmt.Errorf("the message capability is not granted")
 	}
 	return g.publishExternal(e)
+}
+
+// aiWork describes one of the four intents that reach a backend: chat,
+// imagine, look and act. They share a shape — decide whether this was
+// provoked, get off the intent loop, be sure of the capability, take the
+// ghost's one AI slot, do the work — and used to repeat it four times, which
+// made the places where they genuinely differ hard to see. Here the
+// differences are the fields.
+type aiWork struct {
+	// name is the intent, for the allowance and the log.
+	name string
+	// capability must be granted before the work starts.
+	capability string
+	topic      hlog.Topic
+	// charged says an unprompted one spends from the daily allowance. Every
+	// intent that puts something in front of the person sets it; see the
+	// note at IntentLook for the one that does not.
+	charged bool
+	// refusal, when set, is said back to the brain as an error when the
+	// allowance is spent. Silence is right for a remark nobody is waiting
+	// on; a tool call somebody is waiting on needs an answer.
+	refusal string
+	// beforeLock runs on the work's own goroutine before the AI lock is
+	// taken, for setup that may itself be slow.
+	beforeLock func()
+	// run is the work. userDriven is whether a person was waiting when the
+	// intent arrived, which only chat and imagine care about.
+	run func(in proto.Intent, userDriven bool)
+}
+
+// startAI gates one backend-bound intent and starts it.
+//
+// The two gates are deliberately on opposite sides of the goroutine.
+// Whether this was provoked is a fact about the moment the intent arrived,
+// so the allowance is spent here, on the intent loop, before anything can
+// take time: a slow backend must not be able to turn a reply into an
+// interruption on arrival. The capability question is asked on the other
+// side, because it may put a question on screen and wait for a person to
+// read it — and holding the ghost's one AI slot while they think would
+// leave it deaf to everything else meanwhile.
+func (g *Ghost) startAI(in proto.Intent, w aiWork) {
+	if w.charged && !g.allowInitiative(w.name) {
+		if w.refusal != "" {
+			g.publishAIError(w.refusal, in.Tag)
+		}
+		return
+	}
+	// Whether a person is waiting travels with the request, so a slow
+	// backend cannot turn a reply into an interruption on arrival.
+	userDriven := g.respondingToUser()
+	// Own goroutine: a slow backend must not block other intents. aiMu
+	// keeps one request in flight per ghost.
+	g.go_(w.topic, w.name, func() {
+		if !g.ensureCapability(w.capability) {
+			g.publishAIError(w.capability+" capability not granted", in.Tag)
+			return
+		}
+		if w.beforeLock != nil {
+			w.beforeLock()
+		}
+		g.aiMu.Lock()
+		defer g.aiMu.Unlock()
+		w.run(in, userDriven)
+	})
 }
 
 // execIntent runs on the brain's intent-reader goroutine. Wayland calls are
@@ -911,42 +1134,14 @@ func (g *Ghost) execIntent(in proto.Intent) {
 	case proto.IntentLog:
 		g.log.Line("ghost: " + in.Text)
 	case proto.IntentChat:
-		// Gate before the goroutine: the answer to "was this provoked?"
-		// belongs to the moment the intent arrived, not to whenever a
-		// backend gets around to it.
-		if !g.allowInitiative("chat") {
-			return
-		}
-		// Whether a person is waiting travels with the request, so a slow
-		// backend cannot turn a reply into an interruption on arrival.
-		userDriven := g.respondingToUser()
-		// Own goroutine: a slow backend must not block other intents.
-		// aiMu keeps one request in flight per ghost.
-		g.go_(hlog.AI, "chat", func() {
-			// Consent first, and before the lock: the question waits on a
-			// person, and holding the ghost's one AI slot while they think
-			// would leave it deaf to everything else meanwhile.
-			if !g.ensureCapability("llm") {
-				g.publishAIError("llm capability not granted", in.Tag)
-				return
-			}
-			g.aiMu.Lock()
-			defer g.aiMu.Unlock()
-			g.execChat(in, userDriven)
+		g.startAI(in, aiWork{
+			name: "chat", capability: "llm", topic: hlog.AI, charged: true,
+			run: g.execChat,
 		})
 	case proto.IntentImagine:
-		if !g.allowInitiative("imagine") {
-			return
-		}
-		userDriven := g.respondingToUser()
-		g.go_(hlog.AI, "imagine", func() {
-			if !g.ensureCapability("imagine") {
-				g.publishAIError("imagine capability not granted", in.Tag)
-				return
-			}
-			g.aiMu.Lock()
-			defer g.aiMu.Unlock()
-			g.execImagine(in, userDriven)
+		g.startAI(in, aiWork{
+			name: "imagine", capability: "imagine", topic: hlog.AI, charged: true,
+			run: g.execImagine,
 		})
 	case proto.IntentSetExpression:
 		g.setExpression(in.Name)
@@ -961,52 +1156,37 @@ func (g *Ghost) execIntent(in proto.Intent) {
 			g.announce(proto.ActedClip, in.Name)
 		}
 	case proto.IntentLook:
-		// Own goroutine: capture plus a vision request is seconds of work.
-		g.go_(hlog.Screen, "look", func() {
-			if !g.ensureCapability("screen") {
-				g.publishAIError("screen capability not granted", in.Tag)
-				return
-			}
-			g.aiMu.Lock()
-			defer g.aiMu.Unlock()
-			g.execLook(in)
+		// Not charged against the daily allowance, unlike its three
+		// neighbours here, and the omission is deliberate rather than
+		// missed. Looking is rationed by the hourly LLM budget it spends
+		// from (ai/vision.go) and hedged six further ways in look.go —
+		// declared capability, granted capability, a configured vision
+		// model, the ignore list, nothing fullscreen, and the ghost
+		// visibly showing that it is looking. What the daily allowance
+		// rations is interruption, and a look interrupts nobody: its
+		// answer goes to the brain, never to the balloon.
+		g.startAI(in, aiWork{
+			name: "look", capability: "screen", topic: hlog.Screen,
+			run: func(in proto.Intent, _ bool) { g.execLook(in) },
 		})
 	case proto.IntentAct:
-		// Gated on the intent loop, as chat is, and for the same reason:
-		// whether this was provoked is a fact about the moment it arrived,
-		// not about whenever a tool server gets round to it. Acting unbidden
-		// is the most interruptive thing a ghost does and is charged like
-		// it — which is also the answer to the obvious worry about an agent
-		// living on your desktop, since deciding to do anything at all
-		// unprompted comes out of a daily allowance a restart cannot refill.
-		if !g.allowInitiative("act") {
-			g.publishAIError("not now: the ghost's allowance for acting unprompted is spent", in.Tag)
-			return
-		}
-		// Its own goroutine, like chat: a tool call is seconds to minutes
-		// of somebody else's work, with a permission question possibly in
-		// front of it, and the intent loop is not a thing to stall for
-		// either. The AI lock is taken because acting and talking share the
-		// balloon and the face, and two of them at once would be two ghosts
-		// wearing one body.
-		g.go_(hlog.Tool, "act", func() {
-			// The standing question, before the lock and for the reason
-			// chat gives: it waits on a person, and holding the ghost's one
-			// slot while they read would leave it deaf meanwhile. The
-			// question about the individual tool cannot be hoisted the same
-			// way — it belongs to the call, and the model's tool loop asks
-			// it mid-exchange — so it is asked under the lock, where the
-			// ghost is genuinely busy anyway.
-			if !g.ensureCapability("tools") {
-				g.publishAIError("tools capability not granted", in.Tag)
-				return
-			}
+		// Acting unbidden is the most interruptive thing a ghost does and
+		// is charged like it — which is also the answer to the obvious
+		// worry about an agent living on your desktop, since deciding to
+		// do anything at all unprompted comes out of a daily allowance a
+		// restart cannot refill. Said out loud when refused, because a
+		// tool call the model is waiting on needs an answer.
+		//
+		// The AI lock is taken because acting and talking share the
+		// balloon and the face, and two of them at once would be two
+		// ghosts wearing one body.
+		g.startAI(in, aiWork{
+			name: "act", capability: "tools", topic: hlog.Tool, charged: true,
+			refusal: "not now: the ghost's allowance for acting unprompted is spent",
 			// Granted possibly a moment ago, in which case the servers have
 			// never been started. Cheap and idempotent when they have.
-			g.startToolServers()
-			g.aiMu.Lock()
-			defer g.aiMu.Unlock()
-			g.execAct(in)
+			beforeLock: g.startToolServers,
+			run:        func(in proto.Intent, _ bool) { g.execAct(in) },
 		})
 	case proto.IntentWatch:
 		// Its own goroutine, like chat: ensureCapability blocks while the
@@ -1017,6 +1197,8 @@ func (g *Ghost) execIntent(in proto.Intent) {
 		g.execIntend(in)
 	case proto.IntentResolve:
 		g.execResolve(in.Name)
+	case proto.IntentSetAside:
+		g.execSetAside(in.Name)
 	case proto.IntentNote:
 		g.execNote(in.Text)
 	case proto.IntentTell:

@@ -107,7 +107,7 @@ func TestFiringDoesNotDischarge(t *testing.T) {
 	}
 	// And it says so, so the ghost brings it up next time they talk rather
 	// than the reminder evaporating.
-	if ctx := g.intentionsContext(); !strings.Contains(ctx, "not dealt with it yet") {
+	if ctx := g.intentionsContext(""); !strings.Contains(ctx, "not dealt with it yet") {
 		t.Errorf("context does not say it is outstanding:\n%s", ctx)
 	}
 }
@@ -168,9 +168,14 @@ func TestAnIntentionWithNoMoment(t *testing.T) {
 	if armed {
 		t.Error("an intention with no moment was given one")
 	}
-	ctx := g.intentionsContext()
+	// It is a goal, so it rides into a request that is about it rather than
+	// into every request for the rest of the year (see inContext).
+	ctx := g.intentionsContext("did you water the plants?")
 	if !strings.Contains(ctx, "plants") || !strings.Contains(ctx, "no particular moment") {
 		t.Errorf("context = %q, want it carried and marked as having no moment", ctx)
+	}
+	if ctx := g.intentionsContext("what is the weather like"); ctx != "" {
+		t.Errorf("context = %q, want a goal left out of a request that is not about it", ctx)
 	}
 }
 
@@ -179,7 +184,9 @@ func TestAnIntentionWithNoMoment(t *testing.T) {
 func TestIntentionsAreBounded(t *testing.T) {
 	g, _, _ := intendingGhost(t)
 	for i := range maxIntentions + 5 {
-		intend(g, string(rune('a'+i)), "errand", 0)
+		// Errands rather than goals: goals have a much smaller cap of their
+		// own, for a different reason (see TestGoalsAreCappedSeparately).
+		intend(g, string(rune('a'+i)), "errand", 60*60*1000)
 		time.Sleep(time.Millisecond) // distinct Made times, so oldest is defined
 	}
 	held := g.loadIntentions()
@@ -218,6 +225,7 @@ func TestIntentionValidation(t *testing.T) {
 		{Type: proto.IntentIntend, Name: "x"},
 		{Type: proto.IntentIntend, Name: "x", Text: "y", DelayMS: -1},
 		{Type: proto.IntentResolve},
+		{Type: proto.IntentSetAside},
 	} {
 		if err := bad.Validate(); err == nil {
 			t.Errorf("%+v was accepted", bad)

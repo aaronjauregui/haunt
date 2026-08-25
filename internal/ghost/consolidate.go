@@ -4,17 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/BurntSushi/toml"
-
 	"github.com/aaronjauregui/haunt/internal/ai"
 	"github.com/aaronjauregui/haunt/internal/hlog"
-	"github.com/aaronjauregui/haunt/internal/quiet"
 )
 
 // Consolidation: the ghost sleeping.
@@ -79,48 +75,10 @@ const (
 	// seconds, and "away from the desk" is not the same as "stepped out of
 	// the room to make tea".
 	consolidateDelay = 5 * time.Minute
-	// defaultSleepsPerDay is the allowance. Four is enough to work through
-	// a busy week's memories over a few nights and few enough that nobody
-	// notices it on a bill.
-	defaultSleepsPerDay = 4
 	// maxSummaryChars bounds what the model may write back. A summary
 	// longer than the entries it replaces has failed at its one job.
 	maxSummaryChars = 400
 )
-
-// MemoryConfig is the [memory] portion of the user config: what the ghost
-// is allowed to spend thinking about what it already knows.
-type MemoryConfig struct {
-	// ConsolidationsPerDay caps consolidation passes in any rolling 24
-	// hours. Zero switches consolidation off entirely — the index then
-	// behaves as it did before, a flat ring that forgets by strength —
-	// absent means defaultSleepsPerDay.
-	ConsolidationsPerDay *int `toml:"consolidations_per_day"`
-}
-
-// loadMemoryConfig reads [memory] from the user config file.
-func loadMemoryConfig() (int, error) {
-	path, err := quiet.ConfigPath()
-	if err != nil {
-		return 0, err
-	}
-	var root struct {
-		Memory MemoryConfig `toml:"memory"`
-	}
-	data, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return 0, err
-	}
-	if err == nil {
-		if err := toml.Unmarshal(data, &root); err != nil {
-			return 0, fmt.Errorf("parsing %s: %w", path, err)
-		}
-	}
-	if root.Memory.ConsolidationsPerDay == nil {
-		return defaultSleepsPerDay, nil
-	}
-	return *root.Memory.ConsolidationsPerDay, nil
-}
 
 // sleeper holds the state of the pass: at most one runs at a time, and the
 // user coming back cancels it.

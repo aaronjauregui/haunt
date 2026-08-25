@@ -86,6 +86,7 @@ func permsList(name string) error {
 	}
 
 	servers := permsListTools(name, grants)
+	permsListPolls(name, grants)
 
 	// Grants the manifest no longer asks for: an update can drop a
 	// capability, and a stale grant left in the file is worth saying out
@@ -308,6 +309,50 @@ func permsListTools(name string, grants *library.Grants) []string {
 	fmt.Println("  (each tool is asked about the first time it is used;")
 	fmt.Println("   change one with: haunt perms grant tool:" + m.Tools[0].Name + ".<tool>)")
 	return servers
+}
+
+// permsListPolls prints the manifest's scheduled tool calls: what the ghost
+// will ask somebody else's server, how often, and whether it may.
+//
+// It is here because this is the one place a person can see a standing
+// arrangement *before* it happens. A poll asks its consent question in the
+// balloon like any other tool, but only while somebody is at the desk — so
+// a ghost that mostly runs unattended may never get round to asking, and
+// the listing plus `haunt perms grant` is the way to settle it in advance.
+func permsListPolls(name string, grants *library.Grants) {
+	m, err := loadInstalled(name)
+	if err != nil {
+		return
+	}
+	var polls []ghost.TriggerSection
+	for _, tr := range m.Triggers {
+		if tr.Tool != "" {
+			polls = append(polls, tr)
+		}
+	}
+	if len(polls) == 0 {
+		return
+	}
+	fmt.Println("\n  things it checks on a schedule:")
+	for _, tr := range polls {
+		key := "tool:" + tr.Tool
+		mark := "no "
+		if grants.Granted(key) {
+			mark = "yes"
+		}
+		what := tr.Tool
+		if tr.QuietWhen != "" {
+			// Worth calling out: this one does not talk to the ghost at
+			// all, it decides whether the ghost talks.
+			what += " (keeps quiet when the answer says " + tr.QuietWhen + ")"
+		}
+		if grants.IsRefused(key) {
+			what += "  (refused — it will not ask again)"
+		}
+		fmt.Printf("    [%s] %-13s %-15s %s\n", mark, tr.Name, tr.Cron, what)
+	}
+	fmt.Println("  (asked about in the balloon while you are there; grant one here")
+	fmt.Println("   to settle it in advance, and see haunt perms grant tool:<server>.<tool>)")
 }
 
 // decidedTools returns the tool grant keys for one server that the user has

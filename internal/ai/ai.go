@@ -13,10 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/BurntSushi/toml"
-
 	"github.com/aaronjauregui/haunt/internal/hlog"
-	"github.com/aaronjauregui/haunt/internal/quiet"
 )
 
 // Config is the [ai] portion of the user config. The *user* chooses
@@ -180,25 +177,10 @@ const (
 	defaultMaxToolCalls = 6
 )
 
-// LoadConfig reads the [ai] section of the user config file.
-func LoadConfig() (*Config, error) {
-	path, err := quiet.ConfigPath()
-	if err != nil {
-		return nil, err
-	}
-	var root struct {
-		AI Config `toml:"ai"`
-	}
-	data, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return nil, err
-	}
-	if err == nil {
-		if err := toml.Unmarshal(data, &root); err != nil {
-			return nil, fmt.Errorf("parsing %s: %w", path, err)
-		}
-	}
-	cfg := root.AI
+// WithDefaults returns cfg with the budget defaults filled in. The [ai]
+// section is read for it by internal/config, which owns the file; this is
+// only the part that knows what an absent budget should mean.
+func WithDefaults(cfg Config) *Config {
 	if cfg.Budget.LLMRequestsPerHour == 0 {
 		cfg.Budget.LLMRequestsPerHour = defaultLLMPerHour
 	}
@@ -211,7 +193,7 @@ func LoadConfig() (*Config, error) {
 	if cfg.Budget.ToolRequestsPerHour == 0 {
 		cfg.Budget.ToolRequestsPerHour = defaultToolPerHour
 	}
-	return &cfg, nil
+	return &cfg
 }
 
 func (c *LLMConfig) apiKey() string {
@@ -291,7 +273,7 @@ type Budgets struct {
 }
 
 // NewBudgets builds an hourly ration from config. Defaults are filled in
-// here as well as in LoadConfig, so a Config built directly — tests,
+// here as well as in WithDefaults, so a Config built directly — tests,
 // embedders — gets a working allowance rather than one that refuses
 // everything.
 func NewBudgets(cfg BudgetConfig) *Budgets {

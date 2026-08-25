@@ -23,7 +23,7 @@ func choosingGhost(t *testing.T) (*Ghost, *bus.Bus) {
 		t.Fatal(err)
 	}
 	g.blnRend = r
-	q, err := quiet.Load()
+	q, err := quiet.New(quiet.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}

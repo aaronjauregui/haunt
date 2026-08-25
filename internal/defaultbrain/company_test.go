@@ -138,3 +138,67 @@ func TestReactionNamesTheNeighbour(t *testing.T) {
 		t.Error("a remark nobody asked for must still be marked unprompted")
 	}
 }
+
+// told builds a message event as it arrives from another ghost's `tell`:
+// the driver stamps From from the sender's own manifest, so a brain cannot
+// forge it and this brain must not ignore it.
+func told(from, text string) proto.Event {
+	return proto.Event{Type: proto.EventMessage, Time: base, From: from, Text: text}
+}
+
+// The commands belong to the person. This brain used to hand the whole
+// spoken vocabulary to anything that could reach the control socket with a
+// message event, because it read e.Text and dropped e.From: a neighbouring
+// ghost could say "look" and have this one photograph the user's screen for
+// a vision model, or "draw a cat" and spend their image budget, exactly as
+// though the person had typed it.
+func TestANeighbourCannotDriveTheCommands(t *testing.T) {
+	for _, command := range []string{"look", "draw a cat", "help", "draw again"} {
+		intents := run(t, told("whisper", command))
+		if got := only(intents, proto.IntentLook); len(got) != 0 {
+			t.Errorf("%q from a ghost made it look at the screen: %+v", command, got)
+		}
+		if got := only(intents, proto.IntentImagine); len(got) != 0 {
+			t.Errorf("%q from a ghost made it generate an image: %+v", command, got)
+		}
+		// The menu and the help text are answers to a person asking; a
+		// neighbour saying "help" is a neighbour making conversation.
+		for _, say := range only(intents, proto.IntentSay) {
+			if strings.Contains(say.Text, "draw <something>") {
+				t.Errorf("%q from a ghost got the user's help text", command)
+			}
+		}
+	}
+	// The same words from the person still work, or the fix has traded one
+	// bug for a worse one.
+	intents := run(t, proto.Event{Type: proto.EventMessage, Time: base, Text: "look"})
+	if got := only(intents, proto.IntentLook); len(got) != 1 {
+		t.Errorf("the person said \"look\" and got %+v", got)
+	}
+}
+
+// What a neighbour gets instead: conversation, unprompted so the driver
+// charges it, and filed under the neighbour's name so months of exchanges
+// add up to a sense of who they are — the same bargain onObserved makes.
+func TestBeingToldByAGhostIsConversation(t *testing.T) {
+	intents := run(t, told("whisper", "the build finished at last"))
+	chats := only(intents, proto.IntentChat)
+	if len(chats) != 1 {
+		t.Fatalf("chats = %+v, want one", chats)
+	}
+	if !chats[0].SelfPrompt {
+		t.Error("the reply is credited to the user rather than being the ghost's own")
+	}
+	if chats[0].About != "whisper" {
+		t.Errorf("About = %q, want the neighbour's name", chats[0].About)
+	}
+	if !strings.Contains(chats[0].Text, "the build finished at last") ||
+		!strings.Contains(chats[0].Text, "whisper") {
+		t.Errorf("the direction lost what was said: %q", chats[0].Text)
+	}
+	// Out loud, not sent back: a private reply would hide the one
+	// interesting thing about having two ghosts.
+	if got := only(intents, proto.IntentTell); len(got) != 0 {
+		t.Errorf("it replied privately: %+v", got)
+	}
+}

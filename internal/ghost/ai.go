@@ -92,7 +92,7 @@ func (g *Ghost) execChat(in proto.Intent, userDriven bool) {
 		// become, recall is what this reminds it of, and this is what it
 		// has not got round to yet.
 		system += notes + g.entityContext(text) + g.recallContext(picked) +
-			g.intentionsContext()
+			g.intentionsContext(text)
 	}
 	msgs = append(msgs, ai.Message{Role: "system", Content: system})
 	msgs = append(msgs, history...)

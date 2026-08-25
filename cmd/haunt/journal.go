@@ -147,15 +147,42 @@ func printIntentions(s *store.Store) error {
 			// nobody was there. It is still owed.
 			mark = "! "
 			note = "  (its moment has passed and it has not said so yet)"
-		case it.Due.IsZero():
+		case it.Aside:
+			note = "  (set aside — still on the books, no longer watched)"
+		case it.Goal():
 			note = "  (no particular moment)"
 		default:
 			note = "  (due " + it.Due.Format("2006-01-02 15:04") + ")"
 		}
 		fmt.Printf("%s%s%s\n", mark, it.Text, note)
 		fmt.Printf("    taken on %s\n", humanAge(it.Made, now))
+		printGoalEvidence(it, now)
 	}
 	return nil
+}
+
+// printGoalEvidence prints everything the ghost is keeping about a goal.
+//
+// Not a debugging aid. The consent story for goals is that the ghost
+// watches what you named, from when you named it, and nothing else — and a
+// promise nobody can check is a promise. So this is the whole of it,
+// verbatim: the words it is looking for, and the times it saw them. There
+// is no fourth thing, and if there ever is, it belongs here too.
+func printGoalEvidence(it ghost.Intention, now time.Time) {
+	if !it.Goal() || it.Aside {
+		return
+	}
+	if len(it.Watch) == 0 {
+		fmt.Println("    watching for: nothing — it could not tell what to look for")
+		return
+	}
+	fmt.Printf("    watching for: %s\n", strings.Join(it.Watch, ", "))
+	switch last := it.LastSeen(); {
+	case last.IsZero():
+		fmt.Println("    seen: never, since it was taken on")
+	default:
+		fmt.Printf("    seen: %d times, last %s\n", len(it.Seen), humanAge(last, now))
+	}
 }
 
 // humanAge says how long ago something was taken on, which is the thing a

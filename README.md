@@ -10,8 +10,13 @@ first.
 The terms are the ukagaka community's, kept deliberately. Nothing else is:
 there is no compatibility with SHIORI, SSTP or SakuraScript, and this runs
 on wlroots-based Wayland compositors (sway, Hyprland) and others that
-implement `zwlr_layer_shell_v1`. See `DESIGN.md` for the whole design and
-its reasoning, and `BACKLOG.md` for what is still open.
+implement `zwlr_layer_shell_v1`.
+
+Four documents sit behind this one: `DESIGN.md` for what haunt is meant to
+be and why, `STATUS.md` for what exists and what was measured, `ROADMAP.md`
+for what to build next, and `BACKLOG.md` for the flat list of what is open.
+All four are development documents — user and ghost-author documentation is
+itself a roadmap item.
 
 ## Try it
 
@@ -57,6 +62,27 @@ and can tell you what it is holding, and it stays held until it has
 actually been handed back. So a reminder whose moment arrives during quiet
 hours, or over a fullscreen game, comes up next time you talk instead of
 evaporating. `haunt journal -intentions` lists what yours is carrying.
+
+Leave the time out and you have said something different:
+
+    remind me the thesis matters
+
+That has no moment, so nothing is scheduled. The ghost holds it, and from
+then on it notices when something to do with the thesis is in front of you.
+If a week goes by with nothing, it will say so — once, and then not again
+for a fortnight. It knows nothing on the first day and that is deliberate:
+it watches what you named, from when you named it, and a ghost that
+delivered a verdict the same afternoon would be one that had been watching
+before it was asked. All it writes down is the words it is looking for and
+the times it saw them, and `haunt journal -intentions` prints both.
+
+When you have stopped caring:
+
+    never mind about the thesis
+
+Which is not the same as saying it is done. It stays on the books, marked;
+it is simply no longer watched. A ghost still asking about a thesis you
+submitted in March is the thing you close.
 
 With an embedding model configured, the ghost remembers past conversations
 and pulls the relevant ones back into context months later. It also
@@ -155,6 +181,52 @@ The brakes are the driver's. `[ai.budget] tool_requests_per_hour` (60)
 caps how fast it may act; `[ai] max_tool_calls` (6) stops one exchange
 looping; and acting when nobody asked comes out of the same daily
 allowance as speaking first, which a restart does not refill.
+
+### Being woken by the world
+
+Tools are pull-only: they reach your model in the middle of a conversation
+you started. A **trigger** is the other direction — the driver asking, on a
+schedule, and telling the ghost what it heard:
+
+```toml
+[[trigger]]
+cron = "*/15 * * * *"
+name = "calendar"
+tool = "calendar.upcoming"           # a tool from one of the servers above
+args = { within = "2h" }
+```
+
+That is the whole of haunt's integration story, and the reason there is no
+integration code anywhere in it: your calendar is an MCP server and one
+trigger line, your house is an MCP server and one trigger line, and so is
+whatever you use next year.
+
+A poll never speaks. What it does is give the ghost something it now means
+to raise with you — because a schedule silently skips whatever it missed
+while the laptop was shut, and a thing the ghost is *meaning to do* survives
+that, and a restart, and a quiet hour. It also leaves the ghost's screen
+alone: no balloon, no journal entry, nothing in its memory, and nothing at
+all when the answer is the same as last time. The tool itself is consented
+to by name like any other, in a question that says it is asking about a
+standing arrangement rather than about one call — and it is only ever asked
+while you are at the desk.
+
+One trigger does something else. Give it `quiet_when` and it becomes a
+presence check:
+
+```toml
+[[trigger]]
+cron = "*/5 * * * *"
+name = "presence"
+tool = "home.person_state"
+args = { person = "me" }
+quiet_when = "not_home"              # your server's word for it, not ours
+```
+
+When the answer contains that text the ghost keeps quiet, which is a better
+answer to "should this be talking" than `22:00-08:00` is. It wears off by
+itself after half an hour, so a laptop that stops asking gets its ghost back
+rather than staying mute.
 
 ## More than one
 

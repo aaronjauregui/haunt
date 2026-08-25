@@ -39,9 +39,101 @@ func (g *Ghost) guard(topic hlog.Topic, what string, fn func()) {
 	fn()
 }
 
-// go_ starts fn on its own goroutine, guarded.
+// go_ starts fn on its own goroutine, guarded and counted. Counted because
+// most of what goes through here ends in a write to the store — remembering
+// an exchange, filing what the ghost concluded about a subject — and Run
+// closes the store on its way out. Untracked, a Ctrl-C landing in the second
+// after a reply meant the store went away underneath the goroutine still
+// writing the memory of it, which surfaced as a "database is closed" warning
+// and a conversation the ghost had no memory of having had.
+//
+// A goroutine started after teardown has begun is not run at all: there is
+// nowhere left for its result to go, and saying so is better than letting it
+// write into a closing store.
 func (g *Ghost) go_(topic hlog.Topic, what string, fn func()) {
-	go g.guard(topic, what, fn)
+	if !g.bg.add() {
+		g.log.Debug(topic, "not starting %s: the ghost is shutting down", what)
+		return
+	}
+	go func() {
+		defer g.bg.done()
+		g.guard(topic, what, fn)
+	}()
+}
+
+// backgroundGrace is how long teardown waits for that work. Long enough for
+// an embedding call against a local model to land, short enough that a
+// wedged backend does not hold the terminal of somebody who just pressed
+// Ctrl-C. Whatever is still running when it expires is abandoned, which is
+// where we were before counting them at all.
+const backgroundGrace = 3 * time.Second
+
+// waitForBackground lets the counted goroutines finish, up to the grace
+// period, and refuses any that have not started yet.
+func (g *Ghost) waitForBackground() {
+	if done, left := g.bg.wait(backgroundGrace); !done {
+		g.log.Debug(hlog.Session, "%d background %s still running at shutdown; abandoning",
+			left, plural(left, "job", "jobs"))
+	}
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
+// background counts the goroutines go_ starts, so teardown can wait for
+// them. A plain sync.WaitGroup is not enough on its own: Add on a
+// zeroed group racing a Wait is a documented misuse, and the whole point
+// here is that the two happen at once. The flag closes the door first, so
+// no Add can begin once waiting has.
+type background struct {
+	mu      sync.Mutex
+	wg      sync.WaitGroup
+	running int
+	closed  bool
+}
+
+func (b *background) add() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return false
+	}
+	b.running++
+	b.wg.Add(1)
+	return true
+}
+
+func (b *background) done() {
+	b.mu.Lock()
+	b.running--
+	b.mu.Unlock()
+	b.wg.Done()
+}
+
+// wait closes the door and waits up to d, reporting whether everything
+// finished and how many were still going if not.
+func (b *background) wait(d time.Duration) (bool, int) {
+	b.mu.Lock()
+	b.closed = true
+	b.mu.Unlock()
+
+	finished := make(chan struct{})
+	go func() {
+		b.wg.Wait()
+		close(finished)
+	}()
+	select {
+	case <-finished:
+		return true, 0
+	case <-time.After(d):
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		return false, b.running
+	}
 }
 
 // recoverPanic is the deferred half of guard, for callers that need the

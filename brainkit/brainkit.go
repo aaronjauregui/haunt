@@ -311,6 +311,20 @@ func (em *Emitter) Resolve(name string) {
 	em.emit(Intent{Type: proto.IntentResolve, Name: name})
 }
 
+// SetAside stops a goal being watched and brought up, without pretending it
+// was finished. It is the other exit, and the two are not the same one:
+// Resolve says the thing was done, and this says the person has stopped
+// caring whether it is. A goal that is over and still generating "you have
+// not touched this in eleven days" is the most irritating thing an ambient
+// companion can do, so both exits have to exist.
+//
+// What is set aside stays on the books — it is still visible in
+// `haunt journal -intentions`, marked — because deleting it would put a
+// discharge in the record that never happened.
+func (em *Emitter) SetAside(name string) {
+	em.emit(Intent{Type: proto.IntentSetAside, Name: name})
+}
+
 // Note writes a private journal entry. Recent notes are injected into LLM
 // context on every Chat, so what the ghost chooses to remember shapes its
 // future behavior. The user can read the journal with `haunt journal`.

@@ -28,6 +28,7 @@ import (
 	"sync"
 
 	"github.com/aaronjauregui/haunt/internal/ai"
+	"github.com/aaronjauregui/haunt/internal/config"
 	"github.com/aaronjauregui/haunt/internal/ghost"
 	"github.com/aaronjauregui/haunt/internal/hlog"
 )
@@ -94,15 +95,12 @@ func Run(ctx context.Context, members []Member, opts Options) error {
 		// a private 120 LLM calls an hour is 360 calls an hour, and the
 		// curiosity ceiling above does not bound them, since a ghost being
 		// *talked to* costs money too.
-		aiCfg, err := ai.LoadConfig()
+		cfg, err := config.Load()
 		if err != nil {
 			return err
 		}
-		rations = ai.NewBudgets(aiCfg.Budget)
-		perGhost, configured, err := ghost.Curiosity()
-		if err != nil {
-			return err
-		}
+		rations = ai.NewBudgets(cfg.AI.Budget)
+		perGhost, configured := cfg.Allowances()
 		limit := Ceiling(perGhost, configured, len(members))
 		budget = NewBudget(opts.StateRoot, limit, log)
 		log.Info(hlog.Curiosity, "%d ghosts resident; the room may act unprompted %d times a day",

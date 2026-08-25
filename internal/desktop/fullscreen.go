@@ -80,6 +80,17 @@ func New(log *hlog.Logger) *Watcher {
 	return w
 }
 
+// Fixed builds a Watcher that always gives the same answer, for tests that
+// need to stand a ghost in front of a fullscreen window without a
+// compositor to make one. The real mechanisms are chosen by New.
+func Fixed(fullscreen bool) *Watcher {
+	return &Watcher{
+		log:  hlog.Discard(),
+		what: "fixed",
+		ask:  func() (bool, error) { return fullscreen, nil },
+	}
+}
+
 // Mechanism names how the question is being answered ("sway", "hyprland",
 // "none").
 func (w *Watcher) Mechanism() string { return w.what }

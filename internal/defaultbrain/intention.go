@@ -34,6 +34,30 @@ const intentionTag = "intention:"
 // never shown to anybody.
 func remindName(n int) string { return fmt.Sprintf("%serrand-%d", KeyPrefix, n) }
 
+// errandKeyPrefix remembers what each name was actually about.
+//
+// The names are private and the person only ever knows the words they said,
+// so this is what lets them say "never mind about the thesis" and have it
+// reach the right one. It is also why the counter is restored at boot:
+// a goal is meant to be held for months across a great many restarts, and a
+// counter that started at zero every morning would silently replace
+// yesterday's goal with today's errand.
+const errandKeyPrefix = KeyPrefix + "errand/"
+
+// restoreErrands reads back what this brain was carrying, at boot.
+func (b *Brain) restoreErrands(kv map[string]string) {
+	for k, v := range kv {
+		name, ok := strings.CutPrefix(k, errandKeyPrefix)
+		if !ok || v == "" {
+			continue
+		}
+		b.errandTexts[KeyPrefix+name] = v
+		if n, err := strconv.Atoi(strings.TrimPrefix(name, "errand-")); err == nil && n > b.errands {
+			b.errands = n
+		}
+	}
+}
+
 // onRemind handles "remind me [in <when>] to <what>". Reports whether the
 // text was one.
 func (b *Brain) onRemind(text string, emit *brainkit.Emitter) bool {
@@ -53,7 +77,13 @@ func (b *Brain) onRemind(text string, emit *brainkit.Emitter) bool {
 	}
 
 	b.errands++
-	emit.Intend(remindName(b.errands), what, int(delay/time.Millisecond))
+	name := remindName(b.errands)
+	emit.Intend(name, what, int(delay/time.Millisecond))
+	// What it was about, under its own name, so "never mind about that" has
+	// something to match against later. The driver holds the intention; this
+	// is only the brain's index into it.
+	b.errandTexts[name] = what
+	emit.Remember(errandKeyPrefix+strings.TrimPrefix(name, KeyPrefix), what)
 	switch {
 	case delay > 0:
 		emit.SayFor("All right — I'll remind you "+plainly(delay)+".", lingerNote)
@@ -65,6 +95,63 @@ func (b *Brain) onRemind(text string, emit *brainkit.Emitter) bool {
 		emit.SayFor("I'll keep that in mind and bring it up.", lingerNote)
 	}
 	return true
+}
+
+// onNeverMind is the other exit: the person has stopped caring whether this
+// happens, which is not the same as it having been done.
+//
+// It exists because the worst thing a goal can do is outlive the wanting of
+// it. A ghost still asking about a thesis that was submitted in March is
+// the thing you close, and people punish that far harder than they punish
+// silence — so giving up has to be as easy to say as taking it on was, and
+// has to be recorded as giving up rather than as success.
+//
+// Matched on the person's own words, because the names are the driver's and
+// nobody has ever seen one.
+func (b *Brain) onNeverMind(text string, emit *brainkit.Emitter) bool {
+	var subject string
+	for _, opener := range []string{
+		"stop asking about ", "stop asking me about ", "never mind about ",
+		"never mind the ", "forget about ", "let go of ",
+	} {
+		if rest, ok := cutPrefixFold(text, opener); ok {
+			subject = strings.TrimSpace(rest)
+			break
+		}
+	}
+	if subject == "" {
+		return false
+	}
+	name, what := b.errandNamed(subject)
+	if name == "" {
+		emit.SayFor("I don't think I'm holding anything about that.", lingerNote)
+		return true
+	}
+	emit.SetAside(name)
+	delete(b.errandTexts, name)
+	emit.Remember(errandKeyPrefix+strings.TrimPrefix(name, KeyPrefix), "")
+	emit.SayFor("All right — I'll stop bringing up "+what+".", lingerNote)
+	return true
+}
+
+// errandNamed finds what the person meant, by the words they used. Longest
+// match wins, so "the thesis chapter" picks the chapter rather than
+// whichever of the two the map happened to yield first.
+func (b *Brain) errandNamed(subject string) (name, what string) {
+	subject = strings.ToLower(strings.TrimSpace(subject))
+	if subject == "" {
+		return "", ""
+	}
+	for n, t := range b.errandTexts {
+		lower := strings.ToLower(t)
+		if !strings.Contains(lower, subject) && !strings.Contains(subject, lower) {
+			continue
+		}
+		if what == "" || len(t) > len(what) {
+			name, what = n, t
+		}
+	}
+	return name, what
 }
 
 // onIntentionDue is a standing intention reaching its moment. It is said

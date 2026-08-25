@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -340,4 +342,50 @@ func TestReembedStopsOnBackendFailure(t *testing.T) {
 	if len(mems) != 1 || mems[0].Text != "keep me" || mems[0].Model != "old" {
 		t.Errorf("failed re-embedding damaged the index: %+v", mems)
 	}
+}
+
+// The generated-image cache belongs beside the database, not in /tmp.
+// openStore used to compute the cache directory from Options.StateDir while
+// the database went to the *resolved* directory, and those differ on every
+// ordinary run — where the option is empty. So a default install put
+// state.db under XDG and threw the images away on reboot, which quietly
+// undid the built-in brain reusing a stored prompt so that asking twice for
+// the same picture costs one generation.
+func TestCacheSitsBesideTheStore(t *testing.T) {
+	t.Run("explicit state directory", func(t *testing.T) {
+		dir := t.TempDir()
+		g := &Ghost{
+			manifest: &Manifest{Ghost: GhostSection{Name: "wisp"}},
+			opts:     Options{StateDir: dir, Store: &memStore{m: map[string]string{}}},
+		}
+		if err := g.openStore(); err != nil {
+			t.Fatal(err)
+		}
+		if want := filepath.Join(dir, "cache"); g.cacheDir != want {
+			t.Errorf("cacheDir = %q, want %q", g.cacheDir, want)
+		}
+	})
+
+	// The case that was broken: no state directory given, which is what
+	// `haunt run` does.
+	t.Run("resolved from XDG", func(t *testing.T) {
+		root := t.TempDir()
+		t.Setenv("XDG_DATA_HOME", root)
+		g := &Ghost{
+			manifest: &Manifest{Ghost: GhostSection{Name: "wisp"}},
+			opts:     Options{Store: &memStore{m: map[string]string{}}},
+		}
+		if err := g.openStore(); err != nil {
+			t.Fatal(err)
+		}
+		want := filepath.Join(root, "haunt", "ghosts", "wisp", "cache")
+		if g.cacheDir != want {
+			t.Errorf("cacheDir = %q, want it beside state.db at %q", g.cacheDir, want)
+		}
+		// Specifically not the shape the bug produced, which ignored the
+		// resolved directory entirely and named the ghost in a temp path.
+		if strings.Contains(g.cacheDir, "haunt-cache-") {
+			t.Errorf("cacheDir = %q: the throwaway temp path, not the state directory", g.cacheDir)
+		}
+	})
 }

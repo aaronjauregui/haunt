@@ -48,6 +48,13 @@ import (
 //   - A brain, through the `act` intent, when it wants a specific thing
 //     done at a specific moment rather than whatever the model decides.
 //
+// A third caller reads rather than acts: a `[[trigger]]` with a tool on it,
+// which the driver calls on a schedule nobody is watching (poll.go). It
+// comes through the same permission and the same allowance, and it is the
+// one call that leaves none of the three marks — the reasons are on
+// toolCall.scheduled, and they are about the marks being for acting rather
+// than about polls being exempt from being honest.
+//
 // Neither of them holds a credential or spawns a process. The driver runs
 // the servers, exactly as it holds the API keys, and for the same reason: a
 // brain is a sandboxed WASM module that a person downloaded.
@@ -332,7 +339,13 @@ func (g *Ghost) toolGranted(ref toolRef) bool {
 // ensureTool settles whether this tool may run now, asking if it has to.
 // Blocks while the question is on screen, so it is called off the intent
 // loop and outside the AI lock, like every other question.
-func (g *Ghost) ensureTool(e toolEntry) bool {
+//
+// scheduled changes the words and nothing else. A poll is consented to on
+// the same terms as any other tool call, and the person deserves to be told
+// which of the two they are answering about: "would like to use" is about
+// the thing happening now, and a manifest trigger is about a thing that
+// will keep happening (see poll.go).
+func (g *Ghost) ensureTool(e toolEntry, scheduled bool) bool {
 	if g.toolGranted(e.ref) {
 		return true
 	}
@@ -345,6 +358,10 @@ func (g *Ghost) ensureTool(e toolEntry) bool {
 	// a balloon is not a manual.
 	what := summaryLine(e.tool.Description)
 	question := g.manifest.Ghost.Name + " would like to use " + e.ref.String()
+	if scheduled {
+		question = g.manifest.Ghost.Name + " would like to check " + e.ref.String() +
+			" on a schedule, without being asked each time"
+	}
 	if what != "" {
 		question += " — " + what
 	}
@@ -380,16 +397,50 @@ type acted struct {
 	Failed bool
 }
 
-// runTool is the whole of doing one thing: permission, allowance, the three
-// visible marks, and the call itself. Every path that acts goes through it,
-// which is what makes "acting is visibly different from talking" a property
-// of the driver rather than a habit of whichever brain happens to be
-// running.
+// toolCall is one thing to do, and the terms it is done on. The fields
+// past the first two are the differences between the two kinds of caller —
+// something the ghost is doing now, in front of somebody, and a manifest
+// trigger's poll happening on its own schedule.
+type toolCall struct {
+	ref  toolRef
+	args json.RawMessage
+	// wait is what the ghost says while it works, in the character's own
+	// words. Empty gets the driver's.
+	wait string
+	// scheduled says this is a manifest trigger's poll rather than
+	// something decided just now, which changes the consent question and
+	// takes the three visible marks off.
+	//
+	// The marks come off because they are for acting and this is reading:
+	// a balloon line and a journal entry every fifteen minutes would be
+	// noise the person turns off, and journal entries ride into every
+	// prompt, so a calendar poll would slowly replace what the ghost
+	// actually concluded with what it read. What stands in their place is
+	// not nothing — the trigger is written in the manifest the person
+	// installed, the tool is consented to by name in a question that says
+	// it is scheduled, and every poll is logged. See poll.go.
+	scheduled bool
+}
+
+// runTool is one thing done in front of somebody: permission, allowance,
+// the three visible marks, and the call itself. Every path that acts goes
+// through it, which is what makes "acting is visibly different from
+// talking" a property of the driver rather than a habit of whichever brain
+// happens to be running.
 //
 // It does not gate initiative; its callers do, because whether an action
 // was provoked is a question about the moment the request arrived and not
 // about the moment a tool server gets round to it.
 func (g *Ghost) runTool(ref toolRef, args json.RawMessage, wait string) acted {
+	return g.callTool(toolCall{ref: ref, args: args, wait: wait})
+}
+
+// callTool is runTool and the scheduled poll behind one set of gates.
+// Permission, the allowance and the call itself are the same for both, and
+// deliberately so: a poll is a tool call, spends the user's tool budget
+// like one, and is refused by the same "never" as one.
+func (g *Ghost) callTool(c toolCall) acted {
+	ref, args := c.ref, c.args
 	e, known := g.lookupTool(ref)
 	if !known {
 		// Distinguishing "the manifest never declared it" from "the server
@@ -398,7 +449,7 @@ func (g *Ghost) runTool(ref toolRef, args json.RawMessage, wait string) acted {
 		// try again.
 		return acted{Text: "there is no tool called " + ref.String(), Refused: true}
 	}
-	if !g.ensureTool(e) {
+	if !g.ensureTool(e, c.scheduled) {
 		return acted{Text: "not allowed to use " + ref.String(), Refused: true}
 	}
 	// The allowance is the driver's, and there is no acting without one:
@@ -412,26 +463,31 @@ func (g *Ghost) runTool(ref toolRef, args json.RawMessage, wait string) acted {
 		return acted{Text: err.Error(), Refused: true}
 	}
 
-	// The face, first of the three marks. Remembered and put back
-	// afterwards, which is the one place in the driver that returns a face
-	// to where it found it: a pose worn *for the duration of something* has
-	// an end, unlike the ones that stand until the next line.
-	restore := g.wearWorking()
-	defer restore()
+	var indicator *waiter
+	if !c.scheduled {
+		// The face, first of the three marks. Remembered and put back
+		// afterwards, which is the one place in the driver that returns a
+		// face to where it found it: a pose worn *for the duration of
+		// something* has an end, unlike the ones that stand until the next
+		// line.
+		defer g.wearWorking()()
 
-	// The balloon, second mark, while it works. The words are the brain's
-	// when it supplied any and the driver's otherwise, exactly as for a
-	// slow model.
-	if wait == "" {
-		wait = "(" + ref.String() + "…)"
+		// The balloon, second mark, while it works. The words are the
+		// brain's when it supplied any and the driver's otherwise, exactly
+		// as for a slow model.
+		wait := c.wait
+		if wait == "" {
+			wait = "(" + ref.String() + "…)"
+		}
+		indicator = g.startWaiting(wait)
 	}
-	waiter := g.startWaiting(wait)
 
 	ctx, cancel := context.WithTimeout(g.sessionContext(), g.aiSvc.ToolTimeout())
 	defer cancel()
 	g.log.Info(hlog.Tool, "running %s", ref)
 	res, err := e.server.Call(ctx, e.tool.Name, args)
-	waiter.Stop()
+	// Nil and a no-op for a poll, which never put one up.
+	indicator.Stop()
 
 	out := acted{}
 	switch {
@@ -440,11 +496,21 @@ func (g *Ghost) runTool(ref toolRef, args json.RawMessage, wait string) acted {
 		out = acted{Text: err.Error(), Failed: true}
 	default:
 		out = acted{Text: res.Text, Failed: res.IsError}
-		if out.Text == "" {
+		if out.Text == "" && !c.scheduled {
+			// Something has to go back to whoever is waiting. A poll is
+			// nobody waiting, and an empty answer is a real answer there —
+			// a calendar with nothing on it — so it stays empty rather than
+			// becoming a sentence for a ghost to repeat.
 			out.Text = "(it did not say anything)"
 		}
 	}
 
+	if c.scheduled {
+		// Nothing on screen, nothing in the journal, nothing to the
+		// neighbours. What happened is that the ghost read something; what
+		// it does about it is where the marks belong.
+		return out
+	}
 	// The balloon again, and this is the mark that matters: what it did,
 	// after it did it, whether or not anybody was watching while it ran.
 	g.noticeAct(ref, out.Failed)

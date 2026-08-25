@@ -152,6 +152,11 @@ func (g *Ghost) watchWindows() {
 		// stretch is noticed by nothing happening.
 		now := time.Now()
 		g.noteWindow(win.AppID, win.Title)
+		// The one thing about this window that outlives the hour the
+		// session model keeps, and only if the person named it themselves:
+		// that a goal they stated was in front of them, and when. Nothing
+		// about the window itself is written down (see goal.go).
+		g.noteGoalSighting(win.AppID, win.Title, now)
 		g.sessMu.Lock()
 		noticed := facts.Observe(win.AppID, win.Title, now)
 		g.sessMu.Unlock()

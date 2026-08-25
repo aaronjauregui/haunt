@@ -2,17 +2,11 @@ package ghost
 
 import (
 	"encoding/json"
-	"fmt"
-	"os"
 	"sync"
 	"time"
 
-	"github.com/BurntSushi/toml"
-
 	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/proto"
-	"github.com/aaronjauregui/haunt/internal/quiet"
-	"github.com/aaronjauregui/haunt/internal/session"
 )
 
 // Initiative: the ghost acting without being addressed. The journal and the
@@ -42,187 +36,25 @@ const (
 	promptedWindow = 60 * time.Second
 	// initiativeWindow is how long a paid-for chain may keep acting.
 	initiativeWindow = 60 * time.Second
+	// obligationWindow is how long after an obligation comes due the ghost
+	// is still discharging it. As generous as promptedWindow and for the
+	// same reason: a slow local model can take tens of seconds, and a
+	// reminder that arrives after its window closed would be charged to
+	// the ghost's whims and dropped when those ran out.
+	obligationWindow = 60 * time.Second
 	// bootWindow is the much shorter grace after launch. Starting a ghost
 	// invites a greeting, not a minute of free unprompted chatter, so boot
 	// opens the response window only long enough for the brain to say
 	// hello.
 	bootWindow = 2 * time.Second
-	// defaultActionsPerDay is roughly one unprompted remark every couple
-	// of waking hours: present, not pestering.
-	defaultActionsPerDay = 12
 	// curiosityKey persists spends so restarting the ghost does not refill
 	// the allowance.
 	curiosityKey = internalKeyPrefix + "curiosity"
 	// sleepKey persists the consolidation allowance, for the same reason.
 	sleepKey = internalKeyPrefix + "sleep"
+	// obligationKey persists the obligation allowance, likewise.
+	obligationKey = internalKeyPrefix + "obligation"
 )
-
-// AnimationConfig is the [animation] portion of the user config.
-type AnimationConfig struct {
-	// ReducedMotion stops idle animation — blinking, breathing, anything on
-	// an automatic trigger. Clips a brain asks for still play: those are the
-	// ghost saying something, and a companion that ignores its own brain is
-	// broken rather than considerate.
-	ReducedMotion bool `toml:"reduced_motion"`
-}
-
-// loadAnimationConfig reads [animation] from the user config file.
-func loadAnimationConfig() (AnimationConfig, error) {
-	path, err := quiet.ConfigPath()
-	if err != nil {
-		return AnimationConfig{}, err
-	}
-	var root struct {
-		Animation AnimationConfig `toml:"animation"`
-	}
-	data, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return AnimationConfig{}, err
-	}
-	if err == nil {
-		if err := toml.Unmarshal(data, &root); err != nil {
-			return AnimationConfig{}, fmt.Errorf("parsing %s: %w", path, err)
-		}
-	}
-	return root.Animation, nil
-}
-
-// AwarenessConfig is the [awareness] portion of the user config: what the
-// ghost is allowed to notice about your screen.
-type AwarenessConfig struct {
-	// Ignore lists applications never to report, matched case-insensitively
-	// by substring. Password managers and banking belong here, and the
-	// defaults cover the obvious ones so the careless case is not the
-	// dangerous one.
-	Ignore []string `toml:"ignore"`
-	// Dwell is how long in one window before the ghost may remark on it
-	// ("25m" by default). One of three thresholds people actually want to
-	// tune: this is the difference between a companion that notices you are
-	// stuck and one that interrupts you while you are working. The session
-	// model's remaining thresholds are fixed.
-	Dwell string `toml:"dwell"`
-	// Away is how long a gap counts as having been away from the machine,
-	// so coming back is worth remarking on ("90m" by default).
-	Away string `toml:"away"`
-	// LateHour is the hour after which still working is itself worth
-	// noticing, in local time (23 by default), running until the small
-	// hours of the next morning. Negative switches the shape off, which is
-	// the setting for people whose day starts at eleven at night.
-	LateHour *int `toml:"late_hour"`
-
-	// Session is the parsed form of the above, filled in at load.
-	Session session.Config `toml:"-"`
-}
-
-// defaultIgnoredApps are never watched unless the user replaces the list.
-var defaultIgnoredApps = []string{
-	"1password", "bitwarden", "keepass", "gnome-keyring", "seahorse",
-	"polkit", "pinentry", "gnome-disks", "banking",
-}
-
-// loadAwarenessConfig reads [awareness] from the user config file.
-func loadAwarenessConfig() (AwarenessConfig, error) {
-	path, err := quiet.ConfigPath()
-	if err != nil {
-		return AwarenessConfig{}, err
-	}
-	var root struct {
-		Awareness AwarenessConfig `toml:"awareness"`
-	}
-	data, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return AwarenessConfig{}, err
-	}
-	if err == nil {
-		if err := toml.Unmarshal(data, &root); err != nil {
-			return AwarenessConfig{}, fmt.Errorf("parsing %s: %w", path, err)
-		}
-	}
-	cfg := root.Awareness
-	if cfg.Ignore == nil {
-		cfg.Ignore = defaultIgnoredApps
-	}
-	if cfg.Dwell != "" {
-		d, err := time.ParseDuration(cfg.Dwell)
-		if err != nil {
-			return AwarenessConfig{}, fmt.Errorf("parsing %s: [awareness] dwell %q: %w", path, cfg.Dwell, err)
-		}
-		cfg.Session.Dwell = d
-	}
-	if cfg.Away != "" {
-		d, err := time.ParseDuration(cfg.Away)
-		if err != nil {
-			return AwarenessConfig{}, fmt.Errorf("parsing %s: [awareness] away %q: %w", path, cfg.Away, err)
-		}
-		cfg.Session.AwayLong = d
-	}
-	if cfg.LateHour != nil {
-		h := *cfg.LateHour
-		if h > 23 || (h >= 0 && h < session.EarliestLateHour) {
-			return AwarenessConfig{}, fmt.Errorf(
-				"parsing %s: [awareness] late_hour %d: use %d-23, or a negative number to switch it off — "+
-					"late runs until the small hours, so anything earlier would make the whole day late",
-				path, h, session.EarliestLateHour)
-		}
-		cfg.Session.LateHour = h
-	}
-	return cfg, nil
-}
-
-// CuriosityConfig is the [curiosity] portion of the user config. It is the
-// user's dial, not the ghost's: a ghost declares no allowance and cannot
-// raise one.
-type CuriosityConfig struct {
-	// ActionsPerDay caps unprompted actions in any rolling 24 hours. Zero
-	// disables initiative entirely; absent means defaultActionsPerDay.
-	ActionsPerDay *int `toml:"actions_per_day"`
-	// ActionsPerDayTotal caps unprompted actions across every resident
-	// ghost together. Absent means the ceiling is derived from the number
-	// of ghosts in the room (see internal/troupe); it is here for the user
-	// who wants to say "however many of you there are, twenty a day".
-	ActionsPerDayTotal *int `toml:"actions_per_day_total"`
-}
-
-// Curiosity reports the user's [curiosity] settings: the per-ghost daily
-// allowance, and the explicit ceiling for the room if they set one (-1 when
-// they did not). The supervisor needs the second and the ghost needs the
-// first, and neither should be parsing the config file a second time.
-func Curiosity() (perGhost, room int, err error) {
-	cfg, err := curiosityConfig()
-	if err != nil {
-		return 0, 0, err
-	}
-	perGhost = defaultActionsPerDay
-	if cfg.ActionsPerDay != nil {
-		perGhost = *cfg.ActionsPerDay
-	}
-	room = -1
-	if cfg.ActionsPerDayTotal != nil {
-		room = *cfg.ActionsPerDayTotal
-	}
-	return perGhost, room, nil
-}
-
-// curiosityConfig reads [curiosity] from the user config file.
-func curiosityConfig() (CuriosityConfig, error) {
-	path, err := quiet.ConfigPath()
-	if err != nil {
-		return CuriosityConfig{}, err
-	}
-	var root struct {
-		Curiosity CuriosityConfig `toml:"curiosity"`
-	}
-	data, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return CuriosityConfig{}, err
-	}
-	if err == nil {
-		if err := toml.Unmarshal(data, &root); err != nil {
-			return CuriosityConfig{}, fmt.Errorf("parsing %s: %w", path, err)
-		}
-	}
-	return root.Curiosity, nil
-}
 
 // allowance is a persisted daily ration of things the user did not ask
 // for. Two exist: unprompted actions (the curiosity budget) and
@@ -249,6 +81,12 @@ func newAllowance(key string, limit int, store Store, log *hlog.Logger, topic hl
 // newCuriosity is the allowance that rations interruptions.
 func newCuriosity(limit int, store Store, log *hlog.Logger) *allowance {
 	return newAllowance(curiosityKey, limit, store, log, hlog.Curiosity)
+}
+
+// newObligation is the allowance for things a person put on the ghost's
+// books. See markObliged for what separates it from curiosity.
+func newObligation(limit int, store Store, log *hlog.Logger) *allowance {
+	return newAllowance(obligationKey, limit, store, log, hlog.Curiosity)
 }
 
 func (c *allowance) load() {
@@ -338,17 +176,75 @@ func (g *Ghost) markPromptedFor(d time.Duration) {
 	}
 }
 
-// endResponding closes both windows. Going idle means nobody is waiting on
-// the ghost any more, whatever they last said, and that any chain it was
-// working through is finished. Each idle is therefore a fresh occasion the
-// ghost must pay for — without this, an idle threshold shorter than these
-// windows would hand it free chatter, which is precisely the chatter the
-// allowance exists to ration.
+// Obligations, and why they are not curiosity.
+//
+// The daily allowance rations the ghost's *whims*: twelve a day is tuned
+// for "nice weather today", and it is persisted so that restarting is not a
+// way to refill it. A reminder the person asked for is not a whim, and used
+// to come out of the same twelve — so "remind me in ten minutes to take the
+// pizza out" competed with small talk and was dropped outright once the
+// small talk had won. The intention was not lost, because discharge is
+// deliberate and it stayed on the books, but it was silenced, which is the
+// failure mode the top of intention.go says the whole type exists to avoid.
+//
+// So there is a second allowance, and the line between them is **who
+// decided**: the ghost choosing to speak is curiosity, and the ghost
+// discharging something a person put on its books is an obligation.
+//
+// That line is checkable, which "chores versus spontaneity" never would
+// have been. There are exactly two ways to put something on the books, and
+// a brain can forge neither:
+//
+//   - An intention taken on while the person was talking to the ghost.
+//     Whether they were is answered by respondingToUser at the moment the
+//     intention is created, driver-side, and recorded on the intention
+//     itself (Intention.Asked). A brain that invents an errand for itself
+//     while nobody is there gets an ordinary one, charged to curiosity, and
+//     cannot say otherwise.
+//   - A trigger in the manifest, which the author declared and the person
+//     accepted when they installed the ghost.
+//
+// Without the first of those the hole is obvious: a brain could intend
+// something a millisecond out, over and over, and mint obligations until
+// the user's own reminders had nothing left to spend.
+
+// markObliged opens the window in which the ghost is discharging something
+// it was asked to do, rather than saying something it thought of.
+func (g *Ghost) markObliged() {
+	g.initMu.Lock()
+	defer g.initMu.Unlock()
+	if until := time.Now().Add(obligationWindow); until.After(g.obligedUntil) {
+		g.obligedUntil = until
+	}
+}
+
+// obliged reports whether the ghost is inside that window.
+func (g *Ghost) obliged() bool {
+	g.initMu.Lock()
+	defer g.initMu.Unlock()
+	return time.Now().Before(g.obligedUntil)
+}
+
+// endResponding closes all three windows. Going idle means nobody is
+// waiting on the ghost any more, whatever they last said, and that any
+// chain it was working through is finished. Each idle is therefore a fresh
+// occasion the ghost must pay for — without this, an idle threshold shorter
+// than these windows would hand it free chatter, which is precisely the
+// chatter the allowance exists to ration.
+//
+// The obligation window goes with them, and for the same reason. An
+// intention that came due a moment before the person went idle would
+// otherwise leave the window open across the idle event, and the remark the
+// ghost then makes about nothing in particular would be charged to their
+// reminders. The cost of being wrong this way round is small: an obligation
+// caught by an idle that raced it falls back to curiosity rather than being
+// dropped, and the intention stays on the books unresolved either way.
 func (g *Ghost) endResponding() {
 	g.initMu.Lock()
 	defer g.initMu.Unlock()
 	g.promptedUntil = time.Time{}
 	g.initiativeUntil = time.Time{}
+	g.obligedUntil = time.Time{}
 }
 
 // responding reports whether the ghost is inside a window where acting is a
@@ -395,6 +291,28 @@ func (g *Ghost) allowInitiative(what string) bool {
 	if g.desktop != nil && g.desktop.Fullscreen() {
 		g.log.Debug(hlog.Curiosity, "initiative: %s dropped (something is fullscreen)", what)
 		return false
+	}
+	// An obligation the person put on the books, rather than something the
+	// ghost thought of. Its own allowance, and deliberately not subject to
+	// the household ceiling below: that ceiling exists because three ghosts
+	// each politely within their own curiosity still add up to three times
+	// the interruptions, which is an argument about whims. Three ghosts
+	// holding reminders you set them are three sets of reminders you asked
+	// for, and letting one ghost's errand eat another's would make the
+	// ceiling a lottery over things the person is waiting on.
+	if g.obliged() {
+		if g.obligation == nil || g.obligation.limit <= 0 {
+			g.log.Debug(hlog.Curiosity, "obligation: %s dropped (obligations disabled)", what)
+			return false
+		}
+		ok, remaining := g.obligation.spend()
+		if !ok {
+			g.log.Debug(hlog.Curiosity, "obligation: %s dropped (daily obligations spent)", what)
+			return false
+		}
+		g.openInitiative()
+		g.log.Debug(hlog.Curiosity, "obligation: %s (%d left today)", what, remaining)
+		return true
 	}
 	if g.curiosity == nil || g.curiosity.limit <= 0 {
 		g.log.Debug(hlog.Curiosity, "initiative: %s dropped (curiosity disabled)", what)

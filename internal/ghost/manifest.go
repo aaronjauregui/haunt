@@ -8,6 +8,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/aaronjauregui/haunt/internal/proto"
 	"github.com/aaronjauregui/haunt/internal/shell"
 )
 
@@ -69,11 +70,51 @@ type ToolSection struct {
 
 // TriggerSection is a scheduled event: at each cron time, an EventCron with
 // the given name reaches the brain.
+//
+// With Tool set it is a poll rather than an occasion: the driver calls the
+// tool on schedule and delivers what it said as the event's Text. That one
+// field is the whole of haunt's integration story — Home Assistant is an
+// MCP server and a trigger line, Nextcloud is an MCP server and a trigger
+// line, and whatever you use next year is an MCP server and a trigger line.
+// See poll.go for what the driver does with it and why a poll never speaks.
 type TriggerSection struct {
 	// Cron is a standard 5-field cron expression (minute granularity).
 	Cron string `toml:"cron"`
 	// Name identifies the trigger in the delivered event.
 	Name string `toml:"name"`
+	// Tool is what to call on schedule, in the "server.tool" form
+	// everything else spells tools — the server as this manifest named it,
+	// and the tool as the server calls itself. Empty makes this an
+	// occasion, which is the original meaning of a trigger: a name and a
+	// time, with the brain finding the words.
+	//
+	// Declaring one is not permission to run it. The `tools` capability is
+	// the standing question, the individual tool is consented to like any
+	// other, and the question a poll asks says out loud that it is asking
+	// about something that will happen on a schedule rather than about
+	// something happening now.
+	Tool string `toml:"tool"`
+	// Args is the argument object handed to the tool, unchanged, on every
+	// poll. Written inline in the manifest — `args = { within = "2h" }` —
+	// because a poll asks the same question every time; anything that has
+	// to vary is a thing the model should be asking for during a
+	// conversation, not a schedule.
+	Args map[string]any `toml:"args"`
+	// QuietWhen makes this a presence poll: when the tool's answer contains
+	// this text, the driver treats the house as empty and keeps quiet until
+	// an answer that does not.
+	//
+	// The vocabulary is here rather than in the driver on purpose. Every
+	// presence server words it differently — "not_home", "away", "false" —
+	// and a driver that knew any of those words would have an integration
+	// in it, which is the one thing this direction is built to avoid. So
+	// the manifest carries the vendor's word and the driver carries none.
+	//
+	// A presence poll's answer is not delivered to the brain: what it is
+	// for is deciding whether anybody should be talking at all, and a poll
+	// that also produced remarks would be the ghost narrating your front
+	// door.
+	QuietWhen string `toml:"quiet_when"`
 }
 
 // KnownCapabilities are the capabilities a manifest may request. Unknown
@@ -155,11 +196,6 @@ func LoadManifest(dir string) (*Manifest, error) {
 	if hasCmd && !hasCapability(&m, "native-brain") {
 		return nil, fmt.Errorf("%s: brain.command requires the native-brain capability", path)
 	}
-	for i, tr := range m.Triggers {
-		if tr.Cron == "" || tr.Name == "" {
-			return nil, fmt.Errorf("%s: trigger %d needs both cron and name", path, i)
-		}
-	}
 	for _, c := range m.Ghost.Capabilities {
 		if _, ok := KnownCapabilities[c]; !ok {
 			return nil, fmt.Errorf("%s: unknown capability %q", path, c)
@@ -186,6 +222,33 @@ func LoadManifest(dir string) (*Manifest, error) {
 	// that can never act, which is more likely a mistake than an intention.
 	if len(m.Tools) > 0 && !hasCapability(&m, "tools") {
 		return nil, fmt.Errorf("%s: [[tool]] servers are declared but the tools capability is not requested", path)
+	}
+
+	// Triggers, after the servers, because a trigger that polls a tool is
+	// checked against the servers this manifest declares: a typo in a
+	// scheduled call would otherwise be a thing that silently never
+	// happens, discovered — if ever — in a log.
+	for i, tr := range m.Triggers {
+		if tr.Cron == "" || tr.Name == "" {
+			return nil, fmt.Errorf("%s: trigger %d needs both cron and name", path, i)
+		}
+		if tr.Tool == "" {
+			switch {
+			case len(tr.Args) > 0:
+				return nil, fmt.Errorf("%s: trigger %q has args but no tool to give them to", path, tr.Name)
+			case tr.QuietWhen != "":
+				return nil, fmt.Errorf("%s: trigger %q has quiet_when but no tool to ask", path, tr.Name)
+			}
+			continue
+		}
+		if err := proto.ValidToolName(tr.Tool); err != nil {
+			return nil, fmt.Errorf("%s: trigger %q: %w", path, tr.Name, err)
+		}
+		server, _, _ := strings.Cut(tr.Tool, ".")
+		if !seenTool[server] {
+			return nil, fmt.Errorf("%s: trigger %q polls %s, but no [[tool]] server named %q is declared",
+				path, tr.Name, tr.Tool, server)
+		}
 	}
 	rels := []string{m.Brain.Wasm, m.Shell.Sprite}
 	if hasCmd {

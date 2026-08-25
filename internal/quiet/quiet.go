@@ -1,6 +1,11 @@
 // Package quiet implements do-not-disturb: recurring quiet-hours windows
-// from the user config plus a manual shush with expiry. The driver consults
-// it before showing balloons; ghosts cannot override it.
+// plus a manual shush with expiry. The driver consults it before showing
+// balloons; ghosts cannot override it.
+//
+// The [quiet] section is read for it by internal/config, which owns the
+// config file; New takes the parsed section. Package quiet deliberately
+// does no file reading of its own beyond the shush marker, which is
+// runtime state rather than configuration.
 package quiet
 
 import (
@@ -9,9 +14,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
-
-	"github.com/BurntSushi/toml"
 
 	"github.com/aaronjauregui/haunt/internal/control"
 )
@@ -30,49 +34,57 @@ type Checker struct {
 	// shushFile holds a manual-mute expiry (RFC3339) when present.
 	shushFile string
 	now       func() time.Time
+
+	// mu guards awayUntil, which is the one thing here that changes while
+	// the ghost runs: everything else is settled from config at startup and
+	// read from a great many goroutines.
+	mu sync.Mutex
+	// awayUntil is how long the house is believed to be empty. Set by a
+	// presence poll, if the ghost has one (see notePresence in
+	// internal/ghost/poll.go), and never by anything else — the driver
+	// knows no vendor's word for "away" and holds only a deadline.
+	//
+	// A deadline rather than a flag, so that quiet decays back to talking
+	// on its own. A machine that stops polling is the ordinary case — a
+	// laptop asleep, a server gone — and a ghost left mute for good on the
+	// strength of one reading is the failure people uninstall over.
+	awayUntil time.Time
 }
 
-// ConfigPath returns the user config file location.
-func ConfigPath() (string, error) {
-	if dir := os.Getenv("HAUNT_CONFIG_DIR"); dir != "" {
-		return filepath.Join(dir, "config.toml"), nil
+// Away says nobody is home until t, and reports whether that is news. It is
+// advice from a presence poll, not a command from a brain: a ghost cannot
+// silence itself, because being able to would make quiet hours negotiable.
+func (c *Checker) Away(t time.Time) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	was := c.awayUntil.After(c.now())
+	if t.After(c.awayUntil) {
+		c.awayUntil = t
 	}
-	base := os.Getenv("XDG_CONFIG_HOME")
-	if base == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		base = filepath.Join(home, ".config")
-	}
-	return filepath.Join(base, "haunt", "config.toml"), nil
+	return !was
+}
+
+// Home says somebody is there after all, and reports whether that is news.
+// Immediate, unlike going away, which expires: the reading that says the
+// house is occupied is the one it is safe to believe at once.
+func (c *Checker) Home() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	was := c.awayUntil.After(c.now())
+	c.awayUntil = time.Time{}
+	return was
+}
+
+func (c *Checker) away() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.awayUntil.After(c.now())
 }
 
 // ShushPath is the manual-mute marker file, in the runtime dir so it clears
 // on reboot.
 func ShushPath() string {
 	return filepath.Join(control.SocketDir(), "shush")
-}
-
-// Load builds a Checker from the user config (missing file = no windows).
-func Load() (*Checker, error) {
-	path, err := ConfigPath()
-	if err != nil {
-		return nil, err
-	}
-	var root struct {
-		Quiet Config `toml:"quiet"`
-	}
-	data, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return nil, err
-	}
-	if err == nil {
-		if err := toml.Unmarshal(data, &root); err != nil {
-			return nil, fmt.Errorf("parsing %s: %w", path, err)
-		}
-	}
-	return New(root.Quiet)
 }
 
 // New builds a Checker from explicit config.
@@ -121,6 +133,9 @@ func parseHHMM(s string) (int, error) {
 func (c *Checker) Active() (bool, string) {
 	if until, ok := c.shushedUntil(); ok {
 		return true, "shushed until " + until.Format("15:04")
+	}
+	if c.away() {
+		return true, "nobody is home"
 	}
 	now := c.now()
 	minutes := now.Hour()*60 + now.Minute()
