@@ -214,8 +214,7 @@ func TestConsolidationStopsWhenTheAllowanceIsGone(t *testing.T) {
 	for _, m := range g.loadMemories() {
 		if m.Folded {
 			m.Folded = false
-			entry, _ := json.Marshal(m)
-			s.Set(m.key, string(entry))
+			g.putMemory(m)
 		}
 	}
 	if err := g.consolidate(context.Background()); err == nil {

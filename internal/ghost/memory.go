@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"math"
 	"sort"
@@ -252,25 +251,20 @@ func (g *Ghost) remember(kind, text string) {
 		g.log.Warn(hlog.Memory, "embedding failed: %v", err)
 		return
 	}
-	entry, err := json.Marshal(memory{
+	key, cursor := g.allocMemorySlot()
+	if err := g.putMemory(memory{
 		Time:  time.Now(),
 		Kind:  kind,
 		Text:  text,
 		Vec:   encodeVec(vec),
 		Model: g.aiSvc.EmbedModel(),
-	})
-	if err != nil {
-		return
-	}
-	key, cursor := g.allocMemorySlot()
-	if err := g.store.Set(key, string(entry)); err != nil {
+		key:   key,
+	}); err != nil {
 		g.log.Warn(hlog.Memory, "storing: %v", err)
 		return
 	}
 	if cursor >= 0 {
-		if err := g.store.Set(memCursorKey, strconv.Itoa(cursor)); err != nil {
-			g.log.Warn(hlog.Memory, "cursor: %v", err)
-		}
+		g.setMemoryCursor(cursor)
 	}
 }
 
@@ -303,15 +297,11 @@ func (g *Ghost) allocMemorySlot() (key string, cursor int) {
 
 // nextMemorySlot returns the next unused slot while the index is filling.
 func (g *Ghost) nextMemorySlot() int {
-	raw, ok, err := storeGet(g.store, memCursorKey)
-	if err != nil || !ok {
+	if err := g.index.ensure(g.store); err != nil {
+		g.log.Warn(hlog.Store, "reading the memory index: %v", err)
 		return 0
 	}
-	n, err := strconv.Atoi(raw)
-	if err != nil || n < 0 {
-		return 0
-	}
-	return n % maxMemories
+	return g.index.nextSlot()
 }
 
 // firstLine trims a memory to something a log line can hold.
@@ -325,27 +315,17 @@ func firstLine(text string) string {
 	return text
 }
 
-// loadMemories reads the whole index. It is a linear scan over at most
-// maxMemories entries — brute force is the right amount of machinery for a
-// corpus this size, and it keeps the store a plain KV.
+// loadMemories returns the whole index. Recall is a linear scan over at
+// most maxMemories entries — brute force is the right amount of machinery
+// for a corpus this size — and the scan is over the resident copy, so it
+// costs no read at all. See index.go for why the ring is held rather than
+// re-derived from the store on every use.
 func (g *Ghost) loadMemories() []memory {
-	all, err := g.store.All()
-	if err != nil {
+	if err := g.index.ensure(g.store); err != nil {
+		g.log.Warn(hlog.Store, "reading the memory index: %v", err)
 		return nil
 	}
-	out := make([]memory, 0, len(all))
-	for k, v := range all {
-		if !strings.HasPrefix(k, memKeyPrefix) {
-			continue
-		}
-		var m memory
-		if json.Unmarshal([]byte(v), &m) != nil {
-			continue
-		}
-		m.key = k
-		out = append(out, m)
-	}
-	return out
+	return g.index.memories()
 }
 
 // reembedStale rebuilds vectors written by a different embedding model.
@@ -401,11 +381,7 @@ func (g *Ghost) reembedOne(ctx context.Context, m memory, model string) bool {
 		return false
 	}
 	m.Vec, m.Model = encodeVec(vec), model
-	entry, err := json.Marshal(m)
-	if err != nil {
-		return true // skip this one, keep going
-	}
-	if err := g.store.Set(m.key, string(entry)); err != nil {
+	if err := g.putMemory(m); err != nil {
 		g.log.Warn(hlog.Memory, "rewriting %s: %v", m.key, err)
 		return false
 	}
@@ -504,11 +480,7 @@ func (g *Ghost) reinforce(mems []memory) {
 		}
 		cur.Uses++
 		cur.Last = now
-		entry, err := json.Marshal(cur)
-		if err != nil {
-			continue
-		}
-		if err := g.store.Set(cur.key, string(entry)); err != nil {
+		if err := g.putMemory(cur); err != nil {
 			g.log.Warn(hlog.Memory, "reinforcing %s: %v", cur.key, err)
 			return
 		}

@@ -42,7 +42,17 @@ import (
 type Store interface {
 	// Set persists key=value, replacing any existing value.
 	Set(key, value string) error
-	// All returns the complete KV map, handed to brains at boot.
+	// Get returns one value, and whether there was one. The other half of
+	// Set, and separate from All because almost every read the driver
+	// makes wants a single named key — the journal, the conversation, the
+	// intentions, where the ghost is standing. Without it those all went
+	// through All(), which reads every row in the store to find one of
+	// them, so the cost of reading the journal was proportional to the
+	// size of the memory index.
+	Get(key string) (value string, ok bool, err error)
+	// All returns the complete KV map, handed to brains at boot. It is
+	// genuinely a whole-store read and should be treated as one: the
+	// driver does it once per session (see index.go).
 	All() (map[string]string, error)
 	// Close flushes and releases the backend.
 	Close() error
@@ -223,9 +233,14 @@ type Ghost struct {
 	// can be replaced without taking away something the user is reading.
 	blnWaiting bool
 
-	bus     *bus.Bus
-	brain   brain.Runner
-	store   Store
+	bus   *bus.Bus
+	brain brain.Runner
+	store Store
+	// index is the memory ring and the entity index, held in memory and
+	// written through to the store. It is loaded once — from the snapshot
+	// boot already reads — and is authoritative for as long as the ghost
+	// runs (see index.go).
+	index   residentIndex
 	quiet   *quiet.Checker
 	desktop *desktop.Watcher
 
@@ -821,6 +836,11 @@ func (g *Ghost) boot() error {
 	if err != nil {
 		return err
 	}
+	// The one full read of the session, and it has two consumers: the
+	// brain's KV snapshot below, and the resident memory and entity
+	// indexes, which would otherwise re-derive themselves from the store
+	// several times per exchange (see index.go).
+	g.index.adopt(kv)
 	var poses []string
 	if g.shell != nil {
 		poses = g.shell.Poses()

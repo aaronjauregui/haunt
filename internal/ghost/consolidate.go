@@ -403,11 +403,7 @@ func (g *Ghost) foldMemories(cluster []memory) {
 			continue
 		}
 		cur.Folded = true
-		entry, err := json.Marshal(cur)
-		if err != nil {
-			continue
-		}
-		if err := g.store.Set(cur.key, string(entry)); err != nil {
+		if err := g.putMemory(cur); err != nil {
 			g.log.Warn(hlog.Memory, "folding %s: %v", cur.key, err)
 			return
 		}

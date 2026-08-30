@@ -97,26 +97,23 @@ func entitySlug(name string) string {
 	return strings.TrimSuffix(b.String(), "-")
 }
 
-// loadEntities reads the whole index — a linear scan over at most
-// maxEntities keys, for the same reason memory brute-forces its ring.
+// loadEntities returns the whole index — a linear scan over at most
+// maxEntities subjects, for the same reason memory brute-forces its ring,
+// and over the resident copy for the same reason it does (see index.go).
 func (g *Ghost) loadEntities() []Entity {
-	all, err := g.store.All()
-	if err != nil {
+	if err := g.index.ensure(g.store); err != nil {
+		g.log.Warn(hlog.Store, "reading the entity index: %v", err)
 		return nil
 	}
-	out := make([]Entity, 0, len(all))
-	for k, v := range all {
-		if !strings.HasPrefix(k, entityKeyPrefix) {
-			continue
-		}
-		var e Entity
-		if json.Unmarshal([]byte(v), &e) != nil || e.Name == "" {
-			continue
-		}
-		e.key = k
-		out = append(out, e)
-	}
-	return out
+	return g.index.entities()
+}
+
+// clone copies a subject deeply enough to hand out. Facts is the reason:
+// recordEntity appends to it, and an append with spare capacity would write
+// into the resident copy's array before the store had accepted anything.
+func (e Entity) clone() Entity {
+	e.Facts = append([]string(nil), e.Facts...)
+	return e
 }
 
 // recordEntity merges what a consolidation learned into the index. Callers
@@ -174,11 +171,7 @@ func (g *Ghost) recordEntity(name, kind string, facts []string) {
 	if len(e.Facts) == 0 {
 		return // nothing worth a slot
 	}
-	b, err := json.Marshal(e)
-	if err != nil {
-		return
-	}
-	if err := g.store.Set(key, string(b)); err != nil {
+	if err := g.putEntity(e); err != nil {
 		g.log.Warn(hlog.Memory, "recording entity %q: %v", name, err)
 		return
 	}
@@ -214,7 +207,7 @@ func (g *Ghost) makeRoomForEntity() bool {
 			weakest, low = e, s
 		}
 	}
-	if err := g.store.Set(weakest.key, "{}"); err != nil {
+	if err := g.dropEntity(weakest.key); err != nil {
 		g.log.Warn(hlog.Memory, "forgetting entity %q: %v", weakest.Name, err)
 		return false
 	}

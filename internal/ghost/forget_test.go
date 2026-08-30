@@ -174,8 +174,9 @@ func TestReinforceSkipsRecycledSlots(t *testing.T) {
 
 	// The slot is reused while the recall that returned it is still in
 	// flight.
-	entry, _ := json.Marshal(memory{Kind: kindExchange, Text: "the new occupant"})
-	if err := s.Set(stale.key, string(entry)); err != nil {
+	if err := g.putMemory(memory{
+		key: stale.key, Kind: kindExchange, Text: "the new occupant",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	g.reinforce([]memory{stale})

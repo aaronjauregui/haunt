@@ -66,7 +66,11 @@ func TestMemoryIndexIsBounded(t *testing.T) {
 	now := time.Now()
 	for i := 0; i < maxMemories+3; i++ {
 		key, cursor := g.allocMemorySlot()
-		entry, _ := json.Marshal(memory{
+		// Through the ghost, not straight into the store: the resident
+		// index is authoritative while a ghost runs, so a test that wrote
+		// round it would be testing a state the driver cannot reach.
+		err := g.putMemory(memory{
+			key:  key,
 			Kind: kindNote, Text: fmt.Sprintf("note %d", i),
 			// Ascending and in the *past*, so the newest entry is always
 			// the strongest and the pass never immediately evicts what it
@@ -78,13 +82,11 @@ func TestMemoryIndexIsBounded(t *testing.T) {
 			// about one run in a hundred that way.
 			Time: now.Add(-time.Duration(maxMemories+3-i) * time.Minute),
 		})
-		if err := s.Set(key, string(entry)); err != nil {
+		if err != nil {
 			t.Fatal(err)
 		}
 		if cursor >= 0 {
-			if err := s.Set(memCursorKey, strconv.Itoa(cursor)); err != nil {
-				t.Fatal(err)
-			}
+			g.setMemoryCursor(cursor)
 		}
 	}
 

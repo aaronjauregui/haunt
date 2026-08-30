@@ -408,15 +408,13 @@ func DecodeHistory(raw string) ([]Exchange, error) {
 	return out, nil
 }
 
-// storeGet adapts the narrow Store interface (which lacks Get) by scanning
-// All; history is one key so this stays cheap.
+// storeGet reads one key. It used to adapt a Store interface that had no
+// Get by scanning All, on the reasoning that the caller only wanted one key
+// so it stayed cheap — which had it backwards: the cost was never in the
+// number of keys wanted, it was in the number read to find them, and every
+// journal read was pulling the whole memory index along with it.
 func storeGet(s Store, key string) (string, bool, error) {
-	all, err := s.All()
-	if err != nil {
-		return "", false, err
-	}
-	v, ok := all[key]
-	return v, ok, nil
+	return s.Get(key)
 }
 
 // chatRound is one request to the model: the waiting indicator in front of
