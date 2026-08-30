@@ -243,7 +243,12 @@ it before committing your own desktop to it.
 
 Each ghost is its own session — its own memory, its own brain, its own
 compositor connection — so one crashing is one ghost lost rather than the
-room. What they share is what belongs to you rather than to any of them:
+room, and the one that crashed comes back a couple of seconds later. It
+will greet you again, which is how you find out. A ghost that dies over and
+over is eventually left stopped and said so; one that never got as far as
+the screen is not retried at all, because that is a manifest to fix rather
+than a ghost to revive. What they share is what belongs to you rather than
+to any of them:
 nobody opens on top of anybody else, `haunt say` with no `-ghost` goes to
 the one you last interacted with, the hourly limits on backend calls are
 one ration between them rather than one each, and there is a ceiling on
