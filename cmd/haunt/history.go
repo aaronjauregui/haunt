@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/aaronjauregui/haunt/internal/ghost"
@@ -118,6 +119,15 @@ func printWhy(w ghost.Why, showPrompt bool) {
 	if w.HistoryTurns > 0 {
 		fmt.Printf("%s· with the last %d turns of this conversation\n", indent, w.HistoryTurns)
 	}
+	// A measurement, not a verdict: nothing is trimmed to fit and there is
+	// no limit to compare it against. It is here because it is the number
+	// to look at when a ghost on a modest machine starts timing out rather
+	// than answering — the prompt is what a slow backend spends its time
+	// on before the first token.
+	if w.PromptChars > 0 {
+		fmt.Printf("%s· the whole request was %s characters, of which %s were the prompt above\n",
+			indent, thousands(w.PromptChars), thousands(len(w.System)))
+	}
 	if len(w.Recalled) == 0 {
 		fmt.Println(indent + "· nothing was recalled from further back")
 	} else {
@@ -141,6 +151,23 @@ func printWhy(w ghost.Why, showPrompt bool) {
 			fmt.Println(indent + "    " + line)
 		}
 	}
+}
+
+// thousands groups a count so a five-figure prompt is legible at a glance,
+// which is the whole reason the number is printed.
+func thousands(n int) string {
+	s := strconv.Itoa(n)
+	if len(s) <= 3 {
+		return s
+	}
+	var b strings.Builder
+	for i, r := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			b.WriteByte(',')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // oneLine flattens a memory to something that fits under a history line.

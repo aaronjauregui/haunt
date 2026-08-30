@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/aaronjauregui/haunt/internal/ai"
 	"github.com/aaronjauregui/haunt/internal/hlog"
 )
 
@@ -90,6 +91,44 @@ type Why struct {
 	// themselves are not copied — they are in the history already, and
 	// duplicating them per exchange would square the storage.
 	HistoryTurns int `json:"history_turns,omitempty"`
+	// PromptChars is the size of the largest request this reply took: every
+	// message sent, on the last round if tools ran and the array grew.
+	//
+	// A measurement and not a policy. Nothing acts on it, nothing is
+	// trimmed to fit it, and there is no configured limit for it to be
+	// compared against. It is here because the assembled prompt has a
+	// bound that nobody chose — the journal's twenty notes, recall's five
+	// memories, the entity facts and the intentions each have a cap picked
+	// for its own reasons, and their sum is whatever it happens to be —
+	// and the question of whether that sum ever matters is answerable by
+	// looking rather than by arithmetic over worst cases that do not
+	// occur. A prompt is also the thing a slow machine spends its time on
+	// before the first token arrives, which is the deadline in
+	// `FirstTokenTimeout`, so this is the number to look at when a ghost
+	// on a modest machine starts timing out rather than answering.
+	//
+	// Characters, not tokens: the driver has no tokenizer and speaks to
+	// backends that do not agree on one. Divide by three or four for a
+	// rough count.
+	//
+	// The breakdown needs no fields of its own. System is stored whole, so
+	// its size is len(System) and its blocks are self-labelling ("Your
+	// private journal", "Things this reminds you of", and so on); what is
+	// left over is the conversation and the utterance.
+	PromptChars int `json:"prompt_chars,omitempty"`
+}
+
+// promptChars measures a request the way it goes out: the content of every
+// message, plus the arguments of any tool call, which are sent too.
+func promptChars(msgs []ai.Message) int {
+	n := 0
+	for _, m := range msgs {
+		n += len(m.Content)
+		for _, c := range m.ToolCalls {
+			n += len(c.Function.Name) + len(c.Function.Arguments)
+		}
+	}
+	return n
 }
 
 // WhyWindow is the focused window at the moment of a reply.

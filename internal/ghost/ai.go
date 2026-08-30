@@ -16,6 +16,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/aaronjauregui/haunt/internal/ai"
 	"github.com/aaronjauregui/haunt/internal/hlog"
@@ -220,6 +221,7 @@ func (g *Ghost) execChat(in proto.Intent, userDriven bool) {
 		Window:       g.currentWindow(),
 		System:       system,
 		HistoryTurns: len(history) / 2,
+		PromptChars:  promptChars(msgs),
 	})
 
 	// The brain hears the reply before memory is written. Remembering means
@@ -523,5 +525,56 @@ func (g *Ghost) runToolCall(call ai.ToolCall, back map[string]toolRef) toolResul
 	if out.Refused {
 		return toolResult{text: "That was not allowed: " + out.Text + "."}
 	}
-	return toolResult{text: out.Text, ref: ref.String(), ran: true}
+	return toolResult{text: g.readable(ref, out.Text), ref: ref.String(), ran: true}
+}
+
+// toolResultChars is how much of one tool's answer goes into the prompt.
+//
+// Everything else the driver assembles has a bound — the journal is twenty
+// notes of five hundred characters, recall is five memories of six hundred,
+// entities four subjects of six facts — and a tool's answer had none at
+// all. That is the one thing in a prompt the driver does not generate and
+// cannot predict the size of: an MCP server is somebody else's program,
+// answering with whatever it has, and a file or a query dump goes in whole.
+// Six of them may run in one exchange (MaxToolCalls), so the bound this
+// sets is six times this number, and it is deliberately of the same order
+// as the rest of the prompt rather than larger — one tool call should not
+// be able to crowd out everything the ghost knows.
+//
+// Generous for what a companion's tools actually answer with (a day's
+// appointments, a search result, a note that was written) and much smaller
+// than a document. A tool that genuinely needs to hand over more than this
+// wants to be asked a narrower question, which the model can do: it still
+// has the tool.
+const toolResultChars = 2000
+
+// readable trims a tool's answer to what will fit in a prompt, and says so
+// when it has.
+//
+// Saying so is the point rather than a courtesy. A silently truncated
+// answer is worse than a refused one: the model reads half a result,
+// cannot tell that it is half, and answers the person as though it had the
+// whole thing. The note goes at the end, where it is the last thing read
+// before the model decides how much to trust what it just saw.
+//
+// Unlike clip() this keeps the newlines: a tool's answer is often a list,
+// and flattening it to one line to save characters would cost the model
+// the structure it needs to read it. clip() is for the journal, where the
+// entry is one line by design.
+func (g *Ghost) readable(ref toolRef, text string) string {
+	if len(text) <= toolResultChars {
+		return text
+	}
+	// On a rune boundary: a tool may answer in any script, and half a
+	// character is not a saving.
+	cut := toolResultChars
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	dropped := len(text) - cut
+	g.log.Info(hlog.Tool, "%s answered with %d characters; %d of them were not read",
+		ref, len(text), dropped)
+	return text[:cut] + fmt.Sprintf(
+		"\n\n[This answer was too long to read in full: %d more characters were not seen. "+
+			"Ask a narrower question if you need them.]", dropped)
 }
