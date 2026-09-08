@@ -73,7 +73,7 @@ func TestTheStoreIsReadOnceHoweverMuchIsAsked(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	g.recordEntity("Sam", "person", []string{"likes oolong"})
+	g.recordEntity("Sam", "person", FactInference, []string{"likes oolong"})
 
 	before := s.reads
 	for i := 0; i < 50; i++ {
@@ -174,17 +174,17 @@ func TestAFailedLoadIsRetried(t *testing.T) {
 func TestEntitiesAreHandedOutUnshared(t *testing.T) {
 	s := newCounting()
 	g := &Ghost{store: s, log: hlog.Discard()}
-	g.recordEntity("Sam", "person", []string{"likes oolong", "runs on Tuesdays"})
+	g.recordEntity("Sam", "person", FactInference, []string{"likes oolong", "runs on Tuesdays"})
 
 	first := g.loadEntities()
 	if len(first) != 1 || len(first[0].Facts) != 2 {
 		t.Fatalf("entities = %+v", first)
 	}
-	first[0].Facts[0] = "forged"
+	first[0].Facts[0].Text = "forged"
 
 	again := g.loadEntities()
-	if again[0].Facts[0] != "likes oolong" {
-		t.Errorf("a caller's edit reached the index: facts = %q", again[0].Facts)
+	if again[0].Facts[0].Text != "likes oolong" {
+		t.Errorf("a caller's edit reached the index: facts = %+v", again[0].Facts)
 	}
 }
 
@@ -193,7 +193,7 @@ func TestEntitiesAreHandedOutUnshared(t *testing.T) {
 func TestEvictingASubjectClearsBothSides(t *testing.T) {
 	s := newCounting()
 	g := &Ghost{store: s, log: hlog.Discard()}
-	g.recordEntity("Sam", "person", []string{"likes oolong"})
+	g.recordEntity("Sam", "person", FactInference, []string{"likes oolong"})
 	key := entityKeyPrefix + "sam"
 
 	if err := g.dropEntity(key); err != nil {

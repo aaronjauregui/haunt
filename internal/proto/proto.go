@@ -34,6 +34,16 @@ const (
 	// External.
 	EventMessage EventType = "message" // inbound text (chat, CLI, socket)
 
+	// EventCorrect is the person saying the ghost is wrong about a subject:
+	// Name is the subject, Fact is the id of the belief being retired (0 for
+	// none), Text is what is true instead (empty for a plain retraction).
+	//
+	// It is handled by the driver before the brain ever sees it, and it is
+	// the one inbound event a brain may not forge — filing a fact adds
+	// something the person can see and object to, and retiring one removes
+	// the evidence. A brain may propose and must not perform.
+	EventCorrect EventType = "correct"
+
 	// System.
 	// EventCron is a manifest-scheduled trigger firing. Name is the
 	// trigger's. Text is empty for an occasion — a morning greeting, an
@@ -142,6 +152,11 @@ type Event struct {
 	Text string `json:"text,omitempty"`
 	// From identifies the sending ghost for cross-ghost messages.
 	From string `json:"from,omitempty"`
+	// Fact identifies which belief an EventCorrect retires, by the id
+	// `haunt journal -entities` prints beside it. Zero means retire
+	// nothing, which is the case where a fact has not gone wrong so much
+	// as out of date.
+	Fact int `json:"fact,omitempty"`
 	// Tag echoes the tag of the intent this event answers, so a brain that
 	// has several AI requests in flight can tell their results apart.
 	Tag string `json:"tag,omitempty"`
@@ -219,6 +234,7 @@ const (
 	IntentPlayClip      IntentType = "play_clip"      // run a declared animation
 	IntentLook          IntentType = "look"           // show the focused window to a vision model
 	IntentWatch         IntentType = "watch"          // the user asked for window awareness; ask and start it
+	IntentCorrect       IntentType = "correct"        // the user wants to fix a belief; the driver runs the whole dialogue
 	IntentAct           IntentType = "act"            // run one tool on a declared server
 	IntentIntend        IntentType = "intend"         // hold a purpose, across restarts
 	IntentResolve       IntentType = "resolve"        // that purpose is discharged
@@ -387,6 +403,16 @@ func (i *Intent) Validate() error {
 	// watch carries nothing: it is a request to put a question, and every
 	// term of that question is the driver's.
 	case IntentWatch:
+	// correct carries nothing either, and for a stronger reason. Filing a
+	// fact adds something the person can see and object to; retiring one
+	// removes the evidence, so a brain that could name the subject or the
+	// belief could take out what the person actually said and put something
+	// else in its place, with nothing anywhere showing that it had. This
+	// intent is only the brain saying *they want to fix something*. Which
+	// subject, which belief and what is true instead are read off the
+	// driver's own index, asked in the driver's own balloon, and answered
+	// where the brain cannot hear it.
+	case IntentCorrect:
 	case IntentIntend:
 		if i.Name == "" {
 			return fmt.Errorf("intend intent with empty name")

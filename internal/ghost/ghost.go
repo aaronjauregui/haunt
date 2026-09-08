@@ -442,20 +442,28 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		}
 	}()
 
-	// Control socket: external programs push events in (haunt say, hooks).
-	// Requires the "message" capability: declared in the manifest and
-	// granted by the user (dev runs auto-grant declared capabilities).
-	if g.capabilityActive("message") {
-		// Through g.publishFromControl, not the bus directly: `haunt say` is
-		// a person addressing the ghost, and the reply must not be charged
-		// to the ghost's own initiative.
-		ctl, err := control.Listen(m.Ghost.Name, g.publishFromControl, log)
-		if err != nil {
-			return err
-		}
-		defer ctl.Close()
-		defer control.Forget(m.Ghost.Name)
+	// Control socket: external programs push events in (haunt say, hooks),
+	// and the person corrects the ghost through it (haunt correct).
+	//
+	// The socket itself is no longer gated on the "message" capability, and
+	// the gate has moved into publishFromControl instead. What that
+	// capability is about is whether outside programs may put *words* in
+	// front of the person; a correction is not conversation, it is the
+	// person editing what their own ghost believes about them, and making
+	// it depend on a capability granted for scripts and CI would mean a
+	// ghost that can be read (`haunt journal -entities` opens the database
+	// directly) and not told it is wrong. That is the exact asymmetry
+	// revision exists to remove.
+	//
+	// Through g.publishFromControl, not the bus directly: `haunt say` is a
+	// person addressing the ghost, and the reply must not be charged to the
+	// ghost's own initiative.
+	ctl, err := control.Listen(m.Ghost.Name, g.publishFromControl, log)
+	if err != nil {
+		return err
 	}
+	defer ctl.Close()
+	defer control.Forget(m.Ghost.Name)
 
 	stopTriggers, err := g.startTriggers(opts.IdleTimeoutMS)
 	if err != nil {
@@ -1007,6 +1015,20 @@ func (g *Ghost) publishExternal(e proto.Event) error {
 // window, screen, tell — is checked at the moment it is used and so changes
 // in both directions immediately.
 func (g *Ghost) publishFromControl(e proto.Event) error {
+	// A correction is settled by the driver and never reaches the brain.
+	// Two reasons. A brain that could retire a fact could take out what the
+	// person actually said and put something else in its place, and nothing
+	// anywhere would show that it had — filing adds something the person can
+	// see and object to, retiring removes the evidence. And a model asked to
+	// interpret a correction is a model that can get the subject or the
+	// polarity wrong, which is the failure this is here to fix.
+	if e.Type == proto.EventCorrect {
+		if !g.memoryEnabled() {
+			return fmt.Errorf("this ghost has no memory to correct")
+		}
+		_, err := g.applyCorrection(e.Name, e.Fact, e.Text)
+		return err
+	}
 	if !g.capabilityActive("message") {
 		return fmt.Errorf("the message capability is not granted")
 	}
@@ -1213,6 +1235,10 @@ func (g *Ghost) execIntent(in proto.Intent) {
 		// question is on screen, and the intent loop is not a thing to
 		// stall while somebody reads.
 		g.go_(hlog.Screen, "watch", func() { g.execWatch() })
+	case proto.IntentCorrect:
+		// Same reason: this puts several questions on screen in a row and
+		// waits for a person to read each one.
+		g.go_(hlog.Memory, "correct", func() { g.execCorrect() })
 	case proto.IntentIntend:
 		g.execIntend(in)
 	case proto.IntentResolve:

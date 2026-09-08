@@ -377,7 +377,7 @@ func (g *Ghost) applySummary(cluster []memory, s summary) {
 
 	g.memMu.Lock()
 	for _, e := range s.Entities {
-		g.recordEntity(e.Name, e.Kind, e.Facts)
+		g.recordEntity(e.Name, e.Kind, FactInference, e.Facts)
 	}
 	g.memMu.Unlock()
 

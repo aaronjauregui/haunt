@@ -44,6 +44,8 @@ func main() {
 		err = cmdDev(os.Args[2:])
 	case "say":
 		err = cmdSay(os.Args[2:])
+	case "correct":
+		err = cmdCorrect(os.Args[2:])
 	case "keygen":
 		err = cmdKeygen(os.Args[2:])
 	case "pack":
@@ -94,6 +96,7 @@ func usage() {
   haunt run [-x N] [-y N] [-output NAME] [-record FILE] [-state DIR] [-idle-ms N] [ghost-dir|name ...]
   haunt dev [-x N] [-y N] [-state DIR] <ghost-dir>
   haunt say [-ghost NAME] <text>
+  haunt correct [-ghost NAME] <subject> [number] [what is true]
   haunt new [-brain] <name>
   haunt shell init [-C dir] [-write] <art.ora>
   haunt keygen

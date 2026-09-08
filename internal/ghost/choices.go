@@ -405,3 +405,31 @@ func (g *Ghost) choiceHighlight() int {
 // what a desktop companion should be; the brain hears a dismissal and can
 // ask again if it still cares.
 const choiceTimeout = 2 * time.Minute
+
+// askForText puts the driver's own question on screen and waits for a typed
+// answer, which arrives as what was typed or "" if the line was abandoned.
+//
+// The counterpart to ask, and it exists for the same reason: some questions
+// are the driver's, and their answers are not the brain's to overhear. This
+// is the one place a correction needs words rather than a pick from a list —
+// what is true instead — and an empty answer is a complete reply rather than
+// a failure, because "that is wrong, and I am not going to tell you what is
+// right" retires the belief just as well.
+func (g *Ghost) askForText(prompt string) string {
+	if muted, _ := g.quiet.Active(); muted {
+		return ""
+	}
+	g.showBalloon(prompt)
+	reply := make(chan string, 1)
+	if !g.openInputWithReply(reply) {
+		return ""
+	}
+	select {
+	case answer := <-reply:
+		return strings.TrimSpace(answer)
+	case <-g.done:
+		return ""
+	case <-g.stoppingC():
+		return ""
+	}
+}

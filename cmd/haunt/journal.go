@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -82,17 +81,12 @@ func printEntities(s *store.Store) error {
 		fmt.Println("(it has not concluded anything about anyone yet)")
 		return nil
 	}
-	sort.SliceStable(ents, func(i, j int) bool { return ents[i].Mentions > ents[j].Mentions })
+	sortEntities(ents)
 	for _, e := range ents {
-		who := e.Name
-		if e.Kind != "" {
-			who += " (" + e.Kind + ")"
-		}
-		fmt.Printf("%s  last mentioned %s\n", who, e.Last.Format("2006-01-02"))
-		for _, f := range e.Facts {
-			fmt.Printf("    %s\n", f)
-		}
+		printEntity(e, true)
 	}
+	fmt.Println()
+	fmt.Println("Something wrong here? `haunt correct <subject> <number> \"what is true\"`.")
 	return nil
 }
 

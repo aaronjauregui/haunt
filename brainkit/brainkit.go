@@ -244,6 +244,23 @@ func (em *Emitter) Watch() {
 	em.emit(Intent{Type: proto.IntentWatch})
 }
 
+// Correct asks the driver to let the person fix something the ghost
+// believes about a subject. Offer it as a menu entry; emit this when they
+// pick it.
+//
+// It carries nothing, and cannot be made to carry anything. Everything
+// about the correction — which subject, which belief, what is true instead
+// — is read from the driver's own entity index, asked in the driver's own
+// balloon, and answered where this brain cannot hear it. That asymmetry is
+// deliberate: a brain may *propose* that the person be asked, and may not
+// perform a retirement, because filing a fact adds something they can see
+// and object to while retiring one removes the evidence.
+//
+// There is no answer event, for the same reason Watch has none.
+func (em *Emitter) Correct() {
+	em.emit(Intent{Type: proto.IntentCorrect})
+}
+
 // Act runs one tool on one of the tool servers the ghost's manifest
 // declares (requires the tools capability, and the user's yes for that
 // individual tool the first time it is used). tool is in "server.tool"
