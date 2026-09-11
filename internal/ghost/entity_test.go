@@ -54,8 +54,8 @@ func TestEntityMerge(t *testing.T) {
 	s := &memStore{m: map[string]string{}}
 	g := &Ghost{store: s, log: hlog.Discard()}
 
-	g.recordEntity("Sam", "person", []string{"drinks oolong"})
-	g.recordEntity("sam,", "person", []string{"Drinks oolong", "is writing a compiler"})
+	g.recordEntity("Sam", "person", FactInference, []string{"drinks oolong"})
+	g.recordEntity("sam,", "person", FactInference, []string{"Drinks oolong", "is writing a compiler"})
 
 	ents := g.loadEntities()
 	if len(ents) != 1 {
@@ -82,10 +82,10 @@ func TestEntityRejectsSentences(t *testing.T) {
 	s := &memStore{m: map[string]string{}}
 	g := &Ghost{store: s, log: hlog.Discard()}
 
-	g.recordEntity(strings.Repeat("a name far too long to be one ", 4), "person", []string{"x"})
-	g.recordEntity("", "person", []string{"x"})
+	g.recordEntity(strings.Repeat("a name far too long to be one ", 4), "person", FactInference, []string{"x"})
+	g.recordEntity("", "person", FactInference, []string{"x"})
 	// A subject nothing is known about is not worth a slot either.
-	g.recordEntity("Sam", "person", nil)
+	g.recordEntity("Sam", "person", FactInference, nil)
 
 	if ents := g.loadEntities(); len(ents) != 0 {
 		t.Errorf("stored %d entities, want none: %+v", len(ents), ents)
@@ -98,8 +98,8 @@ func TestEntityRejectsSentences(t *testing.T) {
 func TestEntityContext(t *testing.T) {
 	s := &memStore{m: map[string]string{}}
 	g := &Ghost{store: s, log: hlog.Discard()}
-	g.recordEntity("Sam", "person", []string{"drinks oolong", "is writing a compiler"})
-	g.recordEntity("Biscuit", "cat", []string{"sits on the keyboard"})
+	g.recordEntity("Sam", "person", FactInference, []string{"drinks oolong", "is writing a compiler"})
+	g.recordEntity("Biscuit", "cat", FactInference, []string{"sits on the keyboard"})
 
 	got := g.entityContext("how is Sam getting on")
 	if !strings.Contains(got, "Sam (person)") || !strings.Contains(got, "writing a compiler") {
@@ -120,13 +120,13 @@ func TestEntityEvictionKeepsTheTalkedAbout(t *testing.T) {
 	s := &memStore{m: map[string]string{}}
 	g := &Ghost{store: s, log: hlog.Discard()}
 
-	g.recordEntity("Sam", "person", []string{"the one who matters"})
+	g.recordEntity("Sam", "person", FactInference, []string{"the one who matters"})
 	for i := 0; i < 8; i++ {
-		g.recordEntity("Sam", "person", []string{"fact " + string(rune('a'+i))})
+		g.recordEntity("Sam", "person", FactInference, []string{"fact " + string(rune('a'+i))})
 	}
 	for i := 0; i < maxEntities+5; i++ {
 		g.recordEntity("passer-by-"+string(rune('a'+i%26))+string(rune('a'+i/26)), "person",
-			[]string{"came up once"})
+			FactInference, []string{"came up once"})
 	}
 
 	ents := g.loadEntities()

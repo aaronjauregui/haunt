@@ -153,7 +153,7 @@ func TestRemarksAboutANeighbourBecomeFacts(t *testing.T) {
 	g.store = &memStore{m: map[string]string{}}
 	g.observed("moth", proto.ActedDrew, "a lighthouse")
 	g.recordEntity("moth", g.subjectKind("moth"),
-		[]string{"moth draws lighthouses when it is quiet"})
+		FactInference, []string{"moth draws lighthouses when it is quiet"})
 
 	ents := g.loadEntities()
 	if len(ents) != 1 {

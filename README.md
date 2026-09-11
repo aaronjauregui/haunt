@@ -131,6 +131,24 @@ useful before — so "it remembered" and "it guessed" stop looking the same.
 The reasons live in the ghost's own store beside the conversation, never in
 a session recording, and only the last dozen replies keep them.
 
+It also keeps a short list of what it has decided about the people, places
+and projects you mention, which you can read:
+
+    haunt journal -entities      # who and what it thinks it knows about
+
+And, because a companion you can interrogate but cannot correct is worse
+than one you can do neither to, you can tell it that it is wrong:
+
+    haunt correct sam 1 "left Acme in March"
+
+Or pick "You've got something wrong about someone" from its menu and answer
+in the balloon, which is the same thing without a terminal. What it used to
+think is not deleted — it stops being something the ghost believes, and
+stays visible under the fact that replaced it, so *you used to think this*
+remains a thing you can check. It will not quietly conclude the same thing
+again afterwards, and it does not argue: if you say a fact is wrong, it is
+wrong.
+
 `haunt perms` shows what a ghost asked for and what it has, and takes it
 back:
 
@@ -368,6 +386,7 @@ what the shell has.
 | `haunt history` / `haunt journal` | what was said / what it chose to remember |
 | `haunt history -why [-prompt]` | why it said that: what it recalled, saw, and was asked |
 | `haunt journal -entities` | who and what it thinks it knows about |
+| `haunt correct <who> <n> "<what's true>"` | tell it it's wrong about one of them (or from its menu) |
 | `haunt perms grant window` | let it notice what you are working on (or ask it from its menu) |
 | `haunt perms [grant\|revoke <cap>]` | what it may do — revocable while it runs |
 | `haunt shush` / `unshush` | quiet hours, now |

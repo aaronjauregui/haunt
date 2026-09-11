@@ -110,6 +110,7 @@ const (
 	menuLook     = "Have a look at my screen"
 	menuWatch    = "Keep an eye on what I'm working on"
 	menuDrawMore = "Draw that again"
+	menuWrong    = "You've got something wrong about someone"
 	menuNothing  = "Nothing, thanks"
 )
 
@@ -206,6 +207,13 @@ func (b *Brain) offerMenu(emit *brainkit.Emitter) {
 	if b.lastPrompt != "" {
 		options = append(options, menuDrawMore)
 	}
+	// Always offered, and offered without knowing whether there is anything
+	// to correct: this brain cannot see the entity index, by design, so the
+	// driver answers "I haven't decided anything about anyone yet" when
+	// there is nothing there. An entry that is sometimes a no-op is a much
+	// smaller cost than the alternative, which is a brain that would have to
+	// be told what its ghost believes in order to offer to fix it.
+	options = append(options, menuWrong)
 	options = append(options, menuNothing)
 	emit.Offer(menuTag, "What would you like?", options...)
 }
@@ -225,6 +233,13 @@ func (b *Brain) onChoice(picked string, emit *brainkit.Emitter) {
 		// do not, which is exactly what the brain sees when the capability
 		// was never granted — so there is nothing here to handle.
 		emit.Watch()
+	case menuWrong:
+		// Nothing but the request. Which subject, which belief and what is
+		// true instead are the driver's to ask and the driver's to record;
+		// this brain never learns the answer, because a brain that could
+		// retire a fact could take out what the person actually said and
+		// put something else in its place. Propose, do not perform.
+		emit.Correct()
 	case menuDrawMore:
 		if b.lastPrompt != "" {
 			emit.Send(brainkit.Intent{Type: "imagine", Text: b.lastPrompt, Fresh: true, Wait: "Again, differently…", LingerMS: lingerImage})

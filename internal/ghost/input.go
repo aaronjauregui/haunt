@@ -33,15 +33,26 @@ type inputState struct {
 	// arrives before the matching enter belongs to the previous line, not
 	// this one — see onKeyboardFocus.
 	focused bool
+	// reply, when set, is where what was typed goes instead of to the
+	// brain. The same asymmetry g.ask has for menus: some questions are
+	// the driver's own, and a ghost has no business overhearing the answer
+	// to a question about what it has got wrong. Buffered by the caller, so
+	// closing a line never blocks on a listener that gave up.
+	reply chan string
 }
 
 // openInput starts a line of input, unless one is already open.
-func (g *Ghost) openInput() {
+func (g *Ghost) openInput() { g.openInputWithReply(nil) }
+
+// openInputWithReply is openInput with somewhere for the answer to go,
+// reporting whether the line was opened at all.
+func (g *Ghost) openInputWithReply(reply chan string) bool {
 	g.inputMu.Lock()
 	if g.input.open {
 		g.inputMu.Unlock()
-		return
+		return false
 	}
+	g.input.reply = reply
 	g.input.open = true
 	g.input.caret = true
 	g.input.focused = false
@@ -78,10 +89,16 @@ func (g *Ghost) openInput() {
 			}
 		}
 	}()
+	return true
 }
 
 // closeInput ends the line, releasing the keyboard.
-func (g *Ghost) closeInput() {
+func (g *Ghost) closeInput() { g.closeInputWith("") }
+
+// closeInputWith closes the line, handing answer to whoever is waiting for
+// it. Abandoning a line closes it with nothing, which is how a person who
+// turned away says no.
+func (g *Ghost) closeInputWith(answer string) {
 	g.inputMu.Lock()
 	if !g.input.open {
 		g.inputMu.Unlock()
@@ -90,6 +107,13 @@ func (g *Ghost) closeInput() {
 	g.input.open = false
 	g.input.focused = false
 	close(g.input.stop)
+	// Whoever is waiting is told, even when the line was abandoned: an
+	// empty answer is an answer, and a caller blocked on a person who
+	// walked away would wait for the session.
+	if g.input.reply != nil {
+		g.input.reply <- answer
+		g.input.reply = nil
+	}
 	g.input.editor.Reset()
 	g.inputMu.Unlock()
 	g.log.Debug(hlog.Input, "input line closed")
@@ -175,6 +199,13 @@ func (g *Ghost) onKey(code uint32, down bool) {
 		g.closeInput()
 		return
 	case textinput.ActionSubmit:
+		g.inputMu.Lock()
+		driverOwned := g.input.reply != nil
+		g.inputMu.Unlock()
+		if driverOwned {
+			g.closeInputWith(text)
+			return
+		}
 		g.closeInput()
 		if !empty {
 			g.publish(proto.Event{Type: proto.EventMessage, Text: text})

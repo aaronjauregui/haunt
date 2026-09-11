@@ -95,3 +95,24 @@ func TestSendToMissingGhost(t *testing.T) {
 		t.Fatal("runtime dir should exist")
 	}
 }
+
+// The control socket accepts two things and no more: a message, and a
+// person correcting what their ghost believes. Everything else — lifecycle,
+// input, timers — is driver-internal, and an external program that could
+// forge one could make a ghost act as though it had seen something it
+// never saw.
+func TestOnlyMessagesAndCorrectionsAreAccepted(t *testing.T) {
+	for _, ok := range []proto.EventType{proto.EventMessage, proto.EventCorrect} {
+		if !allowedInbound[ok] {
+			t.Errorf("%q should be accepted on the control socket", ok)
+		}
+	}
+	for _, no := range []proto.EventType{
+		proto.EventBoot, proto.EventShutdown, proto.EventClick,
+		proto.EventTimer, proto.EventAIReply, proto.EventObserved,
+	} {
+		if allowedInbound[no] {
+			t.Errorf("%q must not be injectable from outside", no)
+		}
+	}
+}

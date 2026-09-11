@@ -244,7 +244,7 @@ func (g *Ghost) execChat(in proto.Intent, userDriven bool) {
 		g.go_(hlog.Memory, "filing what it thinks of "+subject, func() {
 			g.memMu.Lock()
 			defer g.memMu.Unlock()
-			g.recordEntity(subject, kind, []string{full})
+			g.recordEntity(subject, kind, FactExchange, []string{full})
 		})
 	}
 

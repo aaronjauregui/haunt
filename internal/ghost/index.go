@@ -127,6 +127,9 @@ func (x *residentIndex) fill(all map[string]string) {
 				continue
 			}
 			e.key = k
+			// Ids for anything written before facts had them, so a
+			// correction has something stable to name.
+			e.normalize()
 			x.ents[k] = e
 		case k == memCursorKey:
 			if n, err := strconv.Atoi(v); err == nil && n >= 0 {
