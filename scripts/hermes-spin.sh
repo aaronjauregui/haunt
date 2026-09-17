@@ -26,6 +26,14 @@
 #   - the weekly review: `skill_view` of weekly-review, `intentions`, a
 #     question per goal (the spin keeps each) and one about next week
 #     (the spin says nothing new);
+#   - the goal gone quiet: an eight-day-old goal seeded by
+#     scripts/spinseed is raised when the spin presses a key; the ghost
+#     loads keep-an-eye-on-a-goal and asks "Still want this?" (the spin
+#     answers "Later", which files an errand three days out);
+#   - humanizer: `skill_view humanizer`, one of hermes's bundled skills;
+#   - the shopping list: `skill_view shopping-list` and a call to the
+#     notes server's tool, which writes to the notes file, plus the
+#     driver's warning about the misspelled-notes skill;
 #   - the ghost story: `skill_view` of wisp's own ghost-story skill, which
 #     `journal -skills` lists under "From its package".
 #
@@ -46,17 +54,19 @@ fi
 mkdir -p "$out"
 
 go build -o "$out/spinkeys" ./scripts/spinkeys || exit 1
+go build -o "$out/spinseed" ./scripts/spinseed || exit 1
 
-# The morning occasion, six minutes out: after hermes is up and the boot
-# turn is over, most of the time. If hermes is slower, the occasion waits
-# for the turn in flight.
-morning=$(( $(date +%s) + 360 ))
+# The morning occasion, seven minutes out: after hermes is up and the
+# first turns are over, most of the time. If hermes is slower, the occasion
+# waits for the turn in flight.
+morning=$(( $(date +%s) + 420 ))
 morning_cron="$(date -d "@$morning" +'%-M %-H') * * *"
 
 # Debug for balloon and input, because the spin waits for their "choices
 # offered" and "input line opened" lines to know a question is up.
 GHOST=wisp IDLE_MS="${IDLE_MS:-45000}" WLR_BACKENDS=headless HAUNT_LOG="${HAUNT_LOG:-info}" \
     HAUNT_DEBUG="${HAUNT_DEBUG:-balloon,input}" WISP_MORNING_CRON="$morning_cron" \
+    WISP_NOTES="$out/notes.txt" SEED_STATE="$out/spinseed" GOAL_DELAY=5s \
     ./scripts/demo.sh > "$out/demo.log" 2>&1 &
 demo=$!
 stop() {
@@ -151,6 +161,16 @@ typein() {
 step "boot and one idle turn"
 sleep 60
 
+step "a goal gone quiet (haunt's keep-an-eye-on-a-goal skill)"
+# spinseed left an eight-day-old goal that was never seen. The goal check
+# ran when the compositor went idle; a key press brings the person back,
+# which is when the driver raises it.
+grep 'a goal has gone quiet' "$out/demo.log" || echo "(the goal check found nothing)"
+keys enter
+answer "later" 180
+sleep 30
+haunt journal -intentions -state "$state"
+
 step "the morning check-in (haunt's skill, from a cron occasion at $(date -d "@$morning" +%H:%M))"
 now=$(date +%s)
 [ "$now" -lt "$morning" ] && sleep $((morning - now))
@@ -189,6 +209,17 @@ step "a ghost story (wisp's own skill)"
 haunt say -ghost wisp "tell me a ghost story"
 sleep 90
 
+step "humanizer (a bundled hermes skill)"
+haunt say -ghost wisp "make this sound less like an AI wrote it: In today's fast-paced digital landscape, it is crucial to leverage synergies."
+sleep 90
+
+step "a shopping list (a skill that needs a tool server's tool)"
+haunt say -ghost wisp "put oat milk on my shopping list"
+sleep 90
+echo "notes file:"
+cat "$out/notes.txt" 2>/dev/null || echo "(nothing written)"
+grep 'hermes will not list the skill' "$out/demo.log" || echo "(no warning about the misspelled skill)"
+
 step "a weekly review (haunt's skill)"
 # Keep every goal, and nothing new: answer each question until none comes.
 haunt say -ghost wisp "let's do a weekly review"
@@ -198,7 +229,7 @@ haunt journal -intentions -state "$state"
 haunt journal -skills -state "$state" wisp
 
 step "the conversation, with reasons"
-haunt history -n 60 -why -state "$state"
+haunt history -n 80 -why -state "$state"
 
 stop
 if docker ps -q --filter name=hermes- 2>/dev/null | grep -q .; then

@@ -43,7 +43,8 @@ func Soul(p Persona) string {
 		"person talking to you. Address the person as \"you\".\n")
 	b.WriteString("2. Most events deserve no reply. To say nothing, reply with exactly `" + NoReply +
 		"` and nothing else; it will not be shown. When a reminder you took on comes due " +
-		"(`kind=intention_due`), do say it.\n")
+		"(`kind=intention_due`), or a goal of theirs you hold has gone quiet (`kind=goal_quiet`), " +
+		"do say it.\n")
 	b.WriteString("3. Your replies appear in a small speech balloon beside you on their screen. " +
 		"Keep them to one or two short sentences, with no markdown.\n")
 

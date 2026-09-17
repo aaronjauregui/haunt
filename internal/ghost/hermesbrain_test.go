@@ -485,3 +485,40 @@ func TestEnvelopeMinutes(t *testing.T) {
 		}
 	}
 }
+
+// A goal gone quiet reaches the model as its own event, with the goal's
+// facts, and is discharged once raised; the goal itself stays held.
+func TestHermesGoalQuiet(t *testing.T) {
+	g, b, ft := hermesGhost(t, 0)
+	now := time.Now()
+	g.saveIntentions([]Intention{{
+		Name: "hermes/thesis", Text: "finish the thesis", Watch: []string{"thesis"},
+		Made: now.Add(-8 * 24 * time.Hour), Asked: true,
+	}})
+	g.checkGoalsOnce()
+	drift := driftName + "hermes/thesis"
+	if _, ok := g.intentionNamed(drift); !ok {
+		t.Fatal("the goal check found nothing")
+	}
+	g.fireIntention(drift)
+	if ctx := g.turnContext(now); !strings.Contains(ctx, `their goal "finish the thesis" has gone quiet (`+drift+`)`) {
+		t.Errorf("turn context: %q", ctx)
+	}
+	ft.reply = func(context.Context, hermes.TurnRequest) (hermes.Reply, error) {
+		return hermes.Reply{Text: "The thesis has been quiet."}, nil
+	}
+	b.Deliver(proto.Event{Type: proto.EventIntention, Name: drift})
+	in := waitTurn(t, ft)
+	want := `[haunt event] kind=goal_quiet name=` + drift +
+		` goal="finish the thesis" goal_name=hermes/thesis held="8 days" last_seen=never`
+	if in != want {
+		t.Errorf("sent %q\nwant %q", in, want)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if _, ok := g.intentionNamed(drift); ok {
+		t.Error("the finding is still held after it was raised")
+	}
+	if _, ok := g.intentionNamed("hermes/thesis"); !ok {
+		t.Error("the goal went with the finding")
+	}
+}

@@ -1,6 +1,6 @@
 ---
 name: keep-an-eye-on-a-goal
-description: "A goal to hold, a goal gone quiet (drift), or how it goes"
+description: "kind=goal_quiet, or a goal to take on or ask about"
 version: 1.0.0
 author: haunt
 metadata:
@@ -32,21 +32,21 @@ eye on something:
 
 ## When it has gone quiet
 
-`[haunt event] kind=intention_due` with a `name` starting `_haunt/drift/`
-and a `text` like "bring up what they said mattered — … — because …".
+`[haunt event] kind=goal_quiet`, with the goal's text (`goal`), its name
+(`goal_name`), how long you have held it (`held`) and when it was last in
+front of them (`last_seen`, or `never`).
 
-1. Say it once, gently, in one sentence: the goal, and how long it has
-   been. No guilt, no lecture.
+1. Say it once, gently, in one sentence to them: the goal, and how long it
+   has been. No guilt, no lecture.
 2. Call `mcp__haunt__ask` with "Still want this?" and choices like "Yes,
    back to it", "Later" and "Drop it".
    - "Yes, back to it": a word of encouragement.
    - "Later": `mcp__haunt__intend` with `text` like `ask about <goal>
      again` and `delay_ms` of three days (259200000).
-   - "Drop it": find the goal's own name with `mcp__haunt__intentions`
-     (it starts `hermes/`), and `mcp__haunt__set_aside` it.
+   - "Drop it": `mcp__haunt__set_aside` with `goal_name`.
    - Dismissed (an empty answer): leave it.
-3. Do not resolve the `_haunt/drift/…` entry yourself. The driver clears
-   it once you have said it.
+3. The event's own `name` (`_haunt/drift/…`) is cleared once you have
+   said it. Never resolve `goal_name` unless they say the goal is done.
 
 ## When they ask how it is going
 

@@ -278,10 +278,14 @@ func (b *hermesBrain) Deliver(e proto.Event) error {
 		if !ok {
 			return nil
 		}
-		b.unprompted("intention", "intention:"+it.Name, hermes.Envelope("intention_due",
+		envelope := hermes.Envelope("intention_due",
 			hermes.F("name", it.Name),
 			hermes.F("text", it.Text),
-			hermes.F("asked", it.Asked)),
+			hermes.F("asked", it.Asked))
+		if goal, ok := g.quietGoal(it); ok {
+			envelope = goalQuietEnvelope(it, goal, time.Now())
+		}
+		b.unprompted("intention", "intention:"+it.Name, envelope,
 			func(shown bool) {
 				// An errand is discharged by being raised. Only if it was
 				// actually seen: a reminder that ran into a quiet hour or
@@ -640,9 +644,14 @@ func (g *Ghost) turnContext(now time.Time) string {
 	}
 	var owed []string
 	for _, it := range g.loadIntentions() {
-		if it.Fired && !it.Aside {
-			owed = append(owed, fmt.Sprintf("%q (%s)", it.Text, it.Name))
+		if !it.Fired || it.Aside {
+			continue
 		}
+		if goal, ok := g.quietGoal(it); ok {
+			owed = append(owed, fmt.Sprintf("their goal %q has gone quiet (%s)", goal.Text, it.Name))
+			continue
+		}
+		owed = append(owed, fmt.Sprintf("%q (%s)", it.Text, it.Name))
 	}
 	if len(owed) > 0 {
 		line += "\nCame due and not yet dealt with: " + strings.Join(owed, "; ") +
@@ -713,6 +722,34 @@ func minutes(d time.Duration) string {
 }
 
 // intentionNamed finds one standing intention.
+// quietGoal is the goal a drift finding (goal.go) is about, if it is one
+// and the goal is still held.
+func (g *Ghost) quietGoal(it Intention) (Intention, bool) {
+	name, ok := strings.CutPrefix(it.Name, driftName)
+	if !ok {
+		return Intention{}, false
+	}
+	return g.intentionNamed(name)
+}
+
+// goalQuietEnvelope is a drift finding as the model sees it: its own event
+// with the goal's facts, rather than intention_due with the finding's text.
+// That text is an instruction about the person in the third person, and
+// sent as it was, the model answered in kind ("Raised it: gently prodded
+// them…") and never reached for the skill written for this.
+func goalQuietEnvelope(finding, goal Intention, now time.Time) string {
+	seen := "never"
+	if last := goal.LastSeen(); !last.IsZero() {
+		seen = roughly(now.Sub(last)) + " ago"
+	}
+	return hermes.Envelope("goal_quiet",
+		hermes.F("name", finding.Name),
+		hermes.F("goal", goal.Text),
+		hermes.F("goal_name", goal.Name),
+		hermes.F("held", roughly(now.Sub(goal.Made))),
+		hermes.F("last_seen", seen))
+}
+
 func (g *Ghost) intentionNamed(name string) (Intention, bool) {
 	for _, it := range g.loadIntentions() {
 		if it.Name == name {

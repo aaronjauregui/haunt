@@ -109,7 +109,56 @@ capabilities = ["message", "llm", "imagine", "window", "tell"]
 
 [persona]
 system = "You are Wisp, a wry little desktop spirit haunting the user's screen. Reply in one or two short sentences, with dry wit. Let what you remember about them color your mood and callbacks."
+
+# One of hermes's own skills (docs/hermes-brain.md, section 14).
+[hermes]
+bundled_skills = ["humanizer"]
 EOF
+        # WISP_NOTES=<file> gives wisp a notes tool server (the tests' own,
+        # which appends lines to that file) and a skill that is listed only
+        # when the server's tool is there. A second skill names the tool
+        # wrongly, so the driver warns that hermes will hide it.
+        if [ -n "${WISP_NOTES:-}" ]; then
+            go build -o "$workdir/notes-server" ./cmd/haunt/testdata/toolserver
+            sed -i 's/"tell"\]/"tell", "tools"]/' "$workdir/wisp/ghost.toml"
+            cat >> "$workdir/wisp/ghost.toml" <<TOML
+
+[[tool]]
+name = "notes"
+command = ["$workdir/notes-server"]
+env = ["HAUNT_TEST_NOTES"]
+TOML
+            export HAUNT_TEST_NOTES="$WISP_NOTES"
+            mkdir -p "$workdir/wisp/skills/shopping-list" "$workdir/wisp/skills/misspelled-notes"
+            cat > "$workdir/wisp/skills/shopping-list/SKILL.md" <<'SKILL'
+---
+name: shopping-list
+description: "When they want something on their shopping list"
+metadata:
+  hermes:
+    requires_toolsets: [mcp-haunt]
+    requires_tools: [mcp__haunt__notes__append]
+---
+
+# Shopping list
+
+1. Call `mcp__haunt__notes__append` with `text` like `buy: <item>`, once
+   per item.
+2. Reply in one short sentence naming what you added.
+SKILL
+            cat > "$workdir/wisp/skills/misspelled-notes/SKILL.md" <<'SKILL'
+---
+name: misspelled-notes
+description: "Never listed: its tool is spelled as the server spells it"
+metadata:
+  hermes:
+    requires_toolsets: [mcp-haunt]
+    requires_tools: [mcp__haunt__notes.append]
+---
+
+Hermes hides this skill.
+SKILL
+        fi
         # WISP_MORNING_CRON gives wisp a morning occasion, which haunt's
         # morning-check-in skill answers. The spin sets it a few minutes
         # ahead, since cron has minute granularity.
@@ -206,6 +255,11 @@ fi
 if [ -n "$goal_delay" ]; then
     echo ">> checking on goals ${goal_delay} after going idle"
     run_args+=(-goal-check-delay "$goal_delay")
+fi
+# SEED_STATE is a command run with the ghosts' state root before any ghost
+# starts, to put something in their stores (scripts/spinseed).
+if [ -n "${SEED_STATE:-}" ]; then
+    $SEED_STATE "$workdir/data/haunt/ghosts"
 fi
 # The ghost's memory and cache go in the workdir, not the real library: a
 # demo is for looking at, and an imported shell you are trying out has no
