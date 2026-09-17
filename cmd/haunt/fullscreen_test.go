@@ -1,10 +1,6 @@
 package main
 
 import (
-	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -76,22 +72,13 @@ func TestGhostKeepsQuietOverFullscreen(t *testing.T) {
 		t.Skip("no terminal available to fill the screen with")
 	}
 
-	backend := fakeChatBackend(t)
-	defer backend.Close()
-
 	dir := t.TempDir()
-	rt := filepath.Join(dir, "run")
-	cfgDir := filepath.Join(dir, "config")
-	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	config := "[ai.llm]\nbase_url = \"" + backend.URL + "/v1\"\nmodel = \"fake\"\n"
-	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(config), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	bin := filepath.Join(dir, "haunt")
-	build(t, bin, ".")
+	// A model that would speak, so staying quiet is the driver's doing.
+	rig := newHermesRig(t, dir, []fakeRule{
+		{Match: "kind=idle", Reply: "Still there?"},
+		{Match: "[haunt event]", Reply: "NO_REPLY"},
+	}, "")
+	bin := rig.Bin
 	gDir := filepath.Join(dir, "wisp")
 	writeGhost(t, gDir, `[ghost]
 name = "wisp"
@@ -113,10 +100,10 @@ system = "You are Wisp."
 	record := filepath.Join(dir, "session.jsonl")
 	cmd := exec.Command(bin, "run", "-x", "100", "-y", "100", "-idle-ms", "2500",
 		"-state", filepath.Join(dir, "state"), "-record", record, gDir)
-	cmd.Env = append(c.Env(), "HAUNT_RUNTIME_DIR="+rt, "HAUNT_CONFIG_DIR="+cfgDir,
-		// So that "the ghost stayed quiet" is a real assertion rather than
-		// one that passes because the line was filtered out.
-		"HAUNT_DEBUG=curiosity")
+	cmd.Env = append(c.Env(), rig.env()...)
+	// So that "the ghost stayed quiet" is a real assertion rather than one
+	// that passes because the line was filtered out.
+	cmd.Env = append(cmd.Env, "HAUNT_DEBUG=curiosity")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -137,6 +124,9 @@ system = "You are Wisp."
 	waitLog(t, stderr, "something is fullscreen")
 	if strings.Contains(stderr.String(), "on the ghost's own account") {
 		t.Errorf("the ghost spoke over a fullscreen window:\n%s", stderr.String())
+	}
+	if got := fakeEntries(rig.FakeLog, turnsAbout("kind=idle")); len(got) != 0 {
+		t.Errorf("the model was woken over a fullscreen window: %+v", got)
 	}
 }
 
@@ -162,14 +152,4 @@ func eventually(d time.Duration, cond func() bool) bool {
 		time.Sleep(150 * time.Millisecond)
 	}
 	return false
-}
-
-// fakeChatBackend answers any chat request, so the test can tell "the ghost
-// chose not to speak" from "the ghost could not".
-func fakeChatBackend(t *testing.T) *httptest.Server {
-	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Still there?\"}}]}\n\ndata: [DONE]\n\n")
-	}))
 }

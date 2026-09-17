@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -13,10 +12,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
-
-	"github.com/aaronjauregui/haunt/plugins"
 )
 
 // Config is the [hermes] section of the haunt config: where hermes is and
@@ -37,10 +35,20 @@ type Config struct {
 	// ToolTimeout bounds one tool call from hermes, in seconds, which is
 	// how long an `ask` may wait on the person. Default 600.
 	ToolTimeout int `toml:"tool_timeout"`
-	// Memory selects the memory provider: "" for hermes's built-in memory,
-	// or "haunt" to read and correct beliefs through haunt's plugin
-	// (plugins/hermes/haunt).
-	MemoryProvider string `toml:"memory_provider"`
+	// FirstTokenSeconds is how long a turn may go without a word or a tool
+	// call before the driver gives up on it (default 30). The deadline is
+	// on the first sign of life rather than the whole turn: a turn waiting
+	// on the person's answer is working, and a gateway that has said
+	// nothing at all has wedged.
+	FirstTokenSeconds int `toml:"first_token_timeout"`
+}
+
+// FirstTokenTimeout is FirstTokenSeconds with its default.
+func (c Config) FirstTokenTimeout() time.Duration {
+	if c.FirstTokenSeconds > 0 {
+		return time.Duration(c.FirstTokenSeconds) * time.Second
+	}
+	return 30 * time.Second
 }
 
 // ModelConfig is the model block of a profile.
@@ -222,8 +230,7 @@ func (c Config) EnsureProfile(spec ProfileSpec) (Profile, error) {
 		changed = true
 	}
 	if env["HAUNT_GHOST"] != spec.Ghost {
-		// For the memory provider plugin, which runs inside hermes and has
-		// to find the ghost's socket.
+		// Which ghost the profile belongs to, for a person reading it.
 		env["HAUNT_GHOST"] = spec.Ghost
 		changed = true
 	}
@@ -254,34 +261,10 @@ func (c Config) EnsureProfile(spec ProfileSpec) (Profile, error) {
 			}
 		}
 	}
-	if c.MemoryProvider == "haunt" {
-		if err := installPlugin(filepath.Join(p.Dir, "plugins", "haunt")); err != nil {
-			return Profile{}, fmt.Errorf("installing the haunt memory provider: %w", err)
-		}
-	}
 	if err := c.writeConfig(filepath.Join(p.Dir, "config.yaml"), spec); err != nil {
 		return Profile{}, err
 	}
 	return p, nil
-}
-
-// installPlugin writes the memory provider into the profile's own plugin
-// directory, where hermes looks for user plugins. Rewritten every start, so
-// the plugin always matches the driver talking to it.
-func installPlugin(dir string) error {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	return fs.WalkDir(plugins.MemoryProvider, ".", func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		data, err := plugins.MemoryProvider.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		return writeIfChanged(filepath.Join(dir, filepath.Base(path)), data, 0o600)
-	})
 }
 
 // disabledToolsets is subtracted last, whatever else enables them: a later
@@ -357,9 +340,10 @@ func (c Config) writeConfig(path string, spec ProfileSpec) error {
 		// not a companion. Only defaulted: the person may want otherwise.
 		memory["write_approval"] = false
 	}
-	if c.MemoryProvider != "" {
-		memory["provider"] = c.MemoryProvider
-	} else if memory["provider"] == "haunt" {
+	// Hermes memory is the ghost's only memory. A profile from before
+	// phase 2 may still name haunt's memory provider, which no longer
+	// exists; hermes would fail to load it.
+	if memory["provider"] == "haunt" {
 		delete(memory, "provider")
 	}
 

@@ -105,10 +105,9 @@ func TestFiringDoesNotDischarge(t *testing.T) {
 	if !held[0].Fired {
 		t.Error("it is not marked as having come due")
 	}
-	// And it says so, so the ghost brings it up next time they talk rather
-	// than the reminder evaporating.
-	if ctx := g.intentionsContext(""); !strings.Contains(ctx, "not dealt with it yet") {
-		t.Errorf("context does not say it is outstanding:\n%s", ctx)
+	// And it says so when asked, so the reminder does not evaporate.
+	if list, _ := toolIntentions(g, nil, nil); !strings.Contains(list, "not yet dealt with") {
+		t.Errorf("the list does not say it is outstanding:\n%s", list)
 	}
 }
 
@@ -168,14 +167,10 @@ func TestAnIntentionWithNoMoment(t *testing.T) {
 	if armed {
 		t.Error("an intention with no moment was given one")
 	}
-	// It is a goal, so it rides into a request that is about it rather than
-	// into every request for the rest of the year (see inContext).
-	ctx := g.intentionsContext("did you water the plants?")
-	if !strings.Contains(ctx, "plants") || !strings.Contains(ctx, "no particular moment") {
-		t.Errorf("context = %q, want it carried and marked as having no moment", ctx)
-	}
-	if ctx := g.intentionsContext("what is the weather like"); ctx != "" {
-		t.Errorf("context = %q, want a goal left out of a request that is not about it", ctx)
+	// It is a goal, and says so when the ghost is asked what it holds.
+	list, _ := toolIntentions(g, nil, nil)
+	if !strings.Contains(list, "plants") || !strings.Contains(list, "(a goal)") {
+		t.Errorf("intentions = %q, want it listed as a goal", list)
 	}
 }
 

@@ -97,11 +97,10 @@ wasm = "brain.wasm"
 	}
 
 	// Reinstall while withholding grants: update keeps running but the
-	// socket must refuse messages. (The socket itself is always listening
-	// now, because `haunt correct` goes through it and correcting your own
-	// ghost is not a capability outside programs are granted; the gate
-	// moved into publishFromControl. What "withheld" means is observable
-	// exactly where it was before — `haunt say` fails.) Simulate
+	// socket must refuse messages. (The socket itself is always listening,
+	// because the model's tool calls arrive through it too; the gate is in
+	// publishFromControl. What "withheld" means is observable exactly where
+	// it was before — `haunt say` fails.) Simulate
 	// withholding by rewriting grants.toml with no capabilities.
 	grantsPath := filepath.Join(dir, "data", "ghosts", "whisper", "grants.toml")
 	g, err := os.ReadFile(grantsPath)

@@ -1,10 +1,6 @@
 package main
 
 import (
-	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,29 +20,13 @@ import (
 // replaced by a question about the thing happening right now.
 func TestConsentInTheBalloon(t *testing.T) {
 	c := testenv.StartT(t)
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.Copy(io.Discard, r.Body)
-		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"allowed at last\"}}]}\n\ndata: [DONE]\n\n")
-	}))
-	defer backend.Close()
-
 	dir := t.TempDir()
-	bin := filepath.Join(dir, "haunt")
-	build(t, bin, ".")
-	cfgDir := filepath.Join(dir, "config")
-	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	cfg := fmt.Sprintf("[ai.llm]\nbase_url = %q\nmodel = \"fake\"\n", backend.URL+"/v1")
-	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(cfg), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	envAll := []string{
-		"HAUNT_CONFIG_DIR=" + cfgDir,
-		"HAUNT_DATA_DIR=" + filepath.Join(dir, "data"),
-		"HAUNT_RUNTIME_DIR=" + filepath.Join(dir, "run"),
-	}
+	rig := newHermesRig(t, dir, []fakeRule{
+		{Match: "[haunt event]", Reply: "NO_REPLY"},
+		{Match: "", Reply: "allowed at last: {input}"},
+	}, "")
+	bin := rig.Bin
+	envAll := append(rig.env(), "HAUNT_DATA_DIR="+filepath.Join(dir, "data"))
 	run := func(args ...string) string {
 		t.Helper()
 		cmd := exec.Command(bin, args...)
@@ -69,9 +49,6 @@ func TestConsentInTheBalloon(t *testing.T) {
 name = "wisp"
 version = "0.1.0"
 capabilities = ["message", "llm"]
-
-[brain]
-builtin = true
 
 [persona]
 system = "You are Wisp."
@@ -149,15 +126,19 @@ system = "You are Wisp."
 		wait100ms()
 	}
 
-	// ...and the request that provoked the question goes through, so the
-	// answer arrives as if nothing had happened.
-	waitRecordContains(t, record, "allowed at last")
+	// ...and the turn that provoked the question goes through, so the
+	// answer arrives as if nothing had happened. The boot turn before it
+	// never reached the model: nobody asked, so nobody was asked.
+	waitFake(t, rig.FakeLog, 1, 10*time.Second, repliedTo("hello"))
+	if got := fakeEntries(rig.FakeLog, turnsAbout("[haunt event]")); len(got) != 0 {
+		t.Errorf("unprompted turns reached the model without the capability: %+v", got)
+	}
 
 	// Asked again later, it does not ask again: the grant answers for
 	// itself now.
 	before := strings.Count(stderr.String(), "asking whether")
 	say("and again")
-	waitRecordCount(t, record, `"type":"ai_reply"`, 2)
+	waitFake(t, rig.FakeLog, 1, 10*time.Second, repliedTo("and again"))
 	if got := strings.Count(stderr.String(), "asking whether"); got != before {
 		t.Errorf("it asked again about something already granted (%d → %d)", before, got)
 	}
@@ -168,23 +149,11 @@ system = "You are Wisp."
 func TestNeverAskAgainIsRecorded(t *testing.T) {
 	c := testenv.StartT(t)
 	dir := t.TempDir()
-	bin := filepath.Join(dir, "haunt")
-	build(t, bin, ".")
-	cfgDir := filepath.Join(dir, "config")
-	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// A backend that would answer, so a refusal is the only reason nothing
+	// A model that would answer, so a refusal is the only reason nothing
 	// happens.
-	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"),
-		[]byte("[ai.llm]\nbase_url = \"http://127.0.0.1:1/v1\"\nmodel = \"fake\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	envAll := []string{
-		"HAUNT_CONFIG_DIR=" + cfgDir,
-		"HAUNT_DATA_DIR=" + filepath.Join(dir, "data"),
-		"HAUNT_RUNTIME_DIR=" + filepath.Join(dir, "run"),
-	}
+	rig := newHermesRig(t, dir, nil, "")
+	bin := rig.Bin
+	envAll := append(rig.env(), "HAUNT_DATA_DIR="+filepath.Join(dir, "data"))
 	run := func(args ...string) string {
 		t.Helper()
 		cmd := exec.Command(bin, args...)
@@ -204,9 +173,6 @@ func TestNeverAskAgainIsRecorded(t *testing.T) {
 name = "wisp"
 version = "0.1.0"
 capabilities = ["message", "llm"]
-
-[brain]
-builtin = true
 
 [persona]
 system = "You are Wisp."
@@ -269,6 +235,10 @@ system = "You are Wisp."
 			t.Fatalf("the refusal is not visible in perms:\n%s", run("perms"))
 		}
 		wait100ms()
+	}
+
+	if got := fakeEntries(rig.FakeLog, turnsAbout("hello")); len(got) != 0 {
+		t.Errorf("a refused turn reached the model: %+v", got)
 	}
 
 	// And granting it later clears the refusal: saying yes is also saying

@@ -42,7 +42,6 @@ type File struct {
 	Animation AnimationConfig
 	Awareness AwarenessConfig
 	Curiosity CuriosityConfig
-	Memory    MemoryConfig
 	// Hermes is where the ghosts' brain lives (docs/hermes-brain.md).
 	Hermes hermes.Config
 }
@@ -55,7 +54,6 @@ type root struct {
 	Animation AnimationConfig `toml:"animation"`
 	Awareness AwarenessConfig `toml:"awareness"`
 	Curiosity CuriosityConfig `toml:"curiosity"`
-	Memory    MemoryConfig    `toml:"memory"`
 	Hermes    hermes.Config   `toml:"hermes"`
 }
 
@@ -101,7 +99,6 @@ func Load() (*File, error) {
 		Animation: r.Animation,
 		Awareness: r.Awareness,
 		Curiosity: r.Curiosity,
-		Memory:    r.Memory,
 		Hermes:    r.Hermes,
 	}
 	if err := f.Awareness.derive(path); err != nil {
@@ -222,10 +219,6 @@ const (
 	// refused something you asked for, and the number is only there to
 	// bound a brain that has gone wrong.
 	DefaultObligationsPerDay = 24
-	// DefaultConsolidationsPerDay is the consolidation allowance. Four is
-	// enough to work through a busy week's memories over a few nights and
-	// few enough that nobody notices it on a bill.
-	DefaultConsolidationsPerDay = 4
 )
 
 // Allowances reports the daily rations: the per-ghost allowance for
@@ -244,28 +237,10 @@ func (f *File) Allowances() (perGhost, room int) {
 	return perGhost, room
 }
 
-// MemoryConfig is the [memory] portion of the user config: what the ghost
-// is allowed to spend thinking about what it already knows.
-type MemoryConfig struct {
-	// ConsolidationsPerDay caps consolidation passes in any rolling 24
-	// hours. Zero switches consolidation off entirely — the index then
-	// behaves as it did before, a flat ring that forgets by strength —
-	// absent means DefaultConsolidationsPerDay.
-	ConsolidationsPerDay *int `toml:"consolidations_per_day"`
-}
-
 // ObligationsPerDay is the setting with its default applied.
 func (f *File) ObligationsPerDay() int {
 	if f.Curiosity.ObligationsPerDay == nil {
 		return DefaultObligationsPerDay
 	}
 	return *f.Curiosity.ObligationsPerDay
-}
-
-// ConsolidationsPerDay is the setting with its default applied.
-func (f *File) ConsolidationsPerDay() int {
-	if f.Memory.ConsolidationsPerDay == nil {
-		return DefaultConsolidationsPerDay
-	}
-	return *f.Memory.ConsolidationsPerDay
 }

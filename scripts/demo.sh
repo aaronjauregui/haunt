@@ -7,23 +7,20 @@
 #
 # IDLE_MS sets how long the nested compositor must see no input before the
 # ghost is told the user has gone idle — which is when it may speak first,
-# and when it may consolidate its memories. The driver's own default is two
+# and when it looks at whether a goal has gone quiet. The driver's own default is two
 # minutes; IDLE_MS=10000 makes initiative watchable without waiting around.
 # Note the idleness is the *nested* compositor's: moving the pointer across
 # that window resets it.
 #
-# SLEEP_DELAY and SLEEP_AGE shorten the two waits in front of memory
-# consolidation (normally 5m after going idle, over memories at least 48h
-# old). SLEEP_DELAY=5s SLEEP_AGE=1s makes the whole thing watchable in a
-# sitting; see "testing consolidation" in DESIGN.md.
+# GOAL_DELAY shortens the wait between going idle and the goal check
+# (normally 5m); GOAL_DELAY=5s makes it watchable in a sitting.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
 backend="${WLR_BACKENDS:-wayland}"
 idle_ms="${IDLE_MS:-}"
-sleep_delay="${SLEEP_DELAY:-}"
-sleep_age="${SLEEP_AGE:-}"
+goal_delay="${GOAL_DELAY:-}"
 workdir="$(mktemp -d /tmp/haunt-demo-XXXXXX)"
 # Short, because a unix socket path has about 100 characters to play with
 # and the control socket lives under this.
@@ -53,9 +50,8 @@ EOF
 # GHOST="whisper wisp" puts both on screen at once, which is how you watch
 # the multi-ghost behaviour: neither opens on top of the other, and `haunt
 # say` follows whichever you last poked. Whisper is the scripted example
-# brain, built to WASM; wisp declares no brain at all and so runs on the
-# driver's built-in one, chatting via your configured LLM ([ai.llm] in
-# ~/.config/haunt/config.toml) and drawing via [ai.image].
+# brain, built to WASM; wisp declares no brain at all and so runs on hermes
+# ([hermes] in ~/.config/haunt/config.toml), drawing via [ai.image].
 seriko="${SERIKO:-}"
 ghosts="${GHOST:-whisper}"
 ghost_dirs=()
@@ -110,7 +106,7 @@ version = "0.1.0"
 capabilities = ["message", "llm", "imagine", "window", "tell"]
 
 [persona]
-system = "You are Wisp, a wry little desktop spirit haunting the user's screen. Reply in one or two short sentences, with dry wit. You may be shown your own private journal; let it color your mood and callbacks."
+system = "You are Wisp, a wry little desktop spirit haunting the user's screen. Reply in one or two short sentences, with dry wit. Let what you remember about them color your mood and callbacks."
 EOF
         ;;
     *)
@@ -164,13 +160,9 @@ if [ -n "$idle_ms" ]; then
     echo ">> idle threshold: ${idle_ms}ms (leave the window alone to see it speak first)"
     run_args+=(-idle-ms "$idle_ms")
 fi
-if [ -n "$sleep_delay" ]; then
-    echo ">> consolidating ${sleep_delay} after going idle"
-    run_args+=(-consolidate-delay "$sleep_delay")
-fi
-if [ -n "$sleep_age" ]; then
-    echo ">> consolidating memories older than ${sleep_age}"
-    run_args+=(-consolidate-after "$sleep_age")
+if [ -n "$goal_delay" ]; then
+    echo ">> checking on goals ${goal_delay} after going idle"
+    run_args+=(-goal-check-delay "$goal_delay")
 fi
 # The ghost's memory and cache go in the workdir, not the real library: a
 # demo is for looking at, and an imported shell you are trying out has no

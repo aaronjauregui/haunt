@@ -31,10 +31,11 @@ import (
 //
 //   - **It survives.** An intention is in the store, not in a timer wheel.
 //     A ghost restarted at lunchtime still means to tell you at four.
-//   - **It is carried, not merely scheduled.** Open intentions ride along
-//     in the ghost's context, the way the journal does, so the ghost knows
-//     what it is holding and can say so if asked. A durable timer that the
-//     ghost could not talk about would be a cron job with a face.
+//   - **It is carried, not merely scheduled.** The ghost can list what it
+//     is holding (the intentions tool) and say so if asked, and anything
+//     that came due and was not dealt with rides along on every turn
+//     (turnContext). A durable timer that the ghost could not talk about
+//     would be a cron job with a face.
 //   - **It is discharged deliberately.** Coming due does not clear it;
 //     `resolve` does. So an intention whose moment arrived while the
 //     balloon was suppressed — quiet hours, a fullscreen game — is still
@@ -49,10 +50,9 @@ import (
 const intentionsKey = internalKeyPrefix + "intentions"
 
 const (
-	// maxIntentions bounds what a ghost may be holding. Small, because
-	// these are pasted into every prompt and because a companion carrying
-	// forty errands is a task list, which is a different application and a
-	// worse one. The oldest gives way.
+	// maxIntentions bounds what a ghost may be holding. Small, because a
+	// companion carrying forty errands is a task list, which is a different
+	// application and a worse one. The oldest gives way.
 	maxIntentions = 12
 	// maxIntentionChars keeps one to about a line, for the same reason.
 	maxIntentionChars = 200
@@ -374,81 +374,9 @@ func (g *Ghost) fireIntention(name string) {
 	})
 }
 
-// intentionsContext renders what the ghost is holding, for the system
-// prompt. This is what separates an intention from a durable timer: the
-// ghost knows what it has taken on, so it can be asked about it, and it
-// answers from the same place the reminder will come from rather than from
-// a guess.
-func (g *Ghost) intentionsContext(said string) string {
-	list := g.loadIntentions()
-	if len(list) == 0 {
-		return ""
-	}
-	now := time.Now()
-	var b strings.Builder
-	for _, it := range list {
-		if !g.inContext(it, said) {
-			continue
-		}
-		if b.Len() == 0 {
-			b.WriteString("\n\nWhat you are meaning to do (you took these on; " +
-				"mention one only if it is relevant or its moment has come):\n")
-		}
-		b.WriteString("- " + it.Text)
-		switch {
-		case it.Fired:
-			b.WriteString(" (its moment has come and you have not dealt with it yet)")
-		case it.Goal():
-			b.WriteString(" (no particular moment; they said this matters to them)")
-		default:
-			b.WriteString(" (due " + when(it.Due, now) + ")")
-		}
-		b.WriteString("\n")
-	}
-	return b.String()
-}
-
-// inContext decides whether one intention rides into this request.
-//
-// Errands go in unconditionally, which is right for something due in an
-// hour: it should be in front of the model constantly, because its whole
-// value is being raised at the right moment. A goal is the opposite trade —
-// it would pay rent on every request for six months in order to be relevant
-// on perhaps one of them — so it goes in only when something has put it
-// there: the person just mentioned it, or the drift check turned it into an
-// errand of its own, which is then unconditional like any other.
-//
-// Two goals still go in unasked. One the person has set aside goes in never
-// — that is what setting it aside means. And one with nothing to watch for
-// goes in always, because nothing else can ever surface it, and a purpose
-// the ghost is carrying and structurally cannot mention is worse than one
-// that costs a line.
-func (g *Ghost) inContext(it Intention, said string) bool {
-	// Anything whose moment has come and gone unanswered is outstanding,
-	// and outstanding is unconditional whatever shape it started as. This
-	// is what a drift finding becomes, and it is why the finding is the
-	// thing that reaches a prompt rather than the goal behind it.
-	if !it.Goal() || it.Fired {
-		return true
-	}
-	if it.Aside {
-		return false
-	}
-	if len(it.Watch) == 0 {
-		return true
-	}
-	lower := strings.ToLower(said)
-	for _, w := range it.Watch {
-		if mentions(lower, w) {
-			return true
-		}
-	}
-	return false
-}
-
 // when renders a due time the way a person would say it. Absolute dates
-// rather than "in 3h": a model reading "in 3 hours" months later in a
-// recalled fragment would have no idea what it meant.
+// rather than "in 3h": a model reading "in 3 hours" later in its session
+// would have no idea what it meant.
 func when(due, now time.Time) string {
 	switch d := due.Sub(now); {
 	case d < 0:

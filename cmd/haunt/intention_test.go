@@ -1,10 +1,6 @@
 package main
 
 import (
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,64 +20,37 @@ import (
 // something, is killed, is started again, and hands the errand back.
 func TestAnIntentionSurvivesARestart(t *testing.T) {
 	c := testenv.StartT(t)
-
-	// A backend that echoes the direction it was given, so the test can see
-	// which errand came back rather than only that something did.
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			Messages []struct {
-				Role    string `json:"role"`
-				Content string `json:"content"`
-			} `json:"messages"`
-		}
-		json.NewDecoder(r.Body).Decode(&req)
-		last := req.Messages[len(req.Messages)-1].Content
-		w.Header().Set("Content-Type", "text/event-stream")
-		fl := w.(http.Flusher)
-		chunk, _ := json.Marshal(map[string]any{"choices": []map[string]any{
-			{"delta": map[string]string{"content": "reminding you: " + last}},
-		}})
-		fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", chunk)
-		fl.Flush()
-	}))
-	defer backend.Close()
-
 	dir := t.TempDir()
-	rt := filepath.Join(dir, "run")
-	cfgDir := filepath.Join(dir, "config")
-	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	cfg := fmt.Sprintf("[ai.llm]\nbase_url = %q\nmodel = \"fake\"\n", backend.URL+"/v1")
-	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(cfg), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	bin := filepath.Join(dir, "haunt")
-	build(t, bin, ".")
+	// The model takes the errand on through intend, and says it when it
+	// comes due, echoing the envelope so the test can see which errand came
+	// back rather than only that something did.
+	rig := newHermesRig(t, dir, []fakeRule{
+		{Match: "kind=intention_due", Reply: "reminding you: {input}"},
+		{Match: "[haunt event]", Reply: "NO_REPLY"},
+		{Match: "remind me", Tool: "intend",
+			Args:  map[string]any{"text": "check the build", "delay_ms": 2000},
+			Reply: "I will: {tool}"},
+	}, "")
+	bin := rig.Bin
 	gDir := filepath.Join(dir, "wisp")
 	writeGhost(t, gDir, `[ghost]
 name = "wisp"
 capabilities = ["message", "llm"]
 
-[brain]
-builtin = true
-
 [persona]
 system = "You are Wisp."
 `)
 	state := filepath.Join(dir, "state")
-	env := append(os.Environ(), "HAUNT_RUNTIME_DIR="+rt)
+	rt := rig.RT
 
 	// Start the ghost, ask it to remember something, and stop it.
 	record := filepath.Join(dir, "first.jsonl")
-	stop := startWisp(t, c, bin, gDir, state, rt, cfgDir, record)
-	say(t, bin, env, "remind me in 2 seconds to check the build")
+	stop := startWisp(t, c, rig, gDir, state, record)
+	rig.say(t, "remind me in 2 seconds to check the build")
 
-	// The recording is the event bus, and an intention is an *intent* — it
-	// never appears there. What a person can see is the CLI, so that is
-	// what this waits on, which also checks the one path they have to find
-	// out what their ghost is carrying.
+	// What a person can see is the CLI, so that is what this waits on,
+	// which also checks the one path they have to find out what their
+	// ghost is carrying.
 	waitIntentions(t, bin, state, rt, "check the build")
 	stop()
 
@@ -93,13 +62,17 @@ system = "You are Wisp."
 		t.Fatalf("the errand did not outlive the ghost:\n%s", got)
 	}
 
-	// Started again, it hands the errand back of its own accord.
+	// Started again, it hands the errand back of its own accord: the event
+	// reaches the model after the settling delay, and the reply is shown.
 	second := filepath.Join(dir, "second.jsonl")
-	stop2 := startWisp(t, c, bin, gDir, state, rt, cfgDir, second)
+	stop2 := startWisp(t, c, rig, gDir, state, second)
 	defer stop2()
 
 	waitRecordContainsFor(t, second, `"type":"intention"`, 60*time.Second)
-	waitRecordContainsFor(t, second, "check the build", 60*time.Second)
+	due := waitFake(t, rig.FakeLog, 1, 30*time.Second, repliedTo("kind=intention_due"))
+	if !strings.Contains(due[0].Input, "check the build") || !strings.Contains(due[0].Input, "asked=true") {
+		t.Errorf("intention_due envelope = %q", due[0].Input)
+	}
 
 	// And having said it, it stops carrying it.
 	deadline := time.Now().Add(30 * time.Second)
@@ -131,12 +104,13 @@ func waitIntentions(t *testing.T, bin, state, rt, want string) {
 	}
 }
 
-// startWisp runs the ghost until the returned function is called.
-func startWisp(t *testing.T, c *testenv.Compositor, bin, gDir, state, rt, cfgDir, record string) func() {
+// startWisp runs the ghost on the rig's fake hermes until the returned
+// function is called.
+func startWisp(t *testing.T, c *testenv.Compositor, rig hermesRig, gDir, state, record string) func() {
 	t.Helper()
-	cmd := exec.Command(bin, "run", "-x", "100", "-y", "100",
+	cmd := exec.Command(rig.Bin, "run", "-x", "100", "-y", "100",
 		"-state", state, "-record", record, gDir)
-	cmd.Env = append(c.Env(), "HAUNT_RUNTIME_DIR="+rt, "HAUNT_CONFIG_DIR="+cfgDir)
+	cmd.Env = append(c.Env(), rig.env()...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -154,15 +128,6 @@ func startWisp(t *testing.T, c *testenv.Compositor, bin, gDir, state, rt, cfgDir
 		stopped = true
 		cmd.Process.Signal(syscall.SIGTERM)
 		cmd.Wait()
-	}
-}
-
-func say(t *testing.T, bin string, env []string, text string) {
-	t.Helper()
-	sc := exec.Command(bin, "say", "-ghost", "wisp", text)
-	sc.Env = env
-	if out, err := sc.CombinedOutput(); err != nil {
-		t.Fatalf("say %q: %v: %s", text, err, out)
 	}
 }
 

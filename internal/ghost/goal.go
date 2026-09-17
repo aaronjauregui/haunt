@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/aaronjauregui/haunt/internal/hlog"
 )
@@ -300,10 +301,9 @@ func (g *Ghost) recordSightings(names []string, now time.Time) {
 
 // The check.
 //
-// It is a consolidation pass pointed at a different question, and it wants
-// no new scheduling machinery: it runs when the ghost is idle, which is
-// both the honest time and the time it costs nothing. Three rules, two
-// inherited from consolidation and one of its own.
+// It wants no scheduling machinery of its own: it runs when the ghost is
+// idle, which is both the honest time and the time it costs nothing. Three
+// rules.
 //
 //   - **It must be able to find nothing**, and finding nothing must cost
 //     nothing. That is the common case. Every ambient assistant that has
@@ -329,24 +329,67 @@ func (g *Ghost) recordSightings(names []string, now time.Time) {
 // itself while nobody was there produces a finding charged to curiosity,
 // and cannot say otherwise.
 
-// drifter is the state of the pass. Only a timer: unlike consolidation
-// there is no model call to cancel, because there is no model call.
+// drifter is the state of the pass. Only a timer: there is no model call
+// to cancel, because there is no model call.
 type drifter struct {
 	mu    sync.Mutex
 	timer *time.Timer
 }
 
-// beginGoalCheck is the idle hook. It waits the same while consolidation
-// waits, and for the same reason: "away from the desk" is not the same as
-// "stepped out to make tea", and a person who comes back in ninety seconds
-// should not find a fortnight's verdict waiting for them.
+// mentions reports whether name occurs in text as a whole word, so "Sam"
+// does not match "same" and a project called "go" does not match every
+// sentence containing "going".
+func mentions(text, name string) bool {
+	if name == "" {
+		return false
+	}
+	for i := 0; ; {
+		j := strings.Index(text[i:], name)
+		if j < 0 {
+			return false
+		}
+		start := i + j
+		end := start + len(name)
+		if !wordish(text, start-1) && !wordish(text, end) {
+			return true
+		}
+		i = start + 1
+	}
+}
+
+// wordish reports whether the byte at i is part of a word, treating
+// out-of-range as not.
+func wordish(s string, i int) bool {
+	if i < 0 || i >= len(s) {
+		return false
+	}
+	r := rune(s[i])
+	return unicode.IsLetter(r) || unicode.IsDigit(r)
+}
+
+// goalCheckDelay is how long after the person goes idle the goal check
+// runs. Idle fires on a threshold the person may have set to seconds, and
+// "away from the desk" is not the same as "stepped out to make tea": a
+// person who comes back in ninety seconds should not find a fortnight's
+// verdict waiting for them.
+const goalCheckDelay = 5 * time.Minute
+
+// checkDelay is goalCheckDelay, overridable for tests and demos.
+func (g *Ghost) checkDelay() time.Duration {
+	if g.opts.GoalCheckDelay > 0 {
+		return g.opts.GoalCheckDelay
+	}
+	return goalCheckDelay
+}
+
+// beginGoalCheck is the idle hook.
 func (g *Ghost) beginGoalCheck() {
 	g.drifter.mu.Lock()
 	defer g.drifter.mu.Unlock()
 	if g.drifter.timer != nil {
 		return
 	}
-	g.drifter.timer = time.AfterFunc(g.consolidateDelay(), func() {
+	g.drifter.timer = time.AfterFunc(g.checkDelay(), func() {
 		g.go_(hlog.Memory, "checking a goal", g.checkGoalsOnce)
 	})
 }

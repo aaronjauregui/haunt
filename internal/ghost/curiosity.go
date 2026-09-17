@@ -9,9 +9,9 @@ import (
 	"github.com/aaronjauregui/haunt/internal/proto"
 )
 
-// Initiative: the ghost acting without being addressed. The journal and the
-// memory index are worth little while the ghost can only answer — recall
-// only fires on an utterance — so this is what turns them into behavior.
+// Initiative: the ghost acting without being addressed. On hermes that is
+// an event reaching the model at all (hermesbrain.go's unprompted), charged
+// before it is sent and refunded if the ghost says nothing.
 //
 // The driver decides what counts as unprompted by causality rather than by
 // asking the brain, which cannot be trusted to report its own motives. Two
@@ -21,7 +21,7 @@ import (
 //     waiting on arrived). Anything the ghost emits inside this window is a
 //     response and costs nothing.
 //   - initiativeUntil: the ghost paid for an unprompted action. The rest of
-//     that chain — the say after the chat, the imagine after the rewrite —
+//     that chain — the say after the look, the picture after the remark —
 //     rides free until the window closes. It is deliberately *not*
 //     extendable while open, so one charge buys one chain rather than an
 //     unbounded cascade.
@@ -50,17 +50,14 @@ const (
 	// curiosityKey persists spends so restarting the ghost does not refill
 	// the allowance.
 	curiosityKey = internalKeyPrefix + "curiosity"
-	// sleepKey persists the consolidation allowance, for the same reason.
-	sleepKey = internalKeyPrefix + "sleep"
 	// obligationKey persists the obligation allowance, likewise.
 	obligationKey = internalKeyPrefix + "obligation"
 )
 
-// allowance is a persisted daily ration of things the user did not ask
-// for. Two exist: unprompted actions (the curiosity budget) and
-// consolidation passes (memory.go's sleep), kept apart because they ration
-// different costs — one is the person's attention, the other their bill —
-// and a ghost should not go quiet because it spent the night thinking.
+// allowance is a persisted daily ration. Two exist: unprompted actions (the
+// curiosity budget) and things the person put on the ghost's books (the
+// obligation budget; see markObliged), kept apart because a reminder you
+// asked for is not a whim.
 type allowance struct {
 	mu     sync.Mutex
 	key    string

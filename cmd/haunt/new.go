@@ -11,13 +11,13 @@ import (
 var namePattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
 // cmdNew scaffolds a ghost project. By default that is a manifest and a
-// persona and nothing else — the driver's built-in brain runs it, so there
+// persona and nothing else — hermes is its brain, so there
 // is no compiler in the authoring path and the only thing left to do is the
 // art. `-brain` scaffolds the other kind: a brain in Go with a Makefile
 // that builds it to WASM, for a ghost whose logic is its own.
 func cmdNew(args []string) error {
 	fs := flag.NewFlagSet("new", flag.ExitOnError)
-	withBrain := fs.Bool("brain", false, "scaffold a Go brain compiled to WASM instead of using the built-in brain")
+	withBrain := fs.Bool("brain", false, "scaffold a Go brain compiled to WASM instead of running on hermes")
 	fs.Parse(args)
 	if fs.NArg() != 1 {
 		return fmt.Errorf("new: exactly one ghost name expected")
@@ -68,9 +68,9 @@ capabilities = ["message", "llm", "window"]
 [shell]
 # sprite = "shell.png"   # PNG with transparency; omit for the built-in blob
 
-# No [brain] section: this ghost runs on the driver's built-in brain, which
-# chats in the persona below, draws when asked, keeps a journal, and speaks
-# first now and then. Add one when you want logic of your own — see
+# No [brain] section: this ghost runs on hermes-agent, which talks in the
+# persona below, remembers what you tell it, takes on reminders, and speaks
+# first now and then. Add one when you want scripted logic instead — see
 # `+"`haunt new -brain`"+`.
 [persona]
 system = """
@@ -97,12 +97,14 @@ A ghost: a personality and a picture.
     haunt run .
 
 Talk to it by right-clicking it, or from a script with `+"`haunt say`"+`.
-It answers to `+"`help`"+`, `+"`draw <something>`"+`, `+"`remember <fact>`"+`,
-`+"`remind me in 10 minutes to <something>`"+` and `+"`look`"+` — the rest
-is conversation.
+Ask it anything, tell it things to remember, or ask it to remind you;
+double-click it for its menu.
 
-Chatting needs an LLM in `+"`~/.config/haunt/config.toml`"+` ([ai.llm]);
-any OpenAI-compatible endpoint will do, including a local Ollama.
+Its brain is [hermes-agent](https://github.com/nousresearch/hermes-agent):
+install hermes, and give the ghost's profile a model with
+`+"`hermes -p haunt-%s model`"+` (or `+"`[hermes.model]`"+` in
+`+"`~/.config/haunt/config.toml`"+`). The model needs a context window of
+at least 64K.
 
 ## Making it yours
 
@@ -111,11 +113,11 @@ any OpenAI-compatible endpoint will do, including a local Ollama.
   or a stack of layers with named poses for expressions and animation.
 - **Doing things** means a tool server: uncomment the `+"`[[tool]]`"+`
   block in `+"`ghost.toml`"+` and add `+"`\"tools\"`"+` to the
-  capabilities. Its tools reach your model during ordinary conversation,
-  so there is nothing to write.
+  capabilities. Its tools reach the model through haunt, so there is
+  nothing to write.
 - **Logic of its own** — reactions, commands, state — means a brain:
   `+"`haunt new -brain <name>`"+` scaffolds one in Go.
-`, name),
+`, name, name),
 	}, "cd " + name + " && haunt run ."
 }
 

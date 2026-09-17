@@ -34,7 +34,7 @@ func TestPromptedEvent(t *testing.T) {
 		{proto.Event{Type: proto.EventIdle}, false},
 		{proto.Event{Type: proto.EventCron, Name: "morning"}, false},
 		{proto.Event{Type: proto.EventTimer, Name: "followup"}, false},
-		{proto.Event{Type: proto.EventAIReply, Text: "hello"}, false},
+		{proto.Event{Type: proto.EventAIImage, Name: "/tmp/x.png"}, false},
 	} {
 		if got := promptedEvent(tc.e); got != tc.want {
 			t.Errorf("promptedEvent(%s from %q) = %v, want %v", tc.e.Type, tc.e.From, got, tc.want)
@@ -110,7 +110,7 @@ func TestPaidChainRidesFreeButDoesNotRenew(t *testing.T) {
 
 	// An AI result inside a paid chain must not extend the window: only
 	// user-driven results do that.
-	g.publishAIResult(proto.Event{Type: proto.EventAIReply, Text: "x"}, false)
+	g.publishAIResult(proto.Event{Type: proto.EventAIImage, Name: "x"}, false)
 	g.initMu.Lock()
 	g.initiativeUntil = time.Now().Add(-time.Second) // window closes
 	g.initMu.Unlock()
@@ -124,7 +124,7 @@ func TestPaidChainRidesFreeButDoesNotRenew(t *testing.T) {
 }
 
 // TestUserDrivenResultExtendsTheWindow: a slow model must not turn a reply
-// into an interruption. The ai_reply of a user-driven request reopens the
+// into an interruption. The result of a user-driven request reopens the
 // window so the follow-up imagine stays free.
 func TestUserDrivenResultExtendsTheWindow(t *testing.T) {
 	g, _ := testCuriosityGhost(t, 5)
@@ -135,7 +135,7 @@ func TestUserDrivenResultExtendsTheWindow(t *testing.T) {
 	g.promptedUntil = time.Now().Add(-time.Second)
 	g.initMu.Unlock()
 
-	g.publishAIResult(proto.Event{Type: proto.EventAIReply, Text: "tags: a dog"}, true)
+	g.publishAIResult(proto.Event{Type: proto.EventAILook, Text: "a dog on screen"}, true)
 	if !g.allowInitiative("imagine") {
 		t.Fatal("chained imagine refused")
 	}

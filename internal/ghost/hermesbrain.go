@@ -20,11 +20,11 @@ import (
 // judgment is hermes-agent's, and everything here is the driver deciding
 // what reaches it and putting what comes back on screen.
 //
-// It is a brain.Runner hosted in the driver, like the old built-in brain,
-// but it does not speak intents. What the model wants done arrives as tool
-// calls over the control socket (hermestools.go) and is performed there,
-// under the same gates as everything else; what the model says arrives as
-// the turn's reply and is shown here. The division of labour is the one
+// It is a brain.Runner hosted in the driver, but it does not speak
+// intents. What the model wants done arrives as tool calls over the control
+// socket (hermestools.go) and is performed there, under the same gates as
+// everything else; what the model says arrives as the turn's reply and is
+// shown here. The division of labour is the one
 // docs/hermes-brain.md draws: the driver owns effects — who pays for a wake,
 // whether the balloon may show, what the person sees — and the model owns
 // what to make of an event and whether to say anything at all.
@@ -73,7 +73,7 @@ type hermesTurn struct {
 // order would be answering things they have stopped caring about.
 const hermesQueue = 8
 
-// Lingers, as the built-in brain had them: long enough to read.
+// Lingers: long enough to read.
 const (
 	lingerPoke  = 4 * time.Second
 	lingerReply = 12 * time.Second
@@ -89,9 +89,8 @@ const doubleClick = 700 * time.Millisecond
 
 // reactCooldown bounds how often the ghost is woken about its neighbours:
 // at most once an hour, so two ghosts cannot talk each other into a loop
-// billed to the person. It used to live in the built-in brain; with the
-// model deciding what is worth a word, what is left is the driver deciding
-// what is worth a wake.
+// billed to the person. The model decides what is worth a word; the driver
+// decides what is worth a wake.
 const reactCooldown = time.Hour
 
 // worthWaking is what a neighbour can be seen doing that might deserve a
@@ -260,6 +259,10 @@ func (b *hermesBrain) unprompted(what, envelope string, after func(bool)) {
 		g.log.Debug(hlog.Brain, "%s dropped: the ghost is already in a turn", what)
 		return
 	}
+	if !g.capabilityActive("llm") {
+		g.log.Debug(hlog.Brain, "%s dropped: the llm capability is not granted", what)
+		return
+	}
 	ok, refund := g.chargeInitiative(what)
 	if !ok {
 		return
@@ -271,13 +274,13 @@ func (b *hermesBrain) unprompted(what, envelope string, after func(bool)) {
 	}
 }
 
-// Menu entries. The built-in brain's menu went with it; this one is the
-// driver's, and everything on it is either the driver's own business or a
-// turn the person asked for.
+// Menu entries. The menu is the driver's, and everything on it is either
+// the driver's own business or a turn the person asked for. Telling the
+// ghost it has something wrong is not on it: the person says so, and the
+// model edits its memory.
 const (
 	menuHelp    = "What can you do?"
 	menuWatch   = "Keep an eye on what I'm working on"
-	menuWrong   = "You've got something wrong about someone"
 	menuNothing = "Nothing, thanks"
 )
 
@@ -287,7 +290,7 @@ func (b *hermesBrain) menu() {
 	if g.declares("window") && !g.watching.Load() {
 		options = append(options, menuWatch)
 	}
-	options = append(options, menuWrong, menuNothing)
+	options = append(options, menuNothing)
 	switch g.ask("What would you like?", options...) {
 	case menuHelp:
 		// The person asked, so it is a turn somebody is waiting on — but it
@@ -298,8 +301,6 @@ func (b *hermesBrain) menu() {
 		}
 	case menuWatch:
 		g.execWatch()
-	case menuWrong:
-		g.execCorrect()
 	case menuNothing:
 		g.hideBalloon()
 	}
@@ -314,6 +315,15 @@ func (b *hermesBrain) run(t hermesTurn) {
 		t.refund = noRefund
 	}
 	userDriven := g.respondingToUser()
+
+	// Talking through the person's model is a capability like any other,
+	// and a person waiting may be asked for it (unprompted turns were
+	// checked before they were queued). Before the waiting indicator, which
+	// the question would otherwise replace.
+	if t.person && !g.ensureCapability("llm") {
+		b.fail(t, fmt.Errorf("the llm capability is not granted"))
+		return
+	}
 
 	var waiting *waiter
 	if t.person {
@@ -355,6 +365,7 @@ func (b *hermesBrain) run(t hermesTurn) {
 		shown   bool
 		talking bool
 		faced   bool
+		drew    bool
 		last    time.Time
 	)
 	onDelta := func(delta string) {
@@ -362,7 +373,8 @@ func (b *hermesBrain) run(t hermesTurn) {
 		mu.Lock()
 		defer mu.Unlock()
 		acc += delta
-		if !t.person || hermes.MaybeSilent(acc) {
+		// Not over a picture it has just drawn: the words wait for it.
+		if !t.person || hermes.MaybeSilent(acc) || (drew && g.pictureShowing()) {
 			return
 		}
 		if !talking {
@@ -377,10 +389,13 @@ func (b *hermesBrain) run(t hermesTurn) {
 	}
 	onTool := func(ev hermes.ToolEvent) {
 		wake()
-		if strings.HasSuffix(ev.Name, "face") || strings.HasSuffix(ev.Name, "clip") {
-			mu.Lock()
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case strings.HasSuffix(ev.Name, "face") || strings.HasSuffix(ev.Name, "clip"):
 			faced = true
-			mu.Unlock()
+		case strings.HasSuffix(ev.Name, "draw"):
+			drew = true
 		}
 	}
 
@@ -430,17 +445,41 @@ func (b *hermesBrain) run(t hermesTurn) {
 		after(false)
 		return
 	}
-	if !faced {
+	mu.Lock()
+	drewNow, facedNow := drew, faced
+	mu.Unlock()
+	if !facedNow {
 		// The model wears a face by calling the tool. When it did not, the
 		// lexicon is the free fallback, as for scripted lines.
-		g.inferExpression(text, false)
+		g.inferExpression(text)
 	}
 	// Whether it reaches the screen is decided at the screen, as for every
 	// line: a quiet hour or a half-typed line holds it back, and a reminder
 	// held back is still owed.
 	reached := !muted && !g.inputOpen()
-	g.showPaged(text)
-	g.lingerBalloon(g.balloonGen(), lingerReply)
+	if drewNow && g.pictureShowing() {
+		// The model drew this turn, and the picture is what was asked for.
+		// The words follow once it has had its time, unless something else
+		// has been shown meanwhile.
+		gen := g.balloonGen()
+		time.AfterFunc(pictureLinger, func() {
+			g.guard(hlog.Balloon, "a reply after a picture", func() {
+				select {
+				case <-g.stoppingC():
+					return
+				default:
+				}
+				if g.balloonGen() != gen {
+					return
+				}
+				g.showPaged(text)
+				g.lingerBalloon(g.balloonGen(), lingerReply)
+			})
+		})
+	} else {
+		g.showPaged(text)
+		g.lingerBalloon(g.balloonGen(), lingerReply)
+	}
 	if userDriven {
 		g.markPrompted()
 	}
@@ -480,12 +519,29 @@ func (b *hermesBrain) Close() error {
 	return err
 }
 
-// turnContext is the one line of ambient context layered on a turn: the
-// time, and what the ghost can see when it is allowed to see anything.
+// turnContext is the ambient context layered on a turn: the time, what the
+// ghost can see when it is allowed to see anything, and anything whose
+// moment came without it being said.
+//
+// The last is what keeps a reminder from being lost. An intention_due turn
+// can be dropped (another turn was in flight), answered with silence, or
+// held back by a quiet hour; the errand is then still owed, and nothing
+// would raise it again. Carried here, the model sees it on every turn
+// until it resolves it.
 func (g *Ghost) turnContext(now time.Time) string {
 	line := "Now: " + now.Format("Mon 2 Jan 15:04") + " (" + partOfDay(now) + ")."
 	if w := g.currentWindow().line(); w != "" && g.capabilityActive("window") {
 		line += " The person's focused window: " + w + "."
+	}
+	var owed []string
+	for _, it := range g.loadIntentions() {
+		if it.Fired && !it.Aside {
+			owed = append(owed, fmt.Sprintf("%q (%s)", it.Text, it.Name))
+		}
+	}
+	if len(owed) > 0 {
+		line += "\nCame due and not yet dealt with: " + strings.Join(owed, "; ") +
+			". Raise it when it fits, then resolve it."
 	}
 	return line
 }

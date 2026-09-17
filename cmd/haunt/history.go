@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -18,13 +17,13 @@ import (
 // cmdHistory prints a ghost's recent conversation. The balloon is
 // transient — a long reply pages away, and looking up a moment too late
 // means it is gone — so the words have to be readable somewhere that keeps
-// them. They are already stored; this is the window onto them.
+// them. A ghost's conversation is its hermes session; this is the window
+// onto it.
 func cmdHistory(args []string) error {
 	fs := flag.NewFlagSet("history", flag.ExitOnError)
 	state := fs.String("state", "", "override state directory")
 	n := fs.Int("n", 10, "how many turns to show, most recent last")
-	why := fs.Bool("why", false, "show what went into each reply: recalled memories, what was on screen, the prompt")
-	full := fs.Bool("prompt", false, "with -why, print the whole system prompt as it was sent")
+	why := fs.Bool("why", false, "show what went into each reply: what woke the ghost, what was on screen, what it did")
 	fs.Parse(args)
 
 	stateDir, err := resolveStateDir(*state, fs.Args())
@@ -38,9 +37,10 @@ func cmdHistory(args []string) error {
 	}
 	defer s.Close()
 
-	// A ghost on hermes keeps its conversation there, and the store holds
-	// only which session it is.
-	var turns []ghost.Exchange
+	// The conversation is kept by hermes, and the store holds only which
+	// session it is. No session means the ghost has never spoken (or is
+	// scripted, and keeps no conversation).
+	var turns []hermes.Message
 	if session, onHermes, err := s.Get(ghost.HermesSessionStoreKey); err != nil {
 		return err
 	} else if onHermes {
@@ -50,16 +50,6 @@ func cmdHistory(args []string) error {
 		}
 		if turns, err = hermesHistory(name, session, *n); err != nil {
 			return fmt.Errorf("history: %w", err)
-		}
-	} else {
-		raw, ok, err := s.Get(ghost.HistoryStoreKey)
-		if err != nil {
-			return err
-		}
-		if ok {
-			if turns, err = ghost.DecodeHistory(raw); err != nil {
-				return fmt.Errorf("history is corrupt: %w", err)
-			}
 		}
 	}
 	if len(turns) == 0 {
@@ -108,7 +98,7 @@ func cmdHistory(args []string) error {
 			fmt.Println("       (no reasons kept for this one — it is older than the trace)")
 			continue
 		}
-		printWhy(w, *full)
+		printWhy(w)
 	}
 	return nil
 }
@@ -116,7 +106,7 @@ func cmdHistory(args []string) error {
 // hermesHistory reads a ghost's conversation from its hermes gateway, which
 // has to be running: the session lives in hermes's own database, and haunt
 // reads it only through hermes.
-func hermesHistory(name, session string, n int) ([]ghost.Exchange, error) {
+func hermesHistory(name, session string, n int) ([]hermes.Message, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, err
@@ -133,15 +123,7 @@ func hermesHistory(name, session string, n int) ([]ghost.Exchange, error) {
 		return nil, fmt.Errorf("%s's hermes gateway is not running, and the conversation is kept there (%v)", name, err)
 	}
 	// Twice as many messages as turns: a turn is a line each way.
-	msgs, err := c.Messages(ctx, 2*n)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]ghost.Exchange, 0, len(msgs))
-	for _, m := range msgs {
-		out = append(out, ghost.Exchange{Role: m.Role, Text: m.Text})
-	}
-	return out, nil
+	return c.Messages(ctx, 2*n)
 }
 
 // traceFor finds the reasons behind a reply, and consumes the match so two
@@ -158,8 +140,9 @@ func traceFor(traces []ghost.Why, reply string) (ghost.Why, bool) {
 	return ghost.Why{}, false
 }
 
-// printWhy renders one reply's reasons under the line it explains.
-func printWhy(w ghost.Why, showPrompt bool) {
+// printWhy renders one reply's reasons under the line it explains. What
+// hermes recalled and was prompted with is in hermes's session, not here.
+func printWhy(w ghost.Why) {
 	const indent = "       "
 	switch {
 	case w.Suppressed:
@@ -175,76 +158,6 @@ func printWhy(w ghost.Why, showPrompt bool) {
 		fmt.Println(indent + "· on screen at the time: " + what)
 	}
 	if len(w.Acted) > 0 {
-		// Before the memories, because it is the loudest fact about the
-		// reply: the ghost did not only answer, it did something.
 		fmt.Printf("%s· did something first: %s\n", indent, strings.Join(w.Acted, ", "))
 	}
-	if w.HistoryTurns > 0 {
-		fmt.Printf("%s· with the last %d turns of this conversation\n", indent, w.HistoryTurns)
-	}
-	// A measurement, not a verdict: nothing is trimmed to fit and there is
-	// no limit to compare it against. It is here because it is the number
-	// to look at when a ghost on a modest machine starts timing out rather
-	// than answering — the prompt is what a slow backend spends its time
-	// on before the first token.
-	if w.PromptChars > 0 {
-		fmt.Printf("%s· the whole request was %s characters, of which %s were the prompt above\n",
-			indent, thousands(w.PromptChars), thousands(len(w.System)))
-	}
-	if w.System == "" {
-		// A reply from hermes: what it recalled and what it was prompted
-		// with are hermes's, and not recorded here.
-	} else if len(w.Recalled) == 0 {
-		fmt.Println(indent + "· nothing was recalled from further back")
-	} else {
-		fmt.Printf("%s· recalled %d thing(s) from further back:\n", indent, len(w.Recalled))
-		for _, r := range w.Recalled {
-			kind := r.Kind
-			if kind == "summary" {
-				kind = "summary of many"
-			}
-			fmt.Printf("%s    [%s, %s, similarity %.2f", indent, kind, r.When.Format("2 Jan 2006"), r.Sim)
-			if r.Uses > 0 {
-				fmt.Printf(", recalled %d time(s) before", r.Uses)
-			}
-			fmt.Println("]")
-			fmt.Printf("%s    %s\n", indent, oneLine(r.Text, 100))
-		}
-	}
-	if showPrompt {
-		fmt.Println(indent + "· the prompt it was given:")
-		for _, line := range strings.Split(strings.TrimRight(w.System, "\n"), "\n") {
-			fmt.Println(indent + "    " + line)
-		}
-	}
-}
-
-// thousands groups a count so a five-figure prompt is legible at a glance,
-// which is the whole reason the number is printed.
-func thousands(n int) string {
-	s := strconv.Itoa(n)
-	if len(s) <= 3 {
-		return s
-	}
-	var b strings.Builder
-	for i, r := range s {
-		if i > 0 && (len(s)-i)%3 == 0 {
-			b.WriteByte(',')
-		}
-		b.WriteRune(r)
-	}
-	return b.String()
-}
-
-// oneLine flattens a memory to something that fits under a history line.
-func oneLine(s string, max int) string {
-	s = strings.Join(strings.Fields(strings.ReplaceAll(s, "\n", " ")), " ")
-	if len(s) > max {
-		// Rune-safe: memories are conversation text and may be any script.
-		r := []rune(s)
-		if len(r) > max {
-			return string(r[:max-1]) + "…"
-		}
-	}
-	return s
 }

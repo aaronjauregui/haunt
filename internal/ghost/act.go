@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aaronjauregui/haunt/internal/ai"
+	"github.com/aaronjauregui/haunt/internal/control"
 	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/mcp"
 	"github.com/aaronjauregui/haunt/internal/proto"
@@ -39,12 +39,10 @@ import (
 //
 // Two things decide to act, and both come through here:
 //
-//   - The model, during an ordinary conversation. The driver offers it the
-//     approved tools, runs what it asks for, and hands back the results
-//     until it has an answer (see the tool loop in ai.go). This is what
-//     makes a persona-only ghost — art, a system prompt, no code anywhere —
-//     able to do things, which is the same reason the built-in brain
-//     exists.
+//   - The model, during a hermes turn. The driver re-exports the approved
+//     tools through its own MCP server and runs what hermes asks for (see
+//     serverTool in hermestools.go). This is what makes a persona-only
+//     ghost — art, a persona, no code anywhere — able to do things.
 //   - A brain, through the `act` intent, when it wants a specific thing
 //     done at a specific moment rather than whatever the model decides.
 //
@@ -273,12 +271,12 @@ func (g *Ghost) lookupTool(ref toolRef) (toolEntry, bool) {
 // the map back from the names it will use.
 //
 // The names differ because the two audiences do: a person reads
-// "notes.append", and the chat completions API accepts letters, digits,
-// underscores and dashes and nothing else. So the wire name substitutes,
+// "notes.append", and tool names on the model's side accept letters,
+// digits, underscores and dashes and nothing else. So the wire name substitutes,
 // the map carries the truth, and the translation lives in this one
 // function rather than being reversed by string-splitting at the far end —
 // where a server called "my.notes" would have made it ambiguous.
-func (g *Ghost) offerable() ([]ai.Tool, map[string]toolRef) {
+func (g *Ghost) offerable() ([]control.ToolSpec, map[string]toolRef) {
 	g.toolMu.Lock()
 	entries := make([]toolEntry, 0, len(g.toolCat))
 	for _, e := range g.toolCat {
@@ -289,7 +287,7 @@ func (g *Ghost) offerable() ([]ai.Tool, map[string]toolRef) {
 		return entries[i].ref.String() < entries[j].ref.String()
 	})
 
-	tools := make([]ai.Tool, 0, len(entries))
+	tools := make([]control.ToolSpec, 0, len(entries))
 	back := make(map[string]toolRef, len(entries))
 	for _, e := range entries {
 		wire := wireName(e.ref)
@@ -300,7 +298,7 @@ func (g *Ghost) offerable() ([]ai.Tool, map[string]toolRef) {
 			wire = fmt.Sprintf("%s_%d", wireName(e.ref), n)
 		}
 		back[wire] = e.ref
-		tools = append(tools, ai.Tool{
+		tools = append(tools, control.ToolSpec{
 			Name:        wire,
 			Description: e.tool.Description,
 			Schema:      e.tool.Schema,

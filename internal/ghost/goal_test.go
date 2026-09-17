@@ -244,9 +244,9 @@ func TestSettingAGoalAside(t *testing.T) {
 	if held[0].Watched() {
 		t.Error("it is still being watched")
 	}
-	// It never reaches a prompt again, even when the person says the word.
-	if ctx := g.intentionsContext("how is the thesis going"); ctx != "" {
-		t.Errorf("context = %q, want a goal set aside to stay out of it", ctx)
+	// And the ghost, asked what it holds, says it was set aside.
+	if list, _ := toolIntentions(g, nil, nil); !strings.Contains(list, "(set aside)") {
+		t.Errorf("intentions = %q, want the goal marked as set aside", list)
 	}
 	// And produces nothing, however long it sits there.
 	held[0].Made = time.Now().Add(-365 * 24 * time.Hour)

@@ -13,86 +13,120 @@ on wlroots-based Wayland compositors (sway, Hyprland) and others that
 implement `zwlr_layer_shell_v1`.
 
 Two documents sit behind this one: `DESIGN.md` for what haunt is meant to
-be and why, and `docs/hermes-brain.md` for the one large piece of planned
-work, which replaces the LLM path described below with
-[hermes-agent](https://github.com/nousresearch/hermes-agent) as the ghost's
-brain. Until that lands, everything in this file describes what the tree
-does today. The code is heavily commented and is the record of what exists.
+be and why, and `docs/hermes-brain.md` for how a ghost's thinking is handed
+to [hermes-agent](https://github.com/nousresearch/hermes-agent). The code is
+heavily commented and is the record of what exists.
 
 ## Try it
 
     make demo         # a scripted ghost, in a nested sway window
-    make demo-ai      # one that talks to your LLM
+    make demo-ai      # one that thinks, on hermes-agent
+    make spin-ai      # the same, headless, through a scripted conversation
     make demo-troupe  # two of them at once, sharing a screen
     make demo-seriko SERIKO=<ghost.nar>   # somebody else's ukagaka shell
-    make demo-sleep   # the first, with memory consolidation sped up to watch
 
 Poke it, drag it, double-click for a menu, right-click to type at it. A
-menu can be answered with the mouse or with the number keys. `make demo-ai` needs an
-OpenAI-compatible endpoint in `~/.config/haunt/config.toml`:
+menu can be answered with the mouse or with the number keys.
+
+## A ghost that thinks
+
+A ghost with no brain of its own — art and a persona, nothing compiled —
+runs on **hermes-agent**. Hermes is the judgment: it keeps the
+conversation, remembers what matters about you, decides whether an event is
+worth a word and what to say. Haunt is the body and the conscience: the
+screen, the balloon, consent, budgets, quiet hours, and the reminders it has
+promised to keep. Each ghost gets a hermes profile of its own
+(`haunt-<ghost>` under your hermes home) and its own gateway, started and
+stopped with the ghost.
+
+To set it up:
+
+1. Install hermes (`uv pip install -e 'hermes-agent[mcp]' aiohttp`, Python
+   3.11–3.13), or build its Docker image and use `scripts/hermes-docker`;
+   `docs/hermes-brain.md` §12 has the container recipe.
+2. Give the ghost a model. Either per profile, the hermes way:
+
+       hermes -p haunt-wisp model
+
+   or for every ghost at once, in `~/.config/haunt/config.toml`:
+
+   ```toml
+   [hermes]
+   # command = ["hermes"]           # the default; or scripts/hermes-docker
+   # home = "~/.hermes"             # the default, or $HERMES_HOME
+   # tool_timeout = 600             # seconds a tool (an `ask`) may take
+   # first_token_timeout = 30       # seconds of silence before giving up
+
+   [hermes.model]
+   provider = "zai"
+   name = "glm-5.3"
+   ```
+
+   Hermes needs a model with a context window of at least 64K; small local
+   models are refused, and follow the ghost's rules badly when forced.
+   Provider keys stay hermes's business (its `.env`, or the environment).
+3. Declare `llm` in the ghost's capabilities and run it.
+
+What hermes may use is fixed by haunt, not by the model: its memory, its
+session search, its skills, and haunt's own verbs as tools — speak, ask,
+wear a face, draw, look, hold a reminder, tell another ghost — offered
+through `haunt mcp-serve`. No shell, no files, no browser. Every one of those
+verbs goes through the same gates as anything else the ghost does.
+
+Talking to it is just talking. It remembers what you tell it in hermes
+memory, and when you tell it it has something wrong it corrects that
+memory — there is no separate belief store to edit. What hermes holds is in
+the profile (`memories/MEMORY.md`, `memories/USER.md`) for you to read.
+
+Ask it to remember to *do* something:
+
+    remind me in 10 minutes to check the build
+
+and it takes that on as an **intention**, which is not a timer. It outlives
+the process — a ghost restarted at lunchtime still means to tell you at
+four — it can tell you what it is holding, and it stays held until it has
+actually been handed back. So a reminder whose moment arrives during quiet
+hours, or over a fullscreen game, stays in front of it until it has said
+it, instead of evaporating. `haunt journal -intentions` lists what yours is
+carrying.
+
+Leave the time out and you have said something different:
+
+    remember the thesis matters to me
+
+That has no moment, so nothing is scheduled. The ghost can hold it as a
+goal, and from then on it notices when something to do with the thesis is
+in front of you. If a week goes by with nothing, it will say so — once, and
+then not again for a fortnight. It knows nothing on the first day and that
+is deliberate: it watches what you named, from when you named it. All it
+writes down is the words it is looking for and the times it saw them, and
+`haunt journal -intentions` prints both. Tell it you have stopped caring
+and it sets the goal aside: still on the books, no longer watched.
+
+Most things that happen on the desktop reach the model as a one-line event
+(`[haunt event] kind=idle minutes=2 …`), and most deserve no reply; the
+model answers those with silence and nothing is shown. The driver decides
+first whether an event may reach the model at all, from the same daily
+allowance that has always rationed a ghost speaking first — and a wake that
+ends in silence costs nothing.
+
+Drawing and looking are the driver's own verbs, so their backends are
+configured in haunt:
 
 ```toml
-[ai.llm]
-base_url = "http://localhost:11434/v1"   # Ollama, llama.cpp, anything
-model = "qwen2.5:7b"
-
-[ai.embed]                                # optional: long-term memory
-model = "nomic-embed-text"                # with this, it also sleeps: see below
-
 [ai.image]                                # optional: it can draw
 backend = "comfyui"
 base_url = "http://localhost:8188"
 model = "your-checkpoint.safetensors"
 
 [ai.vision]                               # optional: it can look at a window
+base_url = "http://localhost:11434/v1"
 model = "qwen2.5vl:7b"
 ```
 
-Any OpenAI-compatible endpoint works, which is nearly all of them; for a
-vendor that speaks its own format, point `base_url` at a router like
-LiteLLM. Cloud keys are named, not stored — set `api_key_env = "..."` and
-the driver reads that variable from its own environment.
-
-It can also be asked to remember to *do* something:
-
-    remind me in 10 minutes to check the build
-
-That is not a timer. It outlives the process — a ghost restarted at
-lunchtime still means to tell you at four — the ghost carries it in mind
-and can tell you what it is holding, and it stays held until it has
-actually been handed back. So a reminder whose moment arrives during quiet
-hours, or over a fullscreen game, comes up next time you talk instead of
-evaporating. `haunt journal -intentions` lists what yours is carrying.
-
-Leave the time out and you have said something different:
-
-    remind me the thesis matters
-
-That has no moment, so nothing is scheduled. The ghost holds it, and from
-then on it notices when something to do with the thesis is in front of you.
-If a week goes by with nothing, it will say so — once, and then not again
-for a fortnight. It knows nothing on the first day and that is deliberate:
-it watches what you named, from when you named it, and a ghost that
-delivered a verdict the same afternoon would be one that had been watching
-before it was asked. All it writes down is the words it is looking for and
-the times it saw them, and `haunt journal -intentions` prints both.
-
-When you have stopped caring:
-
-    never mind about the thesis
-
-Which is not the same as saying it is done. It stays on the books, marked;
-it is simply no longer watched. A ghost still asking about a thesis you
-submitted in March is the thing you close.
-
-With an embedding model configured, the ghost remembers past conversations
-and pulls the relevant ones back into context months later. It also
-*sleeps*: while you are away it takes a cluster of old exchanges, works out
-what they amounted to, and writes that down — in its journal, where you can
-read it — along with what it now knows about the people and projects in
-them. The detail fades afterwards on how much it mattered rather than on
-how old it is. That is a model call you did not ask for, so it is rationed:
-`[memory] consolidations_per_day` (four by default, zero to switch it off).
+Any OpenAI-compatible endpoint works for both. Cloud keys are named, not
+stored — set `api_key_env = "..."` and the driver reads that variable from
+its own environment.
 
 Everything AI is opt-in twice — the ghost asks for a capability, you grant
 it — and the driver holds the keys and the budgets, never the ghost.
@@ -114,41 +148,23 @@ and you raise the question yourself, whenever you feel like it.
 Granted, it watches the *shape* of the day rather than each window: a long
 stretch in one file, a flip-flop between two applications, a title that
 keeps coming back, coming back to the machine after an afternoon out, the
-first thing you open in the morning, still being at it at midnight. That is
-what it spends its unprompted remarks on. None of it leaves the machine,
-and the little that is written down — enough to still recognise a
-recurrence after a reboot — stores window titles as hashes, so it can be
-counted but not read.
+first thing you open in the morning, still being at it at midnight. Those
+are the events it may be woken for. None of it leaves the machine except as
+that one line to your model, and the little that is written down — enough
+to still recognise a recurrence after a reboot — stores window titles as
+hashes, so it can be counted but not read.
 
 When it says something that seems to come from nowhere, you can ask where
 it came from:
 
-    haunt history -why           # per reply: what it recalled and what it could see
-    haunt history -why -prompt   # and the prompt it was actually given
+    haunt history                # the conversation, read back from hermes
+    haunt history -why           # per reply: what woke it, what it saw, what it did
 
-Recall is the part worth checking. It shows which memories came back, how
-old they are, how strongly they matched and how often they have proved
-useful before — so "it remembered" and "it guessed" stop looking the same.
-The reasons live in the ghost's own store beside the conversation, never in
-a session recording, and only the last dozen replies keep them.
-
-It also keeps a short list of what it has decided about the people, places
-and projects you mention, which you can read:
-
-    haunt journal -entities      # who and what it thinks it knows about
-
-And, because a companion you can interrogate but cannot correct is worse
-than one you can do neither to, you can tell it that it is wrong:
-
-    haunt correct sam 1 "left Acme in March"
-
-Or pick "You've got something wrong about someone" from its menu and answer
-in the balloon, which is the same thing without a terminal. What it used to
-think is not deleted — it stops being something the ghost believes, and
-stays visible under the fact that replaced it, so *you used to think this*
-remains a thing you can check. It will not quietly conclude the same thing
-again afterwards, and it does not argue: if you say a fact is wrong, it is
-wrong.
+`-why` shows whether a line answered you or an event, what window was in
+front of it, which tools it used, and the turns where it chose to say
+nothing. The reasons live in the ghost's own store, never in a session
+recording, and only the last dozen turns keep them. The conversation itself
+is hermes's, so `haunt history` needs the ghost's gateway running.
 
 `haunt perms` shows what a ghost asked for and what it has, and takes it
 back:
@@ -175,8 +191,8 @@ allow = ["append", "search"]         # optional: the manifest's own bound
 ```
 
 That is the whole of it. There is no code to write: the tools are offered
-to your model during ordinary conversation, so a ghost that is art plus a
-persona can do things. A brain that wants a particular thing done at a
+to hermes alongside the ghost's own verbs, through the same haunt MCP
+server, so a ghost that is art plus a persona can do things. A brain that wants a particular thing done at a
 particular moment has `act` for that.
 
 Permission is asked twice, deliberately. `tools` says the ghost may act at
@@ -197,14 +213,13 @@ configurable: an ambient process that quietly takes actions is a horror,
 and those marks are what make it a companion instead.
 
 The brakes are the driver's. `[ai.budget] tool_requests_per_hour` (60)
-caps how fast it may act; `[ai] max_tool_calls` (6) stops one exchange
-looping; and acting when nobody asked comes out of the same daily
-allowance as speaking first, which a restart does not refill.
+caps how fast it may act, `[ai] tool_timeout` bounds one call, and the
+model is only woken unasked out of the same daily allowance as speaking
+first, which a restart does not refill.
 
 ### Being woken by the world
 
-Tools are pull-only: they reach your model in the middle of a conversation
-you started. A **trigger** is the other direction — the driver asking, on a
+Tools are pull-only: the model reaches for them in the middle of a turn. A **trigger** is the other direction — the driver asking, on a
 schedule, and telling the ghost what it heard:
 
 ```toml
@@ -280,16 +295,13 @@ times the interruptions or three times the model bill. Set it yourself with
 They can also see each other. What a ghost does in public — a line in its
 balloon, a picture, a flourish it was asked for, being poked — reaches the
 others as something they may react to without being spoken to, which is
-where dynamics nobody wrote come from. What each makes of the other it
-keeps: months of occasional remarks accumulate into an opinion, filed under
-that ghost's name, which comes back the next time anybody mentions them.
-Only public things: a ghost can watch its neighbour and can never reach its
-neighbour's memory. Reacting
+where dynamics nobody wrote come from. Only public things: a ghost can
+watch its neighbour and can never reach its neighbour's memory. Reacting
 is unprompted, so it comes out of the same allowance as speaking first,
-and the built-in ghost rations itself further on top of that — two
-characters noticing each other occasionally is company, and two characters
-commenting on everything each other does is a chat log you did not ask for
-and are paying for.
+and a ghost on hermes is woken about its neighbours at most once an hour
+on top of that — two characters noticing each other occasionally is
+company, and two characters commenting on everything each other does is a
+chat log you did not ask for and are paying for.
 
 Quiet hours, the fullscreen rule and reduced motion stay what they always
 were: answers about the room, and every ghost obeys them.
@@ -308,11 +320,10 @@ Hyprland config if the service does not start.
     cd mycompanion && haunt run .
 
 That scaffolds a whole ghost: a manifest and a persona. There is no brain
-in it and nothing to compile — a ghost that declares no brain runs on the
-driver's built-in one, which chats in your persona, draws when asked, keeps
-a journal, offers to notice what you are working on, uses whatever tool
-servers you gave it, and speaks first now and then. What is left to do is
-the art.
+in it and nothing to compile — a ghost that declares no brain runs on
+hermes, which talks in your persona, remembers you, takes on reminders,
+draws when asked, uses whatever tool servers you gave it, and speaks first
+now and then. What is left to do is the art.
 
     haunt new -brain mycompanion
 
@@ -384,10 +395,9 @@ what the shell has.
 | `haunt run [-output NAME] [ghost ...]` | run the resident ghosts (each remembers where it was) |
 | `haunt dev <dir>` | run with hot reload |
 | `haunt say <text>` | talk to it from a script |
-| `haunt history` / `haunt journal` | what was said / what it chose to remember |
-| `haunt history -why [-prompt]` | why it said that: what it recalled, saw, and was asked |
-| `haunt journal -entities` | who and what it thinks it knows about |
-| `haunt correct <who> <n> "<what's true>"` | tell it it's wrong about one of them (or from its menu) |
+| `haunt history` / `haunt journal` | what was said / what it did |
+| `haunt history -why` | why it said that: what woke it, what it saw, what it did |
+| `haunt journal -intentions` | what it is still meaning to do |
 | `haunt perms grant window` | let it notice what you are working on (or ask it from its menu) |
 | `haunt perms [grant\|revoke <cap>]` | what it may do — revocable while it runs |
 | `haunt shush` / `unshush` | quiet hours, now |

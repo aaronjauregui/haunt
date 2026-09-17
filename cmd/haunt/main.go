@@ -44,8 +44,6 @@ func main() {
 		err = cmdDev(os.Args[2:])
 	case "say":
 		err = cmdSay(os.Args[2:])
-	case "correct":
-		err = cmdCorrect(os.Args[2:])
 	case "keygen":
 		err = cmdKeygen(os.Args[2:])
 	case "pack":
@@ -98,7 +96,6 @@ func usage() {
   haunt run [-x N] [-y N] [-output NAME] [-record FILE] [-state DIR] [-idle-ms N] [ghost-dir|name ...]
   haunt dev [-x N] [-y N] [-state DIR] <ghost-dir>
   haunt say [-ghost NAME] <text>
-  haunt correct [-ghost NAME] <subject> [number] [what is true]
   haunt new [-brain] <name>
   haunt shell init [-C dir] [-write] <art.ora>
   haunt keygen
@@ -108,8 +105,8 @@ func usage() {
   haunt switch <name> | add <name> | drop <name>
   haunt perms [name] | perms grant|revoke <capability> [name]
   haunt shush [duration] | unshush
-  haunt journal [-entities|-intentions] [name | -state DIR]
-  haunt history [-n N] [-why [-prompt]] [name | -state DIR]
+  haunt journal [-intentions] [name | -state DIR]
+  haunt history [-n N] [-why] [name | -state DIR]
   haunt mcp-serve -ghost NAME`)
 }
 
@@ -121,16 +118,11 @@ func cmdRun(args []string) error {
 	record := fs.String("record", "", "record the event session to FILE (JSONL)")
 	state := fs.String("state", "", "override state directory")
 	idleMS := fs.Uint("idle-ms", 0, "idle threshold in milliseconds (default 2 minutes)")
-	// Consolidation is scheduled for a real working day: five minutes after
-	// you walk away, over memories at least two days old. Both are right and
-	// both make it unwatchable, so they are overridable for the same reason
-	// -idle-ms is — you cannot debug a behaviour you have to wait two days
-	// to see. Neither belongs in the config file: this is a demo and
-	// debugging affordance, not a preference.
-	sleepAfter := fs.Duration("consolidate-delay", 0,
-		"wait after the user goes idle before consolidating memories (default 5m)")
-	sleepAge := fs.Duration("consolidate-after", 0,
-		"how old a memory must be to be consolidated (default 48h)")
+	// The goal check is scheduled for a real working day, five minutes
+	// after you walk away. Overridable for the same reason -idle-ms is; it
+	// is a demo and debugging affordance, not a preference.
+	goalDelay := fs.Duration("goal-check-delay", 0,
+		"wait after the user goes idle before checking on goals (default 5m)")
 	fs.Parse(args)
 
 	// One logger for the session: level and topics from the user's config
@@ -165,13 +157,12 @@ func cmdRun(args []string) error {
 
 	base := ghost.Options{
 		X: *x, Y: *y,
-		Placed:           isSet(fs, "x") || isSet(fs, "y"),
-		Output:           *output,
-		RecordTo:         *record,
-		StateDir:         *state,
-		IdleTimeoutMS:    uint32(*idleMS),
-		ConsolidateDelay: *sleepAfter,
-		ConsolidateAfter: *sleepAge,
+		Placed:         isSet(fs, "x") || isSet(fs, "y"),
+		Output:         *output,
+		RecordTo:       *record,
+		StateDir:       *state,
+		IdleTimeoutMS:  uint32(*idleMS),
+		GoalCheckDelay: *goalDelay,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

@@ -338,50 +338,42 @@ func TestOfferableNamesAreModelSafe(t *testing.T) {
 }
 
 // A model that asks for something that was never offered is told so,
-// rather than the exchange failing: that is the answer that stops it
-// happening twice.
+// rather than the turn failing: that is the answer that stops it happening
+// twice.
 func TestUnofferedToolCallIsExplained(t *testing.T) {
-	g, _, _ := actingGhost(t)
-	var call ai.ToolCall
-	call.Function.Name = "send_email"
-	res := g.runToolCall(call, map[string]toolRef{})
-	if res.ran {
+	g, srv, _ := actingGhost(t)
+	res := hermesTools{g}.Call(context.Background(), "send_email", nil)
+	if !res.IsError || len(srv.ran()) != 0 {
 		t.Fatal("a tool the model invented ran")
 	}
-	if !strings.Contains(res.text, "send_email") {
-		t.Errorf("text = %q, want the name it asked for", res.text)
+	if !strings.Contains(res.Text, "send_email") {
+		t.Errorf("text = %q, want the name it asked for", res.Text)
 	}
 }
 
 // Bad arguments are a mistake a model can be told about and correct, not a
-// reason to end the exchange.
+// reason to end the turn.
 func TestBadArgumentsAreExplained(t *testing.T) {
 	g, srv, _ := actingGhost(t)
-	var call ai.ToolCall
-	call.Function.Name = "notes__append"
-	call.Function.Arguments = "{not json"
-	res := g.runToolCall(call, map[string]toolRef{"notes__append": appendRef()})
-	if res.ran || len(srv.ran()) != 0 {
+	res := hermesTools{g}.Call(context.Background(), "notes__append", json.RawMessage("{not json"))
+	if !res.IsError || len(srv.ran()) != 0 {
 		t.Fatal("a call with unparseable arguments reached the server")
 	}
-	if !strings.Contains(res.text, "JSON") {
-		t.Errorf("text = %q, want it to say what was wrong", res.text)
+	if !strings.Contains(res.Text, "JSON") {
+		t.Errorf("text = %q, want it to say what was wrong", res.Text)
 	}
 }
 
-// The empty string is what a model sends when it means "no arguments", and
-// is not a mistake.
+// Nothing, or blank, is what a model sends when it means "no arguments",
+// and is not a mistake.
 func TestEmptyArgumentsMeanNone(t *testing.T) {
 	g, srv, _ := actingGhost(t)
 	answer(t, g, consentAllow)
-	var call ai.ToolCall
-	call.Function.Name = "notes__append"
-	call.Function.Arguments = "  "
-	res := g.runToolCall(call, map[string]toolRef{"notes__append": appendRef()})
-	if !res.ran {
-		t.Fatalf("the call did not run: %s", res.text)
+	res := hermesTools{g}.Call(context.Background(), "notes__append", json.RawMessage("  "))
+	if res.IsError {
+		t.Fatalf("the call did not run: %s", res.Text)
 	}
-	if got := srv.ran(); len(got) != 1 || got[0] != "append()" {
+	if got := srv.ran(); len(got) != 1 || got[0] != "append({})" {
 		t.Errorf("ran %v, want one call with no arguments", got)
 	}
 }

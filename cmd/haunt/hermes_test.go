@@ -33,24 +33,10 @@ import (
 func TestHermesBrainEndToEnd(t *testing.T) {
 	c := testenv.StartT(t)
 	dir := t.TempDir()
-	rt := filepath.Join(dir, "run")
-	cfgDir := filepath.Join(dir, "config")
+	rig := newHermesRig(t, dir, nil, "")
+	rt, cfgDir, fakeLog, bin := rig.RT, rig.CfgDir, rig.FakeLog, rig.Bin
 	hermesHome := filepath.Join(dir, "hermes")
 	stateDir := filepath.Join(dir, "state")
-	fakeLog := filepath.Join(dir, "fakehermes.log")
-	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	bin := filepath.Join(dir, "haunt")
-	build(t, bin, ".")
-	fake := filepath.Join(dir, "fakehermes")
-	build(t, fake, "./testdata/fakehermes")
-
-	config := fmt.Sprintf("[hermes]\ncommand = [%q]\nhome = %q\n", fake, hermesHome)
-	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(config), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	const persona = "You are Wisp, a wry desktop spirit who keeps an eye on the kitchen."
 	gDir := filepath.Join(dir, "wisp")
 	writeGhost(t, gDir, `[ghost]
@@ -65,11 +51,7 @@ system = "`+persona+`"
 	record := filepath.Join(dir, "session.jsonl")
 	cmd := exec.Command(bin, "run", "-x", strconv.Itoa(posX), "-y", strconv.Itoa(posY),
 		"-state", stateDir, "-record", record, gDir)
-	cmd.Env = append(c.Env(),
-		"HAUNT_RUNTIME_DIR="+rt,
-		"HAUNT_CONFIG_DIR="+cfgDir,
-		"FAKEHERMES_LOG="+fakeLog,
-	)
+	cmd.Env = append(c.Env(), rig.env()...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -307,6 +289,105 @@ system = "`+persona+`"
 	}
 }
 
+// hermesRig is what a test needs to run a ghost on the fake hermes
+// (testdata/fakehermes): haunt and the fake built, and a config that points
+// [hermes] at the fake with a hermes home of the test's own.
+type hermesRig struct {
+	Dir, Bin, CfgDir, RT, FakeLog, Script string
+}
+
+// fakeRule is one scripted answer for the fake (see rule in
+// testdata/fakehermes): the first whose Match is in the input answers.
+type fakeRule struct {
+	Match   string         `json:"match"`
+	DelayMS int            `json:"delay_ms,omitempty"`
+	Tool    string         `json:"tool,omitempty"`
+	Args    map[string]any `json:"args,omitempty"`
+	Reply   string         `json:"reply"`
+}
+
+// newHermesRig builds into dir. rules nil keeps the fake's defaults (events
+// are NO_REPLY, "remind me" calls intend, anything else is echoed). extra
+// is appended to the config file, so its first lines are still [hermes]
+// keys until it opens a table of its own.
+func newHermesRig(t *testing.T, dir string, rules []fakeRule, extra string) hermesRig {
+	t.Helper()
+	r := hermesRig{
+		Dir:     dir,
+		Bin:     filepath.Join(dir, "haunt"),
+		CfgDir:  filepath.Join(dir, "config"),
+		RT:      filepath.Join(dir, "run"),
+		FakeLog: filepath.Join(dir, "fakehermes.log"),
+	}
+	if err := os.MkdirAll(r.CfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	build(t, r.Bin, ".")
+	fake := filepath.Join(dir, "fakehermes")
+	build(t, fake, "./testdata/fakehermes")
+	if rules != nil {
+		r.Script = filepath.Join(dir, "fakehermes.json")
+		b, err := json.Marshal(rules)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(r.Script, b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	config := fmt.Sprintf("[hermes]\ncommand = [%q]\nhome = %q\n%s", fake, filepath.Join(dir, "hermes"), extra)
+	if err := os.WriteFile(filepath.Join(r.CfgDir, "config.toml"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+// env is what a ghost run, and the fake it starts, need.
+func (r hermesRig) env() []string {
+	env := []string{
+		"HAUNT_RUNTIME_DIR=" + r.RT,
+		"HAUNT_CONFIG_DIR=" + r.CfgDir,
+		"FAKEHERMES_LOG=" + r.FakeLog,
+	}
+	if r.Script != "" {
+		env = append(env, "FAKEHERMES_SCRIPT="+r.Script)
+	}
+	return env
+}
+
+// say addresses the ghost called wisp.
+func (r hermesRig) say(t *testing.T, text string) {
+	t.Helper()
+	sc := exec.Command(r.Bin, "say", "-ghost", "wisp", text)
+	sc.Env = append(os.Environ(), r.env()...)
+	if out, err := sc.CombinedOutput(); err != nil {
+		t.Fatalf("say %q: %v: %s", text, err, out)
+	}
+}
+
+// fakeEntries is every line of the fake's log that matches.
+func fakeEntries(path string, match func(fakeEntry) bool) []fakeEntry {
+	data, _ := os.ReadFile(path)
+	var out []fakeEntry
+	for _, line := range strings.Split(string(data), "\n") {
+		var e fakeEntry
+		if json.Unmarshal([]byte(line), &e) == nil && match(e) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// turnsAbout matches the turns (answered or not) whose input contains s.
+func turnsAbout(s string) func(fakeEntry) bool {
+	return func(e fakeEntry) bool { return e.Kind == "chat" && strings.Contains(e.Input, s) }
+}
+
+// repliedTo matches the replies to inputs containing s.
+func repliedTo(s string) func(fakeEntry) bool {
+	return func(e fakeEntry) bool { return e.Kind == "reply" && strings.Contains(e.Input, s) }
+}
+
 // fakeEntry is one line of testdata/fakehermes's log.
 type fakeEntry struct {
 	Kind          string            `json:"kind"`
@@ -324,6 +405,7 @@ type fakeEntry struct {
 	Text          string            `json:"text"`
 	IsError       bool              `json:"is_error"`
 	Error         string            `json:"error"`
+	Name          string            `json:"name"`
 }
 
 // waitFakeLog returns the first log entry matching, waiting up to d for it.

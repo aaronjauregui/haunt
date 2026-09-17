@@ -1,12 +1,9 @@
 package ghost
 
 import (
-	"context"
-	"fmt"
 	"strings"
 
 	"github.com/aaronjauregui/haunt/internal/ai"
-	"github.com/aaronjauregui/haunt/internal/hlog"
 )
 
 // Expression inference: dialogue arrives, the face follows. Hand-tagged
@@ -15,26 +12,13 @@ import (
 // there is no author present to tag anything, which is the whole reason
 // this exists.
 //
-// Two tiers, because they have different costs:
-//
-//   - A lexicon runs on every line, scripted or generated. It is free and
-//     instant, so a ghost with no LLM at all still animates, and it is the
-//     fallback whenever the model declines or fails.
-//   - In "llm" mode the model classifies generated lines into the shell's
-//     poses and its answer wins. Understanding what a line means is the
-//     thing a model is for; a word table is a stand-in for it, not a
-//     supervisor of it.
-//
-// The classifier is allowed to answer "none", because most dialogue has no
-// particular mood and the right response to that is to leave the face
-// alone. A model too small to use that option well is a reason to leave
-// the mode at its "lexicon" default, not a reason to bend the design
-// around it.
+// A lexicon runs on scripted lines, and on a hermes reply when the model
+// did not wear a face itself (its face tool). It is free and instant, so a
+// ghost with no model at all still animates.
 //
 // A brain that sets an expression explicitly always wins: manual tags
 // override inference, as the design has always said. That is enforced by
-// ordering — inference runs before the brain sees the reply event, so
-// anything the brain does lands last.
+// ordering — inference runs before the brain's own expression lands.
 
 // moodWords maps a pose name to the words that suggest it. Poses a shell
 // does not declare are skipped, so this table can afford to be generous.
@@ -95,9 +79,8 @@ func lexiconPose(text string, available []string) string {
 	return best
 }
 
-// inferExpression sets the face to match a line of dialogue. generated says
-// whether a model wrote it, which is what earns the extra classifying call.
-func (g *Ghost) inferExpression(text string, generated bool) {
+// inferExpression sets the face to match a line of dialogue.
+func (g *Ghost) inferExpression(text string) {
 	if g.shell == nil {
 		return
 	}
@@ -105,71 +88,14 @@ func (g *Ghost) inferExpression(text string, generated bool) {
 	if len(poses) == 0 {
 		return // a single-image shell has no face to arrange
 	}
-
-	mode := ai.ExpressionLexicon
-	if g.aiSvc != nil {
-		mode = g.aiSvc.ExpressionMode()
-	}
-	if mode == ai.ExpressionOff {
+	if g.aiSvc != nil && g.aiSvc.ExpressionMode() == ai.ExpressionOff {
 		return
 	}
-
-	// In llm mode the model has the say on generated lines; the lexicon
-	// answers for scripted ones, and for anything the model declined or
-	// could not be asked about.
-	pose := ""
-	if generated && mode == ai.ExpressionLLM {
-		pose = g.classifyExpression(text, poses)
-	}
-	if pose == "" {
-		pose = lexiconPose(text, poses)
-	}
+	pose := lexiconPose(text, poses)
 	if pose == "" || pose == g.shell.Pose() {
 		return
 	}
 	g.setExpression(pose)
-}
-
-// classifyExpression asks the model which of the shell's poses fits a line.
-// Silent, so the classification never reaches the balloon or the
-// conversation; failures return empty and leave the lexicon's answer alone,
-// because a ghost whose face stops working when a backend hiccups is worse
-// than one whose face is occasionally wrong.
-func (g *Ghost) classifyExpression(text string, poses []string) string {
-	if g.aiSvc == nil || !g.aiSvc.LLMEnabled() || !g.capabilityActive("llm") {
-		return ""
-	}
-	// "none" is offered because most dialogue carries no particular mood,
-	// and a classifier with no way to say so will invent one — labelling
-	// "the file is in that directory" as sad.
-	prompt := fmt.Sprintf(
-		"Which single word from this list best fits the mood of the line below?\n"+
-			"List: %s\nLine: %s\n\nAnswer with one word from the list, "+
-			"or \"none\" if the line carries no particular mood. Nothing else.",
-		strings.Join(poses, ", "), text)
-
-	reply, err := g.aiSvc.Chat(context.Background(), []ai.Message{
-		{Role: "system", Content: "You label the mood of a line of dialogue. Answer with exactly one word."},
-		{Role: "user", Content: prompt},
-	}, nil, ai.Options{Silent: true, Tag: "expression"})
-	if err != nil {
-		g.log.Warn(hlog.Anim, "expression inference: %v", err)
-		return ""
-	}
-
-	// Small models pad, quote and explain; take the first declared pose
-	// that appears in the answer.
-	lower := strings.ToLower(reply)
-	if strings.Contains(lower, "none") {
-		return ""
-	}
-	for _, p := range poses {
-		if strings.Contains(lower, strings.ToLower(p)) {
-			return p
-		}
-	}
-	g.log.Debug(hlog.Anim, "expression inference: %q names none of %v", strings.TrimSpace(reply), poses)
-	return ""
 }
 
 // The face at rest.

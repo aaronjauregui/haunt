@@ -1,10 +1,6 @@
 package ghost
 
 import (
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/aaronjauregui/haunt/internal/ai"
@@ -59,133 +55,48 @@ func TestLexiconIsDeterministic(t *testing.T) {
 	}
 }
 
-// classifierGhost is a ghost whose LLM answers with canned text.
-func classifierGhost(t *testing.T, reply, mode string) (*Ghost, *int) {
-	t.Helper()
-	calls := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		w.Header().Set("Content-Type", "text/event-stream")
-		body, _ := json.Marshal(map[string]any{"choices": []map[string]any{
-			{"delta": map[string]string{"content": reply}},
-		}})
-		fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", body)
-	}))
-	t.Cleanup(srv.Close)
-
-	g := &Ghost{
+// expressionGhost is a ghost with the built-in shell and the given
+// expression mode.
+func expressionGhost(mode string) *Ghost {
+	return &Ghost{
 		opts:     Options{},
 		log:      hlog.Discard(),
 		manifest: &Manifest{Ghost: GhostSection{Capabilities: []string{"llm"}}},
 		shell:    shell.Builtin(64),
-		aiSvc: ai.NewService(&ai.Config{
-			LLM:                 ai.LLMConfig{BaseURL: srv.URL + "/v1", Model: "fake"},
-			ExpressionInference: mode,
-		}, hlog.Discard()),
-	}
-	return g, &calls
-}
-
-// TestClassifyExpression: the model's answer is matched against the shell's
-// own vocabulary, tolerating the padding small models add.
-func TestClassifyExpression(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		reply string
-		want  string
-	}{
-		{"bare word", "happy", "happy"},
-		{"padded", "  The mood is: \"sad\".  ", "sad"},
-		{"explained", "I would say surprised, because of the exclamation.", "surprised"},
-		{"not in the vocabulary", "ecstatic", ""},
-		{"empty-ish", "...", ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			g, _ := classifierGhost(t, tc.reply, ai.ExpressionLLM)
-			if got := g.classifyExpression("a line", g.shell.Poses()); got != tc.want {
-				t.Errorf("classify(%q) = %q, want %q", tc.reply, got, tc.want)
-			}
-		})
+		aiSvc:    ai.NewService(&ai.Config{ExpressionInference: mode}, hlog.Discard()),
 	}
 }
 
-// TestExpressionModes: in llm mode the model decides for generated lines;
-// the lexicon covers everything else and is the fallback.
+// TestExpressionModes: the lexicon reads what it can, and off is off. The
+// "llm" mode went with the one-shot loop; a config that still says it gets
+// the lexicon.
 func TestExpressionModes(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		mode      string
-		line      string
-		wantPose  string
-		wantCalls int
-	}{{
-		name: "lexicon reads what it can", mode: ai.ExpressionLexicon,
-		line: "I'm sorry about that.", wantPose: "sad", wantCalls: 0,
-	}, {
-		name: "lexicon shrugs and nobody is asked", mode: ai.ExpressionLexicon,
-		line: "The build is done.", wantPose: "neutral", wantCalls: 0,
-	}, {
-		name: "the model overrules the word table", mode: ai.ExpressionLLM,
-		line: "I'm sorry about that.", wantPose: "happy", wantCalls: 1,
-	}, {
-		name: "the model reads what the lexicon cannot", mode: ai.ExpressionLLM,
-		line: "The build is done.", wantPose: "happy", wantCalls: 1,
-	}, {
-		name: "off is off", mode: ai.ExpressionOff,
-		line: "I'm sorry about that.", wantPose: "neutral", wantCalls: 0,
-	}} {
+		name     string
+		mode     string
+		line     string
+		wantPose string
+	}{
+		{"lexicon reads what it can", ai.ExpressionLexicon, "I'm sorry about that.", "sad"},
+		{"lexicon shrugs", ai.ExpressionLexicon, "The build is done.", "neutral"},
+		{"off is off", ai.ExpressionOff, "I'm sorry about that.", "neutral"},
+		{"the old llm mode reads as the lexicon", "llm", "Goodnight.", "asleep"},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
-			g, calls := classifierGhost(t, "happy", tc.mode)
-			g.inferExpression(tc.line, true)
+			g := expressionGhost(tc.mode)
+			g.inferExpression(tc.line)
 			if got := g.shell.Pose(); got != tc.wantPose {
 				t.Errorf("pose = %q, want %q", got, tc.wantPose)
 			}
-			if *calls != tc.wantCalls {
-				t.Errorf("made %d model calls, want %d", *calls, tc.wantCalls)
-			}
 		})
 	}
 }
 
-// TestModelDeclining: a model that says "none" hands back to the lexicon
-// rather than being pushed into a guess.
-func TestModelDeclining(t *testing.T) {
-	g, _ := classifierGhost(t, "none", ai.ExpressionLLM)
-	g.inferExpression("The build is done.", true)
-	if got := g.shell.Pose(); got != "neutral" {
-		t.Errorf("pose = %q, want the face left alone", got)
-	}
-
-	// Declining does not throw away what the lexicon could read.
-	g2, _ := classifierGhost(t, "none", ai.ExpressionLLM)
-	g2.inferExpression("Goodnight.", true)
-	if got := g2.shell.Pose(); got != "asleep" {
-		t.Errorf("pose = %q, want the lexicon's asleep", got)
-	}
-}
-
-// TestScriptedDialogueNeverCallsTheModel: the model tier is for generated
-// lines. A scripted ghost's quips must stay free even with it enabled.
-func TestScriptedDialogueNeverCallsTheModel(t *testing.T) {
-	g, calls := classifierGhost(t, "happy", ai.ExpressionLLM)
-	g.inferExpression("Goodnight.", false)
-	if *calls != 0 {
-		t.Errorf("a scripted line cost %d model calls", *calls)
-	}
-	if got := g.shell.Pose(); got != "asleep" {
-		t.Errorf("pose = %q, want the lexicon's asleep", got)
-	}
-}
-
-// TestInferenceLeavesSingleImageShellsAlone: nothing to arrange, nothing to
-// spend.
+// TestInferenceLeavesSingleImageShellsAlone: nothing to arrange.
 func TestInferenceLeavesSingleImageShellsAlone(t *testing.T) {
-	g, calls := classifierGhost(t, "happy", ai.ExpressionLLM)
+	g := expressionGhost(ai.ExpressionLexicon)
 	g.shell = nil
-	g.inferExpression("Thanks!", true) // must not panic
-	if *calls != 0 {
-		t.Errorf("a ghost with no shell cost %d model calls", *calls)
-	}
+	g.inferExpression("Thanks!") // must not panic
 }
 
 // The shell format advertises which pose names the driver can choose on its

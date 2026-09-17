@@ -24,14 +24,12 @@ type Manifest struct {
 	Tools    []ToolSection    `toml:"tool"`
 }
 
-// PersonaSection shapes LLM-generated dialogue. Only meaningful with the
-// llm capability.
+// PersonaSection is the character a ghost on hermes plays. Only
+// meaningful with the llm capability.
 type PersonaSection struct {
-	// System is the character's system prompt.
+	// System is the character's text, which leads the hermes profile's
+	// SOUL.md (docs/hermes-brain.md, section 5.3).
 	System string `toml:"system"`
-	// HistoryTurns caps how many past exchanges accompany each request
-	// (default 12).
-	HistoryTurns int `toml:"history_turns"`
 }
 
 // ToolSection declares one MCP tool server the ghost would like to act
@@ -124,7 +122,7 @@ var KnownCapabilities = map[string]string{
 	"message":      "receive text messages from outside (haunt say, scripts)",
 	"tell":         "send messages to other running ghosts",
 	"native-brain": "run its brain as a native process instead of the WASM sandbox",
-	"llm":          "generate dialogue with your configured language model",
+	"llm":          "talk with you through your language model (hermes)",
 	"imagine":      "generate images with your configured image model",
 	// The two screen-awareness capabilities are deliberately separate:
 	// knowing which window you have open is a different order of intrusion
@@ -150,9 +148,9 @@ type GhostSection struct {
 type ShellSection = shell.Manifest
 
 // BrainSection selects the ghost's logic. Omit it entirely — no [brain]
-// section at all — and the ghost gets the driver's built-in brain
-// (internal/defaultbrain), so a ghost can be art plus a persona with no
-// compiler anywhere in the authoring path.
+// section at all — and the ghost runs on hermes (hermesbrain.go), so a
+// ghost can be art plus a persona with no compiler anywhere in the
+// authoring path.
 type BrainSection struct {
 	// Wasm is the brain module path, relative to the ghost directory.
 	Wasm string `toml:"wasm"`
@@ -160,18 +158,11 @@ type BrainSection struct {
 	// the ghost directory) speaking the same stdio JSONL protocol. Requires
 	// the native-brain capability. Mutually exclusive with Wasm.
 	Command []string `toml:"command"`
-	// Legacy (`builtin = true`) keeps a brainless ghost on the old built-in
-	// brain instead of hermes, while hermes is being brought in. It goes
-	// when the old brain does.
-	Legacy bool `toml:"builtin"`
 }
 
 // Builtin reports whether the ghost declares no brain of its own and so
-// runs on one the driver provides.
+// runs on hermes.
 func (b BrainSection) Builtin() bool { return b.Wasm == "" && len(b.Command) == 0 }
-
-// Hermes reports whether that provided brain is hermes (hermesbrain.go).
-func (b BrainSection) Hermes() bool { return b.Builtin() && !b.Legacy }
 
 // LoadManifest reads and validates <dir>/ghost.toml.
 func LoadManifest(dir string) (*Manifest, error) {
@@ -192,13 +183,13 @@ func LoadManifest(dir string) (*Manifest, error) {
 	if hasWasm && hasCmd {
 		return nil, fmt.Errorf("%s: brain.wasm and brain.command are mutually exclusive", path)
 	}
-	// No brain at all is the persona-only ghost: the driver's built-in brain
-	// runs it. That brain converses for a living, so a ghost asking for it
-	// without the llm capability would work only in the sense that clicking
-	// it produces a quip — better to say so at load than to have every
-	// sentence come back as a capability error in the balloon.
+	// No brain at all is the persona-only ghost, and hermes runs it. That
+	// brain is a model, so a ghost asking for it without the llm capability
+	// would work only in the sense that clicking it produces a quip —
+	// better to say so at load than to have every sentence come back as a
+	// capability error in the balloon.
 	if !hasWasm && !hasCmd && !hasCapability(&m, "llm") {
-		return nil, fmt.Errorf("%s: a ghost with no [brain] section uses the built-in brain, which needs the llm capability", path)
+		return nil, fmt.Errorf("%s: a ghost with no [brain] section runs on hermes, which needs the llm capability", path)
 	}
 	if hasCmd && !hasCapability(&m, "native-brain") {
 		return nil, fmt.Errorf("%s: brain.command requires the native-brain capability", path)

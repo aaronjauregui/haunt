@@ -29,7 +29,7 @@ func TestNewScaffoldsAPersonaGhost(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !m.Brain.Builtin() {
-		t.Errorf("scaffolded brain = %+v, want the built-in one", m.Brain)
+		t.Errorf("scaffolded brain = %+v, want none (hermes)", m.Brain)
 	}
 	if m.Persona.System == "" {
 		t.Error("scaffolded ghost has no persona, which is all it is")

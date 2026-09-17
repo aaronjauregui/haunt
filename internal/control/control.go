@@ -22,7 +22,6 @@ import (
 // else (lifecycle, input, timers) is driver-internal.
 var allowedInbound = map[proto.EventType]bool{
 	proto.EventMessage: true,
-	proto.EventCorrect: true,
 }
 
 // SocketDir returns the directory holding control sockets:

@@ -1,15 +1,8 @@
 package main
 
 import (
-	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptest"
-	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
-	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -17,69 +10,34 @@ import (
 	"github.com/aaronjauregui/haunt/internal/testenv"
 )
 
-// TestWaitingIndicatorAndDeadline: a backend that takes its time gets a
-// balloon saying so, and one that never answers is abandoned rather than
-// left to hold the ghost's only AI slot until the HTTP client gives up
+// TestWaitingIndicatorAndDeadline: a model that takes its time gets a
+// balloon saying so, and a gateway that never answers is abandoned rather
+// than left to hold the ghost's one turn until the HTTP client gives up
 // minutes later.
 func TestWaitingIndicatorAndDeadline(t *testing.T) {
 	c := testenv.StartT(t)
-
-	// The first request never answers; the second replies at once. That
+	dir := t.TempDir()
+	// The first question is never answered; the second is, at once. That
 	// pair is the whole test: the ghost must survive the first well enough
 	// to serve the second.
-	var calls int32
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Read the prompt even though this fake has no use for it. A real
-		// backend does, and an http.Server with an unread request body
-		// cannot notice the client going away — so a handler that skips
-		// this never learns it was cancelled, and hangs the test's own
-		// shutdown rather than the driver's.
-		io.Copy(io.Discard, r.Body)
-		if atomic.AddInt32(&calls, 1) == 1 {
-			<-r.Context().Done() // silence until the driver hangs up
-			return
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"here at last\"}}]}\n\ndata: [DONE]\n\n")
-	}))
-	defer backend.Close()
-
-	dir := t.TempDir()
-	rt := filepath.Join(dir, "run")
-	cfgDir := filepath.Join(dir, "config")
-	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	config := fmt.Sprintf(`[ai.llm]
-base_url = %q
-model = "fake"
-
-[ai]
-first_token_timeout = 2
-`, backend.URL+"/v1")
-	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(config), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	bin := filepath.Join(dir, "haunt")
-	build(t, bin, ".")
+	rig := newHermesRig(t, dir, []fakeRule{
+		{Match: "[haunt event]", Reply: "NO_REPLY"},
+		{Match: "are you there", DelayMS: 60000, Reply: "too late"},
+		{Match: "", Reply: "here at last"},
+	}, "first_token_timeout = 2\n")
 	gDir := filepath.Join(dir, "wisp")
 	writeGhost(t, gDir, `[ghost]
 name = "wisp"
 capabilities = ["message", "llm"]
-
-[brain]
-builtin = true
 
 [persona]
 system = "You are Wisp."
 `)
 
 	const spriteX, spriteY = 100, 100
-	record := filepath.Join(dir, "session.jsonl")
-	cmd := exec.Command(bin, "run", "-x", "100", "-y", "100",
-		"-state", filepath.Join(dir, "state"), "-record", record, gDir)
-	cmd.Env = append(c.Env(), "HAUNT_RUNTIME_DIR="+rt, "HAUNT_CONFIG_DIR="+cfgDir)
+	cmd := exec.Command(rig.Bin, "run", "-x", "100", "-y", "100",
+		"-state", filepath.Join(dir, "state"), gDir)
+	cmd.Env = append(c.Env(), rig.env()...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -98,36 +56,25 @@ system = "You are Wisp."
 	})
 	waitFor(t, stdout, "READY")
 
-	env := append(os.Environ(), "HAUNT_RUNTIME_DIR="+rt)
-	say := func(text string) {
-		t.Helper()
-		sc := exec.Command(bin, "say", "-ghost", "wisp", text)
-		sc.Env = env
-		if out, err := sc.CombinedOutput(); err != nil {
-			t.Fatalf("say %q: %v: %s", text, err, out)
-		}
-	}
-
-	// The boot greeting has to be out of the way first, or what we see next
-	// is that rather than the indicator.
+	// The boot turn has to be out of the way first, or what we see next is
+	// something other than the indicator.
+	waitFake(t, rig.FakeLog, 1, 30*time.Second, repliedTo("kind=boot"))
 	waitNoBalloon(t, c, dir, spriteX, spriteY)
 
-	// A wait the user would notice is shown as one.
-	say("are you there?")
+	// A wait the person would notice is shown as one.
+	rig.say(t, "are you there?")
 	waitBalloon(t, c, dir, spriteX, spriteY, true)
 
-	// And a backend that says nothing at all is given up on, with a reason
-	// the brain can put in a balloon rather than a silence.
-	waitRecordContains(t, record, `"type":"ai_error"`)
-	if !strings.Contains(stderr.String(), "said nothing") {
-		t.Errorf("the timeout was not reported as one:\n%s", stderr.String())
-	}
+	// And a gateway that says nothing at all is given up on, with a reason
+	// in the balloon rather than a silence.
+	waitLog(t, stderr, "said nothing for 2s")
+	waitFake(t, rig.FakeLog, 1, 10*time.Second, func(e fakeEntry) bool { return e.Kind == "abandoned" })
 
-	// The slot is free again: the next thing said is answered normally,
-	// which is the part that matters — one wedged request must not deafen
-	// the ghost for the rest of the session.
-	say("hello again")
-	waitRecordContains(t, record, "here at last")
+	// The turn is free again: the next thing said is answered normally,
+	// which is the part that matters — one wedged turn must not deafen the
+	// ghost for the rest of the session.
+	rig.say(t, "hello again")
+	waitFake(t, rig.FakeLog, 1, 10*time.Second, repliedTo("hello again"))
 }
 
 // waitNoBalloon waits until nothing is beside the sprite.

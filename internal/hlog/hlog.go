@@ -12,8 +12,8 @@
 // errors and warnings always show, info is the short account of a session's
 // life, debug is the running commentary. Topics answer "matter to whom" —
 // debug is enabled per subsystem (`HAUNT_DEBUG=ai,wayland`), because a
-// person chasing a rendering bug does not want the memory index narrating
-// itself.
+// person chasing a rendering bug does not want intentions narrating
+// themselves.
 //
 // Default is info with no debug topics: a quiet log of a handful of lines
 // per session, which is what shipping software should print.
@@ -97,7 +97,7 @@ const (
 	Input Topic = "input"
 	// Screen is window awareness and looking.
 	Screen Topic = "screen"
-	// Memory is the embeddings index and the journal.
+	// Memory is intentions, goals and the journal.
 	Memory Topic = "memory"
 	// Store is persistence.
 	Store Topic = "store"

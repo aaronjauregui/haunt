@@ -1,68 +1,36 @@
 package main
 
 import (
-	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptest"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/aaronjauregui/haunt/internal/testenv"
 )
 
-// TestInitiative: left alone, wisp speaks first — and only as often as the
-// user's curiosity allowance permits. The idle threshold is turned right
+// TestInitiative: left alone, wisp is woken and speaks first — and only as
+// often as the user's curiosity allowance permits. The idle threshold is turned right
 // down so the test does not wait two minutes for the ghost to get bored,
 // but kept past bootWindow: idling inside the launch grace would be counted
 // a response to being started, which is exactly what that window is for.
 func TestInitiative(t *testing.T) {
 	c := testenv.StartT(t)
-
-	var chats int32
-	prompts := &systemPrompts{} // reused here to capture whole requests
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&chats, 1)
-		body, _ := io.ReadAll(r.Body)
-		prompts.add(string(body))
-		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Still there?\"}}]}\n\ndata: [DONE]\n\n")
-	}))
-	defer backend.Close()
-
 	dir := t.TempDir()
-	rt := filepath.Join(dir, "run")
-	cfgDir := filepath.Join(dir, "config")
-	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
 	// One unprompted action per day: enough to prove it happens, few enough
 	// to prove it stops.
-	config := fmt.Sprintf(`[ai.llm]
-base_url = %q
-model = "fake"
-
-[curiosity]
-actions_per_day = 1
-`, backend.URL+"/v1")
-	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(config), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	bin := filepath.Join(dir, "haunt")
-	build(t, bin, ".")
+	rig := newHermesRig(t, dir, []fakeRule{
+		{Match: "kind=idle", Reply: "Still there?"},
+		{Match: "[haunt event]", Reply: "NO_REPLY"},
+		{Match: "", Reply: "echo: {input}"},
+	}, "[curiosity]\nactions_per_day = 1\n")
+	bin := rig.Bin
 	gDir := filepath.Join(dir, "wisp")
 	writeGhost(t, gDir, `[ghost]
 name = "wisp"
 capabilities = ["message", "llm"]
-
-[brain]
-builtin = true
 
 [persona]
 system = "You are Wisp."
@@ -70,37 +38,40 @@ system = "You are Wisp."
 
 	record := filepath.Join(dir, "session.jsonl")
 	stateDir := filepath.Join(dir, "state")
-	cmd := exec.Command(bin, "run", "-x", "100", "-y", "100", "-idle-ms", "2500",
-		"-state", stateDir, "-record", record, gDir)
-	cmd.Env = append(c.Env(), "HAUNT_RUNTIME_DIR="+rt, "HAUNT_CONFIG_DIR="+cfgDir,
+	start := func(record string) (*exec.Cmd, *syncBuffer) {
+		t.Helper()
+		cmd := exec.Command(bin, "run", "-x", "100", "-y", "100", "-idle-ms", "2500",
+			"-state", stateDir, "-record", record, gDir)
+		cmd.Env = append(c.Env(), rig.env()...)
 		// Initiative accounting is debug output: this test is about it.
-		"HAUNT_DEBUG=curiosity")
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
+		cmd.Env = append(cmd.Env, "HAUNT_DEBUG=curiosity")
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		stderr := &syncBuffer{}
+		cmd.Stderr = stderr
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			cmd.Process.Signal(syscall.SIGTERM)
+			cmd.Wait()
+		})
+		waitFor(t, stdout, "READY")
+		return cmd, stderr
 	}
-	stderr := &syncBuffer{}
-	cmd.Stderr = stderr
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		cmd.Process.Signal(syscall.SIGTERM)
-		cmd.Wait()
-	})
-	waitFor(t, stdout, "READY")
+	cmd, stderr := start(record)
+	idles := turnsAbout("kind=idle")
 
-	// Nobody touches anything: the compositor reports idle, the brain tries
-	// to speak, and the driver lets it — once.
+	// Nobody touches anything: the compositor reports idle, the model is
+	// woken, it speaks, and the driver pays for that — once.
 	waitRecordContains(t, record, `"type":"idle"`)
-	waitRecordContains(t, record, "Still there?")
-	if !strings.Contains(stderr.String(), "on the ghost's own account") {
-		t.Errorf("initiative was not accounted for:\n%s", stderr.String())
-	}
+	waitFake(t, rig.FakeLog, 1, 30*time.Second, repliedTo("kind=idle"))
+	waitLog(t, stderr, "on the ghost's own account")
 
 	// The allowance is spent. Wake the compositor and let it go idle again:
-	// the ghost tries a second time and is refused.
-	before := atomic.LoadInt32(&chats)
+	// this time the event never reaches the model.
 	ptr, err := c.NewPointer()
 	if err != nil {
 		t.Fatal(err)
@@ -111,59 +82,25 @@ system = "You are Wisp."
 	ptr.Close()
 	waitRecordCount(t, record, `"type":"idle"`, 2)
 	waitLog(t, stderr, "daily curiosity spent")
-	if got := atomic.LoadInt32(&chats); got != before {
-		t.Errorf("ghost kept talking past its allowance: %d chats, was %d", got, before)
+	if got := len(fakeEntries(rig.FakeLog, idles)); got != 1 {
+		t.Errorf("the model was woken %d times, want once", got)
 	}
 
 	// A person addressing the ghost is always answered, spent or not.
-	say := exec.Command(bin, "say", "-ghost", "wisp", "hello?")
-	say.Env = append(os.Environ(), "HAUNT_RUNTIME_DIR="+rt)
-	if out, err := say.CombinedOutput(); err != nil {
-		t.Fatalf("say: %v: %s", err, out)
-	}
-	waitRecordCount(t, record, `"type":"ai_reply"`, 2)
-
-	// What the ghost said unbidden is remembered as its own remark. The
-	// stage direction that produced it was never said by anyone, and must
-	// not turn up in history attributed to the user — a ghost that speaks
-	// first would otherwise slowly invent a conversation partner.
-	last := prompts.last()
-	if strings.Contains(last, "Nobody has spoken") {
-		t.Errorf("a self-prompt was recorded as the user's words:\n%s", last)
-	}
-	if !strings.Contains(last, "Still there?") {
-		t.Errorf("the ghost's unprompted remark was not kept in history:\n%s", last)
-	}
+	rig.say(t, "hello?")
+	waitFake(t, rig.FakeLog, 1, 30*time.Second, repliedTo("hello?"))
 
 	// And the spend survives a restart: stopping and starting the ghost is
 	// not a way to refill the allowance.
 	cmd.Process.Signal(syscall.SIGTERM)
 	cmd.Wait()
-	chatsBeforeRestart := atomic.LoadInt32(&chats)
 
 	record2 := filepath.Join(dir, "session2.jsonl")
-	cmd2 := exec.Command(bin, "run", "-x", "100", "-y", "100", "-idle-ms", "2500",
-		"-state", stateDir, "-record", record2, gDir)
-	cmd2.Env = append(c.Env(), "HAUNT_RUNTIME_DIR="+rt, "HAUNT_CONFIG_DIR="+cfgDir,
-		"HAUNT_DEBUG=curiosity")
-	stdout2, err := cmd2.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	stderr2 := &syncBuffer{}
-	cmd2.Stderr = stderr2
-	if err := cmd2.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		cmd2.Process.Signal(syscall.SIGTERM)
-		cmd2.Wait()
-	})
-	waitFor(t, stdout2, "READY")
+	cmd2, stderr2 := start(record2)
 	waitRecordContains(t, record2, `"type":"idle"`)
 	waitLog(t, stderr2, "daily curiosity spent")
-	if got := atomic.LoadInt32(&chats); got != chatsBeforeRestart {
-		t.Errorf("restart refilled the allowance: %d chats, was %d", got, chatsBeforeRestart)
+	if got := len(fakeEntries(rig.FakeLog, idles)); got != 1 {
+		t.Errorf("restart refilled the allowance: the model was woken %d times", got)
 	}
 
 	cmd2.Process.Signal(syscall.SIGTERM)

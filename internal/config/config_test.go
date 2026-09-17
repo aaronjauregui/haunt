@@ -33,6 +33,15 @@ away = "45m"
 [curiosity]
 actions_per_day = 3
 
+[ai.vision]
+base_url = "http://localhost:11434/v1"
+model = "qwen2.5vl"
+
+[hermes]
+first_token_timeout = 45
+
+# Sections from before hermes was the brain are ignored, not refused, so an
+# old config keeps working.
 [memory]
 consolidations_per_day = 1
 
@@ -55,14 +64,14 @@ model = "qwen2.5"
 	if perGhost, room := f.Allowances(); perGhost != 3 || room != -1 {
 		t.Errorf("allowances = (%d, %d), want (3, -1)", perGhost, room)
 	}
-	if got := f.ConsolidationsPerDay(); got != 1 {
-		t.Errorf("consolidations = %d, want 1", got)
+	if f.AI.Vision.Model != "qwen2.5vl" {
+		t.Errorf("[ai.vision] model = %q", f.AI.Vision.Model)
 	}
-	if f.AI.LLM.Model != "qwen2.5" {
-		t.Errorf("[ai.llm] model = %q", f.AI.LLM.Model)
+	if got := f.Hermes.FirstTokenTimeout().Seconds(); got != 45 {
+		t.Errorf("[hermes] first_token_timeout = %vs, want 45", got)
 	}
 	// Filled in at load, so nothing downstream re-derives them.
-	if f.AI.Budget.LLMRequestsPerHour == 0 {
+	if f.AI.Budget.VisionRequestsPerHour == 0 {
 		t.Error("the AI budget defaults were not applied")
 	}
 }
@@ -76,9 +85,6 @@ func TestNoFileIsDefaults(t *testing.T) {
 	}
 	if perGhost, _ := f.Allowances(); perGhost != DefaultActionsPerDay {
 		t.Errorf("allowances = %d, want the default %d", perGhost, DefaultActionsPerDay)
-	}
-	if got := f.ConsolidationsPerDay(); got != DefaultConsolidationsPerDay {
-		t.Errorf("consolidations = %d, want the default %d", got, DefaultConsolidationsPerDay)
 	}
 	// The careless case has to be the safe one: a user who never wrote an
 	// ignore list still gets the password managers.

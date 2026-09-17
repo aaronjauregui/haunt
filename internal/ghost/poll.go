@@ -62,8 +62,9 @@ import (
 // does is make it the easy thing: the poll's answer arrives as an ordinary
 // event with no window opened for speaking on its own account, and an
 // intention taken on in the moments after it inherits the obligation the
-// trigger carries (see markObliged, and Asked in execIntend). The built-in
-// brain does exactly this and nothing else — see onPoll in defaultbrain.
+// trigger carries (see markObliged, and Asked in execIntend). The hermes
+// brain does exactly this and nothing else — see the EventCron case in
+// hermesbrain.go's Deliver.
 //
 // # Never the source of truth
 //
@@ -78,12 +79,11 @@ import (
 // with a synchronisation bug.
 //
 // Two things follow, and both are enforced here rather than hoped for.
-// Nothing polled is written to the memory index: 500 entries that forget by
-// strength would bury everything human about the person under "meeting with
-// Bob", so what may be remembered is a *conclusion* — they have moved that
-// session three weeks running — and never what was read. And nothing polled
-// is journalled, for the same reason plus a sharper one: journal entries
-// ride into every prompt.
+// Nothing polled is handed to the model as something to remember: what may
+// be remembered is a *conclusion* — they have moved that session three
+// weeks running — and never what was read, or a year of "meeting with Bob"
+// buries everything human about the person. And nothing polled is
+// journalled, for the same reason.
 //
 // # What a poll costs when it finds nothing
 //

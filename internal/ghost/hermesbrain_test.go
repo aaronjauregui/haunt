@@ -3,6 +3,7 @@ package ghost
 import (
 	"context"
 	"encoding/json"
+	"image"
 	"strings"
 	"sync"
 	"testing"
@@ -167,6 +168,27 @@ func TestHermesSilenceIsRefunded(t *testing.T) {
 	}
 }
 
+// A picture the model drew in a turn is not painted over by the words that
+// follow it: they wait for the picture to have had its time.
+func TestHermesPictureOutlastsTheReply(t *testing.T) {
+	g, b, ft := hermesGhost(t, 0)
+	ft.reply = func(_ context.Context, req hermes.TurnRequest) (hermes.Reply, error) {
+		req.OnTool(hermes.ToolEvent{Name: "mcp__haunt__draw"})
+		g.showImageBalloon(image.NewNRGBA(image.Rect(0, 0, 8, 8)))
+		req.OnTool(hermes.ToolEvent{Name: "mcp__haunt__draw", Done: true})
+		req.OnDelta("There you are.")
+		time.Sleep(150 * time.Millisecond)
+		req.OnDelta(" A sunset.")
+		return hermes.Reply{Text: "There you are. A sunset.", Tools: []string{"mcp__haunt__draw"}}, nil
+	}
+	g.markPrompted()
+	b.Deliver(proto.Event{Type: proto.EventMessage, Text: "draw a sunset"})
+	waitTurn(t, ft)
+	if !g.pictureShowing() {
+		t.Error("the reply replaced the picture")
+	}
+}
+
 // The driver decides whether an event reaches the model at all: with the
 // allowance spent, an idle event is never sent; the person's words are.
 func TestHermesGateIsBeforeSend(t *testing.T) {
@@ -181,6 +203,35 @@ func TestHermesGateIsBeforeSend(t *testing.T) {
 	b.Deliver(proto.Event{Type: proto.EventMessage, Text: "hello"})
 	if in := waitTurn(t, ft); in != "hello" {
 		t.Errorf("sent %q", in)
+	}
+}
+
+// Talking through the model is the llm capability. Without it, nothing
+// unprompted is sent; the person's words ask for it first, in the balloon.
+func TestHermesNeedsTheLLMCapability(t *testing.T) {
+	g, b, ft := hermesGhost(t, 5)
+	r := &recorder{}
+	g.opts.Granted = r.granted
+	g.opts.Refused = r.refusedCap
+	g.opts.Consent = r.record
+
+	b.Deliver(proto.Event{Type: proto.EventIdle})
+	time.Sleep(50 * time.Millisecond)
+	if got := ft.sent(); len(got) != 0 {
+		t.Fatalf("an ungranted wake was sent: %q", got)
+	}
+	if n := spent(g.curiosity); n != 0 {
+		t.Errorf("an ungranted wake was charged: %d spent", n)
+	}
+
+	g.markPrompted()
+	answer(t, g, consentAllow)
+	b.Deliver(proto.Event{Type: proto.EventMessage, Text: "hello"})
+	if in := waitTurn(t, ft); in != "hello" {
+		t.Errorf("sent %q", in)
+	}
+	if !r.granted("llm") {
+		t.Error("the grant was not recorded")
 	}
 }
 
@@ -260,6 +311,28 @@ func TestHermesErrandIsResolvedOnceRaised(t *testing.T) {
 	}
 }
 
+// An errand that came due and was not dealt with rides on every turn until
+// it is resolved; one still to come does not.
+func TestHermesTurnContextCarriesWhatIsOwed(t *testing.T) {
+	g, _, _ := hermesGhost(t, 0)
+	g.execIntend(proto.Intent{Name: "hermes/oven", Text: "check the oven", DelayMS: 60000})
+	g.execIntend(proto.Intent{Name: "hermes/later", Text: "stretch", DelayMS: 3600000})
+	now := time.Date(2026, 9, 17, 14, 3, 0, 0, time.Local)
+	if ctx := g.turnContext(now); !strings.HasPrefix(ctx, "Now: Thu 17 Sep 14:03 (afternoon).") ||
+		strings.Contains(ctx, "oven") {
+		t.Errorf("before it came due: %q", ctx)
+	}
+	g.fireIntention("hermes/oven")
+	ctx := g.turnContext(now)
+	if !strings.Contains(ctx, `"check the oven" (hermes/oven)`) || strings.Contains(ctx, "stretch") {
+		t.Errorf("once owed: %q", ctx)
+	}
+	g.execResolve("hermes/oven")
+	if ctx := g.turnContext(now); strings.Contains(ctx, "oven") {
+		t.Errorf("after it was resolved: %q", ctx)
+	}
+}
+
 // The tool surface lists the ghost's verbs and refuses unknown ones in
 // words.
 func TestHermesToolList(t *testing.T) {
@@ -272,12 +345,14 @@ func TestHermesToolList(t *testing.T) {
 			t.Errorf("%s has an invalid schema", s.Name)
 		}
 	}
-	for _, want := range []string{"say", "ask", "intend", "correct", "beliefs", "face", "draw", "look", "tell"} {
+	for _, want := range []string{"say", "ask", "intend", "face", "draw", "look", "tell"} {
 		if !names[want] {
 			t.Errorf("%s is not offered", want)
 		}
 	}
-	for _, not := range []string{"remember", "note", "move", "watch"} {
+	// Beliefs are hermes memory's, and a correction is an edit to it
+	// (docs/hermes-brain.md, section 13).
+	for _, not := range []string{"remember", "note", "move", "watch", "correct", "beliefs"} {
 		if names[not] {
 			t.Errorf("%s should not be offered", not)
 		}
@@ -293,50 +368,6 @@ func TestHermesToolList(t *testing.T) {
 	r = tools.Call(context.Background(), "intentions", nil)
 	if !strings.Contains(r.Text, "water the plants") {
 		t.Errorf("intentions answered %+v", r)
-	}
-}
-
-// A correction the model proposes changes nothing until the person says
-// yes, and what they confirm is filed with their authority.
-func TestHermesCorrectionNeedsConfirmation(t *testing.T) {
-	g, _, _ := hermesGhost(t, 0)
-	g.recordEntity("Sam", "person", FactInference, []string{"works at Acme"})
-	sam := subjectNamed(t, g, "Sam")
-	id := sam.Facts[0].ID
-	args := json.RawMessage(`{"subject":"sam","fact_id":` + itoa(id) + `,"truth":"left Acme in March"}`)
-	tools := hermesTools{g}
-
-	answer(t, g, correctNo)
-	r := tools.Call(context.Background(), "correct", args)
-	if r.IsError || !strings.Contains(r.Text, "did not confirm") {
-		t.Errorf("a declined correction answered %+v", r)
-	}
-	if got := subjectNamed(t, g, "Sam").StandingFacts(); len(got) != 1 || got[0].Text != "works at Acme" {
-		t.Errorf("a declined correction changed the beliefs: %+v", got)
-	}
-
-	answer(t, g, correctYes)
-	r = tools.Call(context.Background(), "correct", args)
-	if r.IsError {
-		t.Fatalf("a confirmed correction answered %+v", r)
-	}
-	standing := subjectNamed(t, g, "Sam").StandingFacts()
-	if len(standing) != 1 || standing[0].Text != "left Acme in March" || standing[0].From != FactPerson {
-		t.Errorf("the confirmed correction was not filed as the person's: %+v", standing)
-	}
-
-	answer(t, g, correctYes)
-	r = tools.Call(context.Background(), "correct", json.RawMessage(`{"subject":"Juno","truth":"is my sister"}`))
-	if r.IsError {
-		t.Fatalf("a new subject answered %+v", r)
-	}
-	if got := subjectNamed(t, g, "Juno").StandingFacts(); len(got) != 1 || got[0].From != FactPerson {
-		t.Errorf("a new subject was not filed as the person's: %+v", got)
-	}
-
-	r = tools.Call(context.Background(), "beliefs", json.RawMessage(`{"subject":"Sam"}`))
-	if !strings.Contains(r.Text, "left Acme in March [the person said so]") {
-		t.Errorf("beliefs answered %q", r.Text)
 	}
 }
 

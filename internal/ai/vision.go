@@ -18,18 +18,18 @@ import (
 // by the third; "what is this person working on, in one sentence" gets
 // something a ghost can actually use.
 //
-// Charged against the LLM budget: a look costs about what a reply costs,
-// and a ghost that could look freely while its tongue was rationed would
-// have the balance wrong.
+// Charged against its own hourly budget: a look costs about what a reply
+// costs, and the model the ghost talks through is billed by hermes, not
+// here.
 func (s *Service) Look(ctx context.Context, question string, png []byte) (string, error) {
 	if !s.VisionEnabled() {
-		return "", fmt.Errorf("no vision model configured (set [ai.vision] model in the haunt config)")
+		return "", fmt.Errorf("no vision model configured (set [ai.vision] base_url and model in the haunt config)")
 	}
-	if err := s.budgets.llm.spend(); err != nil {
-		return "", fmt.Errorf("llm budget: %w", err)
+	if err := s.budgets.vision.spend(); err != nil {
+		return "", fmt.Errorf("vision budget: %w", err)
 	}
 	s.trace("look → %s model=%s (%d KiB image)\n  [question] %s",
-		s.visionBaseURL(), s.cfg.Vision.Model, len(png)/1024, question)
+		s.cfg.Vision.BaseURL, s.cfg.Vision.Model, len(png)/1024, question)
 
 	// OpenAI-compatible multimodal content: text plus an inline data URI.
 	content := []map[string]any{
@@ -50,7 +50,7 @@ func (s *Service) Look(ctx context.Context, question string, png []byte) (string
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST",
-		strings.TrimRight(s.visionBaseURL(), "/")+"/chat/completions", bytes.NewReader(reqBody))
+		strings.TrimRight(s.cfg.Vision.BaseURL, "/")+"/chat/completions", bytes.NewReader(reqBody))
 	if err != nil {
 		return "", err
 	}

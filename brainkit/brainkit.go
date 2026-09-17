@@ -57,7 +57,6 @@ func (em *Emitter) Say(text string) { em.emit(Intent{Type: proto.IntentSay, Text
 // Menus are how classic ukagaka ghosts are mostly operated. They are also
 // the only way to ask a question that needs no language model behind it,
 // and the only interaction in the driver that works without a mouse.
-// (Not to be confused with Ask, which puts the *model* to work silently.)
 func (em *Emitter) Offer(tag, text string, options ...string) {
 	em.emit(Intent{Type: proto.IntentSay, Text: text, Tag: tag, Choices: options})
 }
@@ -65,14 +64,14 @@ func (em *Emitter) Offer(tag, text string, options ...string) {
 // SayFor shows text and puts it away after ms milliseconds — but only if it
 // is still the line on screen. Prefer this to Say plus a timer: a timer
 // scheduled to hide *this* line fires later and hides whatever has arrived
-// meanwhile, which on a slow model is the reply the person was waiting for.
+// meanwhile.
 // The driver can time it correctly because it knows what is on screen.
 func (em *Emitter) SayFor(text string, ms int) {
 	em.emit(Intent{Type: proto.IntentSay, Text: text, LingerMS: ms})
 }
 
 // Send emits an intent directly, for combinations these helpers do not
-// cover — a chat that carries both waiting words and a linger, say. The
+// cover — a picture that carries both waiting words and a linger, say. The
 // driver validates whatever arrives, so this is an escape hatch rather than
 // a back door.
 func (em *Emitter) Send(i Intent) { em.emit(i) }
@@ -106,65 +105,6 @@ func (em *Emitter) Log(text string) { em.emit(Intent{Type: proto.IntentLog, Text
 // The receiving ghost sees a message event with From set to this ghost.
 func (em *Emitter) Tell(ghostName, text string) {
 	em.emit(Intent{Type: proto.IntentTell, Name: ghostName, Text: text})
-}
-
-// Chat asks the user's LLM to reply to text in this ghost's persona
-// (requires the llm capability). The reply streams into the balloon and
-// arrives back as an ai_reply event; failures arrive as ai_error.
-func (em *Emitter) Chat(text string) {
-	em.emit(Intent{Type: proto.IntentChat, Text: text})
-}
-
-// ChatWaiting is Chat with something to say while the model thinks. The
-// driver shows a waiting indicator of its own after half a second — every
-// ghost gets that, whether or not its author considered slow backends —
-// and puts these words beside it. "Thinking…" in one ghost's voice is
-// "hold on, hold on" in another's, which is why the words come from here
-// and the dots do not.
-func (em *Emitter) ChatWaiting(text, waiting string) {
-	em.emit(Intent{Type: proto.IntentChat, Text: text, Wait: waiting})
-}
-
-// Ask is Chat without the balloon: the reply never reaches the user and is
-// kept out of conversation history, arriving only as an ai_reply event whose
-// Tag is the tag given here. Use it to put the LLM to work inside the brain —
-// rewriting a scribbled request into a real image prompt, classifying an
-// utterance — and act on the answer yourself.
-func (em *Emitter) Ask(tag, text string) {
-	em.emit(Intent{Type: proto.IntentChat, Text: text, Tag: tag, Silent: true})
-}
-
-// Initiate speaks first. direction is a stage direction for the model —
-// "nobody has spoken in a while; say something short, drawing on what you
-// remember" — not a line the user typed, and the driver records only the
-// reply, as the ghost's own remark. Use this rather than Chat for anything
-// the ghost says unbidden, or its memory fills with words it credits to a
-// user who never said them.
-//
-// Unprompted actions come out of the ghost's daily curiosity allowance;
-// the driver may refuse silently.
-func (em *Emitter) Initiate(direction string) {
-	em.emit(Intent{Type: proto.IntentChat, Text: direction, SelfPrompt: true})
-}
-
-// InitiateAbout is Initiate for something the ghost is speaking about a
-// named subject — most usefully another resident ghost it has just watched
-// do something. What it says is kept as one of the things it knows about
-// that subject, so a neighbour stops being a series of unconnected moments
-// and starts being somebody the ghost has opinions about. Those opinions
-// come back into context whenever the subject is mentioned again, by the
-// person or by the ghost itself.
-//
-// The subject is whatever the brain calls it; a ghost's name as it arrived
-// on an `observed` event is the obvious one. Nothing validates it, because
-// this is the ghost's own private sense of who is who.
-func (em *Emitter) InitiateAbout(subject, direction string) {
-	em.emit(Intent{
-		Type:       proto.IntentChat,
-		Text:       direction,
-		SelfPrompt: true,
-		About:      subject,
-	})
 }
 
 // Imagine generates an image (requires the imagine capability), shown as an
@@ -244,23 +184,6 @@ func (em *Emitter) Watch() {
 	em.emit(Intent{Type: proto.IntentWatch})
 }
 
-// Correct asks the driver to let the person fix something the ghost
-// believes about a subject. Offer it as a menu entry; emit this when they
-// pick it.
-//
-// It carries nothing, and cannot be made to carry anything. Everything
-// about the correction — which subject, which belief, what is true instead
-// — is read from the driver's own entity index, asked in the driver's own
-// balloon, and answered where this brain cannot hear it. That asymmetry is
-// deliberate: a brain may *propose* that the person be asked, and may not
-// perform a retirement, because filing a fact adds something they can see
-// and object to while retiring one removes the evidence.
-//
-// There is no answer event, for the same reason Watch has none.
-func (em *Emitter) Correct() {
-	em.emit(Intent{Type: proto.IntentCorrect})
-}
-
 // Act runs one tool on one of the tool servers the ghost's manifest
 // declares (requires the tools capability, and the user's yes for that
 // individual tool the first time it is used). tool is in "server.tool"
@@ -279,9 +202,9 @@ func (em *Emitter) Correct() {
 // between a companion and a process that does things behind your back, and
 // it is enforced in the driver so that no brain can decide otherwise.
 //
-// A brain does not have to use this at all: when the ghost has tools, the
-// model is offered them during ordinary Chat, and a ghost that is art plus
-// a persona can act without a line of code anywhere. Reach for Act when the
+// A brain does not have to use this at all: a ghost with no brain runs on
+// hermes, which is offered the tools, so a ghost that is art plus a persona
+// can act without a line of code anywhere. Reach for Act when the
 // ghost should do a *particular* thing at a *particular* moment — check the
 // build when the timer fires — rather than whatever the conversation
 // suggests.
@@ -353,11 +276,8 @@ func (em *Emitter) Note(text string) {
 // main; it returns when the driver closes the event stream.
 func Run(b Brain) { RunIO(b, os.Stdin, os.Stdout) }
 
-// RunIO is Run over an arbitrary event stream and intent sink. The driver
-// uses it to host its own built-in brain in-process: the transport is a
-// pipe rather than a WASI module's stdio, but the brain still speaks JSON
-// lines through the same schema and the same validation, so the built-in
-// brain can do nothing a downloaded one cannot.
+// RunIO is Run over an arbitrary event stream and intent sink, for tests
+// and for hosting a brain over something other than stdio.
 func RunIO(b Brain, r io.Reader, w io.Writer) {
 	em := &Emitter{enc: json.NewEncoder(w)}
 	sc := bufio.NewScanner(r)

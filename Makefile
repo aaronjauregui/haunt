@@ -1,6 +1,6 @@
 GO ?= go
 
-.PHONY: build test vet fmt demo demo-ai spin-ai demo-troupe demo-seriko demo-sleep demo-headless install-user clean
+.PHONY: build test vet fmt demo demo-ai spin-ai demo-troupe demo-seriko demo-headless install-user clean
 
 build:
 	$(GO) build ./...
@@ -37,7 +37,7 @@ spin-ai:
 	./scripts/hermes-spin.sh
 
 # Two ghosts at once, in one nested sway. Whisper is scripted and wisp runs
-# on the built-in brain, so they behave differently — which is the point.
+# on hermes, so they behave differently — which is the point.
 # Watch for: the second one opens beside the first rather than on top of it,
 # and from another terminal `haunt say "hello"` with no -ghost goes to
 # whichever you last clicked. `haunt say -ghost wisp ...` addresses one.
@@ -54,15 +54,6 @@ demo-troupe:
 demo-seriko:
 	@test -n "$(SERIKO)" || { echo "set SERIKO=<path or URL to a .nar or shell dir>"; exit 2; }
 	SERIKO="$(SERIKO)" SERIKO_ARGS="$(SERIKO_ARGS)" ./scripts/demo.sh
-
-# The AI ghost again, with memory consolidation collapsed to something you
-# can watch: idle after 10s, consolidate 5s later over anything at least a
-# second old. Say three or four related things to it first (haunt say ...),
-# then leave the nested window alone. Needs [ai.llm] and [ai.embed].
-# Read the result with: haunt journal / haunt journal -entities.
-demo-sleep:
-	GHOST=wisp IDLE_MS=10000 SLEEP_DELAY=5s SLEEP_AGE=1s \
-	    HAUNT_LOG=debug HAUNT_DEBUG=memory ./scripts/demo.sh
 
 # Same, but headless: no visible window, used to smoke-test the demo plumbing.
 demo-headless:

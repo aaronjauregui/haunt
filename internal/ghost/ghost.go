@@ -23,7 +23,6 @@ import (
 	"github.com/aaronjauregui/haunt/internal/bus"
 	"github.com/aaronjauregui/haunt/internal/config"
 	"github.com/aaronjauregui/haunt/internal/control"
-	"github.com/aaronjauregui/haunt/internal/defaultbrain"
 	"github.com/aaronjauregui/haunt/internal/desktop"
 	"github.com/aaronjauregui/haunt/internal/hermes"
 	"github.com/aaronjauregui/haunt/internal/hlog"
@@ -45,15 +44,12 @@ type Store interface {
 	Set(key, value string) error
 	// Get returns one value, and whether there was one. The other half of
 	// Set, and separate from All because almost every read the driver
-	// makes wants a single named key — the journal, the conversation, the
-	// intentions, where the ghost is standing. Without it those all went
-	// through All(), which reads every row in the store to find one of
-	// them, so the cost of reading the journal was proportional to the
-	// size of the memory index.
+	// makes wants a single named key — the journal, the intentions, where
+	// the ghost is standing.
 	Get(key string) (value string, ok bool, err error)
 	// All returns the complete KV map, handed to brains at boot. It is
 	// genuinely a whole-store read and should be treated as one: the
-	// driver does it once per session (see index.go).
+	// driver does it once per session (see boot).
 	All() (map[string]string, error)
 	// Close flushes and releases the backend.
 	Close() error
@@ -158,12 +154,10 @@ type Options struct {
 	// IdleTimeoutMS overrides the inactivity threshold for idle events
 	// (default 2 minutes).
 	IdleTimeoutMS uint32
-	// ConsolidateDelay overrides how long after the user goes away the
-	// ghost starts consolidating memories, and ConsolidateAfter how old a
-	// memory must be to be material for it. Both exist so tests do not have
-	// to wait five minutes for a two-day-old exchange.
-	ConsolidateDelay time.Duration
-	ConsolidateAfter time.Duration
+	// GoalCheckDelay overrides how long after the person goes idle the
+	// ghost looks at whether a goal has gone quiet (default 5 minutes; see
+	// goal.go), so tests and demos need not wait.
+	GoalCheckDelay time.Duration
 }
 
 // Ghost is a running instance.
@@ -183,12 +177,10 @@ type Options struct {
 // screen) happens outside them. There is therefore no lock order to get
 // wrong, and adding one is how this stops being true.
 //
-// The two that look like exceptions are not. aiMu is not a data lock at all:
-// it is the ghost's single work slot, held across a whole request so that
-// two of them cannot wear one body, and the code under it takes the small
-// locks freely. memMu is the same thing for memory, kept separate from aiMu
-// precisely so that writing down what was said cannot delay saying the next
-// thing.
+// The one that looks like an exception is not. aiMu is not a data lock at
+// all: it is the ghost's single work slot, held across a whole request so
+// that two of them cannot wear one body, and the code under it takes the
+// small locks freely.
 type Ghost struct {
 	manifest *Manifest
 	opts     Options
@@ -233,12 +225,15 @@ type Ghost struct {
 	// indicator (see waiting.go) rather than anything the ghost said, so it
 	// can be replaced without taking away something the user is reading.
 	blnWaiting bool
+	// blnPicture says the balloon on screen is a picture the ghost drew, so
+	// a hermes reply streaming in after the draw does not paint over it
+	// (see hermesBrain.run).
+	blnPicture bool
 
 	bus   *bus.Bus
 	brain brain.Runner
 	// onHermes says the brain is hermes (hermesbrain.go): the model's tool
-	// calls arrive over the control socket, and memory is hermes's own plus
-	// the belief store.
+	// calls arrive over the control socket, and its memory is hermes's own.
 	onHermes bool
 	// hermesCfg is the [hermes] config, and hermesGW the gateway it
 	// started, if it has.
@@ -248,13 +243,8 @@ type Ghost struct {
 	// hermesLate is the brain's turner until the gateway is up.
 	hermesLate *lateTurner
 	store      Store
-	// index is the memory ring and the entity index, held in memory and
-	// written through to the store. It is loaded once — from the snapshot
-	// boot already reads — and is authoritative for as long as the ghost
-	// runs (see index.go).
-	index   residentIndex
-	quiet   *quiet.Checker
-	desktop *desktop.Watcher
+	quiet      *quiet.Checker
+	desktop    *desktop.Watcher
 
 	// dir is the ghost's own directory, kept because tool servers may be
 	// launched from it (see act.go).
@@ -270,11 +260,6 @@ type Ghost struct {
 	aiSvc    *ai.Service
 	cacheDir string
 	aiMu     sync.Mutex // one AI request at a time per ghost
-	// memMu is memory's own slot. Embedding used to queue behind aiMu with
-	// conversation, which is the wrong way round: writing down what was
-	// just said must never delay saying the next thing, and a wedged
-	// embeddings endpoint must not make the ghost mute.
-	memMu sync.Mutex
 
 	// Typed input (see input.go).
 	inputMu sync.Mutex
@@ -308,17 +293,8 @@ type Ghost struct {
 	// has not changed is not delivered to the brain again (see poll.go).
 	polls polls
 
-	// room is the other ghosts this one has watched act, learned from the
-	// stage rather than told (see sociality.go).
-	roomMu sync.Mutex
-	room   map[string]bool
-
 	// Initiative accounting (see curiosity.go).
 	curiosity *allowance
-	// sleep is the separate allowance for consolidation, and sleeper the
-	// state of the pass itself (see consolidate.go).
-	sleep   *allowance
-	sleeper sleeper
 	// drifter is the state of the goal check, the other pass that happens
 	// while nobody is there, and goalWatch is what the watch loop is
 	// looking for on the person's screen — held in memory so a poll every
@@ -454,18 +430,9 @@ func Run(ctx context.Context, dir string, opts Options) error {
 		}
 	}()
 
-	// Control socket: external programs push events in (haunt say, hooks),
-	// and the person corrects the ghost through it (haunt correct).
-	//
-	// The socket itself is no longer gated on the "message" capability, and
-	// the gate has moved into publishFromControl instead. What that
-	// capability is about is whether outside programs may put *words* in
-	// front of the person; a correction is not conversation, it is the
-	// person editing what their own ghost believes about them, and making
-	// it depend on a capability granted for scripts and CI would mean a
-	// ghost that can be read (`haunt journal -entities` opens the database
-	// directly) and not told it is wrong. That is the exact asymmetry
-	// revision exists to remove.
+	// Control socket: external programs push events in (haunt say, hooks).
+	// The socket is always open, and the "message" capability is checked per
+	// event in publishFromControl, so a withdrawn grant takes effect at once.
 	//
 	// Through g.publishFromControl, not the bus directly: `haunt say` is a
 	// person addressing the ghost, and the reply must not be charged to the
@@ -553,8 +520,7 @@ func (g *Ghost) openStore() error {
 	// — which is every ordinary run — the two differ, and the cache used to
 	// be sent to a temp directory while the database went to XDG. That
 	// quietly threw away every generated image on reboot, and with it the
-	// point of the built-in brain reusing a stored prompt so that asking
-	// for the same picture twice costs one generation.
+	// point of asking for the same picture twice costing one generation.
 	stateDir := g.opts.StateDir
 	if stateDir == "" {
 		base := os.Getenv("XDG_DATA_HOME")
@@ -683,8 +649,8 @@ func (g *Ghost) openScreen() error {
 }
 
 // applySettings takes the parsed config file and everything derived from
-// it: do-not-disturb, what the ghost may notice, its two daily allowances,
-// and the AI service it spends them through.
+// it: do-not-disturb, what the ghost may notice, its daily allowances, the
+// AI service for pictures, sight and tools, and where hermes is.
 func (g *Ghost) applySettings(cfg *config.File) error {
 	var err error
 	// Quiet hours (config windows + manual shush).
@@ -704,32 +670,28 @@ func (g *Ghost) applySettings(cfg *config.File) error {
 	actionsPerDay, _ := cfg.Allowances()
 	g.curiosity = newCuriosity(actionsPerDay, g.store, g.log)
 
-	// And the separate one for consolidation: it rations the user's bill
-	// rather than their attention, so a ghost that spent the night
-	// thinking still has things to say in the morning.
-	g.sleep = newAllowance(sleepKey, cfg.ConsolidationsPerDay(), g.store, g.log, hlog.Memory)
-
-	// And the third: what the person asked for, which must not compete with
+	// And the second: what the person asked for, which must not compete with
 	// what the ghost thought of.
 	g.obligation = newObligation(cfg.ObligationsPerDay(), g.store, g.log)
 
-	// AI services (backends are user-configured; absent config just means
-	// the capabilities error out when used).
+	// AI services: images, vision and the tool budget. Conversation is
+	// hermes's (backends are user-configured; absent config just means the
+	// capabilities error out when used).
 	g.aiSvc = ai.NewServiceWith(cfg.AI, g.log, g.opts.AIBudgets)
 	g.hermesCfg = cfg.Hermes
 	return nil
 }
 
-// startBrain starts the ghost's logic: the driver's built-in brain when the
-// manifest declares none, sandboxed WASM when it does, a native process
-// only when the manifest declares (and the user granted) the native-brain
-// capability. All three speak the same event/intent schema down the same
-// pipe: the built-in brain is hosted, not privileged.
+// startBrain starts the ghost's logic: hermes when the manifest declares no
+// brain (hermesbrain.go), sandboxed WASM when it does, a native process only
+// when the manifest declares (and the user granted) the native-brain
+// capability. The scripted two speak the event/intent schema down a pipe;
+// hermes is hosted in the driver and acts through tools.
 func (g *Ghost) startBrain(ctx context.Context) error {
 	m := g.manifest
 	var err error
 	switch {
-	case m.Brain.Hermes():
+	case m.Brain.Builtin():
 		g.log.Info(hlog.Brain, "no brain declared; running on hermes")
 		g.onHermes = true
 		late := newLateTurner()
@@ -745,9 +707,6 @@ func (g *Ghost) startBrain(ctx context.Context) error {
 			return gw.Stop()
 		})
 		g.hermesLate = late
-	case m.Brain.Builtin():
-		g.log.Info(hlog.Brain, "running the old built-in brain ([brain] builtin = true)")
-		g.brain, err = brain.StartBuiltin(defaultbrain.Run, g.execIntent, brain.Options{})
 	case len(m.Brain.Command) > 0:
 		if !g.capabilityActive("native-brain") {
 			return fmt.Errorf("ghost %q wants a native brain but the native-brain capability is not granted", m.Ghost.Name)
@@ -868,8 +827,8 @@ func (g *Ghost) startTriggers(idleTimeoutMS uint32) (func(), error) {
 }
 
 // boot tells the brain the session has started and starts everything that
-// should only run once it has: standing intentions, window awareness, idle
-// animation, and the index repair. The caller owns stopping the animation.
+// should only run once it has: standing intentions, window awareness and
+// idle animation. The caller owns stopping the animation.
 func (g *Ghost) boot() error {
 	// Boot with the persisted KV snapshot, with the faces this shell can
 	// wear, and with the tools it may act through: a brain choosing an
@@ -879,11 +838,6 @@ func (g *Ghost) boot() error {
 	if err != nil {
 		return err
 	}
-	// The one full read of the session, and it has two consumers: the
-	// brain's KV snapshot below, and the resident memory and entity
-	// indexes, which would otherwise re-derive themselves from the store
-	// several times per exchange (see index.go).
-	g.index.adopt(kv)
 	var poses []string
 	if g.shell != nil {
 		poses = g.shell.Poses()
@@ -910,11 +864,6 @@ func (g *Ghost) boot() error {
 
 	// Idle animation: blinking and the like, on the shell's own schedule.
 	g.startAnimation()
-
-	// Repair the memory index if the embedding model changed since it was
-	// written. In the background: it is a long job on a large index, and
-	// the ghost should be talking meanwhile.
-	g.go_(hlog.Memory, "re-embedding", func() { g.reembedStale(g.runCtx) })
 	return nil
 }
 
@@ -930,11 +879,7 @@ func (g *Ghost) shutdown(deliveryDone <-chan struct{}, runErr error) error {
 	// the watch loop's own exit runs after the store has been closed, so
 	// this is the only place the last minute of it can be saved.
 	g.saveSessionState()
-	// Whatever the ghost was thinking about in its sleep, it is not
-	// finishing it now: the cancel is what stops teardown waiting on a
-	// model call nobody will read (consolidate.go). The goal check goes the
-	// same way, though it has nothing to cancel but a timer.
-	g.wakeUp()
+	// The goal check is not finishing now either.
 	g.endGoalCheck()
 	g.publish(proto.Event{Type: proto.EventShutdown})
 	g.timersMu.Lock()
@@ -1021,15 +966,12 @@ func (g *Ghost) publishExternal(e proto.Event) error {
 	case e.Type == proto.EventIdle:
 		g.idle.Store(true)
 		g.endResponding()
-		// Nobody is waiting, so this is when the ghost gets to think about
-		// what it already knows (consolidate.go), and when it looks at
-		// whether a goal has gone quiet (goal.go). Both are work that must
-		// not happen over somebody's shoulder; neither of them speaks.
-		g.beginSleeping()
+		// Nobody is waiting, so this is when the ghost looks at whether a
+		// goal has gone quiet (goal.go): work that must not happen over
+		// somebody's shoulder, and that does not speak.
 		g.beginGoalCheck()
 	case e.Type == proto.EventActive:
 		g.idle.Store(false)
-		g.wakeUp()
 		g.endGoalCheck()
 		// And there is somebody to raise things with again. A drift finding
 		// is deliberately left unarmed by the pass that made it, because
@@ -1045,37 +987,20 @@ func (g *Ghost) publishExternal(e proto.Event) error {
 // `haunt say` is told why it was refused rather than left wondering.
 //
 // The asymmetry is deliberate and worth knowing: revoking takes effect at
-// once, while a ghost that *started* with `message` withheld has no socket
-// to open and needs a restart to gain it. Everything else — llm, imagine,
-// window, screen, tell — is checked at the moment it is used and so changes
-// in both directions immediately.
+// once. Everything else — llm, imagine, window, screen, tell — is checked
+// at the moment it is used and so changes in both directions immediately.
 func (g *Ghost) publishFromControl(e proto.Event) error {
-	// A correction is settled by the driver and never reaches the brain.
-	// Two reasons. A brain that could retire a fact could take out what the
-	// person actually said and put something else in its place, and nothing
-	// anywhere would show that it had — filing adds something the person can
-	// see and object to, retiring removes the evidence. And a model asked to
-	// interpret a correction is a model that can get the subject or the
-	// polarity wrong, which is the failure this is here to fix.
-	if e.Type == proto.EventCorrect {
-		if !g.memoryEnabled() {
-			return fmt.Errorf("this ghost has no memory to correct")
-		}
-		_, err := g.applyCorrection(e.Name, e.Fact, e.Text)
-		return err
-	}
 	if !g.capabilityActive("message") {
 		return fmt.Errorf("the message capability is not granted")
 	}
 	return g.publishExternal(e)
 }
 
-// aiWork describes one of the four intents that reach a backend: chat,
-// imagine, look and act. They share a shape — decide whether this was
-// provoked, get off the intent loop, be sure of the capability, take the
-// ghost's one AI slot, do the work — and used to repeat it four times, which
-// made the places where they genuinely differ hard to see. Here the
-// differences are the fields.
+// aiWork describes one of the three intents that reach a backend: imagine,
+// look and act. They share a shape — decide whether this was provoked, get
+// off the intent loop, be sure of the capability, take the ghost's one AI
+// slot, do the work — and the places where they genuinely differ are the
+// fields.
 type aiWork struct {
 	// name is the intent, for the allowance and the log.
 	name string
@@ -1094,7 +1019,7 @@ type aiWork struct {
 	// taken, for setup that may itself be slow.
 	beforeLock func()
 	// run is the work. userDriven is whether a person was waiting when the
-	// intent arrived, which only chat and imagine care about.
+	// intent arrived, which only imagine cares about.
 	run func(in proto.Intent, userDriven bool)
 }
 
@@ -1152,7 +1077,7 @@ func (g *Ghost) execIntent(in proto.Intent) {
 		if len(in.Choices) > 0 {
 			// A question, not a remark: it stays up until it is answered,
 			// and the answer comes back as an event.
-			g.inferExpression(in.Text, false)
+			g.inferExpression(in.Text)
 			g.showChoices(in)
 			return
 		}
@@ -1163,7 +1088,7 @@ func (g *Ghost) execIntent(in proto.Intent) {
 		g.dismissChoices()
 		// Scripted dialogue gets the free tier of expression inference. A
 		// brain that also sets an expression runs after this and wins.
-		g.inferExpression(in.Text, false)
+		g.inferExpression(in.Text)
 		// Scripted dialogue arrives whole, so it is readable from its
 		// beginning immediately, pages and all.
 		g.showPaged(in.Text)
@@ -1210,11 +1135,6 @@ func (g *Ghost) execIntent(in proto.Intent) {
 		}
 	case proto.IntentLog:
 		g.log.Line("ghost: " + in.Text)
-	case proto.IntentChat:
-		g.startAI(in, aiWork{
-			name: "chat", capability: "llm", topic: hlog.AI, charged: true,
-			run: g.execChat,
-		})
 	case proto.IntentImagine:
 		g.startAI(in, aiWork{
 			name: "imagine", capability: "imagine", topic: hlog.AI, charged: true,
@@ -1233,9 +1153,9 @@ func (g *Ghost) execIntent(in proto.Intent) {
 			g.announce(proto.ActedClip, in.Name)
 		}
 	case proto.IntentLook:
-		// Not charged against the daily allowance, unlike its three
+		// Not charged against the daily allowance, unlike its two
 		// neighbours here, and the omission is deliberate rather than
-		// missed. Looking is rationed by the hourly LLM budget it spends
+		// missed. Looking is rationed by the hourly vision budget it spends
 		// from (ai/vision.go) and hedged six further ways in look.go —
 		// declared capability, granted capability, a configured vision
 		// model, the ignore list, nothing fullscreen, and the ghost
@@ -1266,14 +1186,10 @@ func (g *Ghost) execIntent(in proto.Intent) {
 			run:        func(in proto.Intent, _ bool) { g.execAct(in) },
 		})
 	case proto.IntentWatch:
-		// Its own goroutine, like chat: ensureCapability blocks while the
+		// Its own goroutine, like imagine: ensureCapability blocks while the
 		// question is on screen, and the intent loop is not a thing to
 		// stall while somebody reads.
 		g.go_(hlog.Screen, "watch", func() { g.execWatch() })
-	case proto.IntentCorrect:
-		// Same reason: this puts several questions on screen in a row and
-		// waits for a person to read each one.
-		g.go_(hlog.Memory, "correct", func() { g.execCorrect() })
 	case proto.IntentIntend:
 		g.execIntend(in)
 	case proto.IntentResolve:
@@ -1397,6 +1313,7 @@ func (g *Ghost) showBalloonSprite(sp *sprite.Sprite) {
 	g.blnMu.Lock()
 	g.bln = bln
 	g.blnWaiting = false
+	g.blnPicture = false
 	g.blnMu.Unlock()
 }
 
@@ -1455,7 +1372,17 @@ func (g *Ghost) showImageBalloon(img image.Image) bool {
 		return false
 	}
 	g.showBalloonSprite(g.renderer().RenderImage(img))
+	g.blnMu.Lock()
+	g.blnPicture = true
+	g.blnMu.Unlock()
 	return true
+}
+
+// pictureShowing reports whether the balloon holds a picture.
+func (g *Ghost) pictureShowing() bool {
+	g.blnMu.Lock()
+	defer g.blnMu.Unlock()
+	return g.blnUp && g.blnPicture
 }
 
 // placeBalloon re-anchors the balloon to the sprite's current position.
@@ -1480,6 +1407,7 @@ func (g *Ghost) hideBalloon() {
 	bln := g.bln
 	g.bln = nil
 	g.blnWaiting = false
+	g.blnPicture = false
 	g.blnUp = false
 	g.blnMu.Unlock()
 	if bln != nil {

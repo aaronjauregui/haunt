@@ -1,15 +1,12 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
-	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -22,137 +19,44 @@ import (
 // ghost actually did something.
 //
 // Both paths are covered, because they are different decisions: the model
-// asking for a tool in the middle of a conversation, and a brain asking for
+// asking for a tool in the middle of a hermes turn, and a brain asking for
 // one specific thing at one specific moment.
 
-// fakeToolBackend is an LLM that answers the first request with a tool call
-// and the second — the one carrying the tool's result — with words. That is
-// the whole shape of the loop the driver runs.
-type fakeToolBackend struct {
-	mu sync.Mutex
-	// offered records whether the tools reached the model, and roles the
-	// message sequence it was given, so the test can check the driver built
-	// a conversation a real backend would accept.
-	offered  bool
-	sawTool  bool
-	toolText string
-}
-
-func (b *fakeToolBackend) serve(t *testing.T) *httptest.Server {
-	t.Helper()
-	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			Messages []struct {
-				Role       string `json:"role"`
-				Content    string `json:"content"`
-				ToolCallID string `json:"tool_call_id"`
-			} `json:"messages"`
-			Tools []struct {
-				Function struct {
-					Name       string          `json:"name"`
-					Parameters json.RawMessage `json:"parameters"`
-				} `json:"function"`
-			} `json:"tools"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), 400)
-			return
-		}
-		b.mu.Lock()
-		if len(req.Tools) > 0 {
-			b.offered = true
-		}
-		var answered bool
-		for _, m := range req.Messages {
-			if m.Role == "tool" {
-				b.sawTool = true
-				b.toolText = m.Content
-				answered = true
-			}
-		}
-		wire := ""
-		if len(req.Tools) > 0 {
-			wire = req.Tools[0].Function.Name
-		}
-		b.mu.Unlock()
-
-		w.Header().Set("Content-Type", "text/event-stream")
-		fl := w.(http.Flusher)
-		send := func(delta map[string]any) {
-			raw, _ := json.Marshal(map[string]any{
-				"choices": []map[string]any{{"delta": delta}},
-			})
-			fmt.Fprintf(w, "data: %s\n\n", raw)
-			fl.Flush()
-		}
-		switch {
-		case answered || wire == "":
-			// The tool has been run and its result handed back — or there
-			// was nothing on offer in the first place.
-			send(map[string]any{"content": "there, it is written down"})
-		default:
-			send(map[string]any{"tool_calls": []map[string]any{{
-				"index": 0, "id": "call_1", "type": "function",
-				"function": map[string]any{"name": wire},
-			}}})
-			for _, frag := range []string{`{"text"`, `:"milk"}`} {
-				send(map[string]any{"tool_calls": []map[string]any{{
-					"index": 0, "function": map[string]any{"arguments": frag},
-				}}})
-			}
-		}
-		fmt.Fprint(w, "data: [DONE]\n\n")
-	})
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-	return srv
-}
-
-// actingGhostRun starts a ghost with one tool server and returns the paths
-// the test needs. brainCmd is empty for the built-in brain.
+// actingRun is a ghost with one tool server, and the paths the test needs.
+// startActingGhost's brain is a testdata program, or empty for hermes.
 type actingRun struct {
 	dir     string
 	bin     string
 	rt      string
 	record  string
 	notes   string
-	backend *fakeToolBackend
+	fakeLog string
 }
 
 func startActingGhost(t *testing.T, c *testenv.Compositor, brain string) actingRun {
 	t.Helper()
-	backend := &fakeToolBackend{}
-	srv := backend.serve(t)
-
 	dir := t.TempDir()
-	rt := filepath.Join(dir, "run")
-	cfgDir := filepath.Join(dir, "config")
-	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	config := fmt.Sprintf(`[ai.llm]
-base_url = %q
-model = "fake"
-`, srv.URL+"/v1")
-	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(config), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	bin := filepath.Join(dir, "haunt")
-	build(t, bin, ".")
+	// On hermes, the model asks for the re-exported tool by its wire name.
+	rig := newHermesRig(t, dir, []fakeRule{
+		{Match: "[haunt event]", Reply: "NO_REPLY"},
+		{Match: "note that", Tool: "notes__append", Args: map[string]any{"text": "milk"},
+			Reply: "there, it is written down"},
+	}, "")
+	bin := rig.Bin
 	server := filepath.Join(dir, "toolserver")
 	build(t, server, "./testdata/toolserver")
 
 	notes := filepath.Join(dir, "notes.txt")
 	gDir := filepath.Join(dir, "wisp")
+	brainSection := ""
+	if brain != "" {
+		brainSection = "[brain]\ncommand = [\"./brain\"]\n"
+	}
 	manifest := fmt.Sprintf(`[ghost]
 name = "wisp"
 capabilities = ["message", "llm", "tools"%s]
 
-[brain]
 %s
-
 [persona]
 system = "You are Wisp."
 
@@ -160,21 +64,17 @@ system = "You are Wisp."
 name = "notes"
 command = [%q]
 env = ["HAUNT_TEST_NOTES"]
-`, brainCap(brain), brainLine(brain), server)
+`, brainCap(brain), brainSection, server)
+	writeGhost(t, gDir, manifest)
 	if brain != "" {
-		brainBin := filepath.Join(gDir, "brain")
-		writeGhost(t, gDir, manifest)
-		build(t, brainBin, "./testdata/"+brain)
-	} else {
-		writeGhost(t, gDir, manifest)
+		build(t, filepath.Join(gDir, "brain"), "./testdata/"+brain)
 	}
 
 	record := filepath.Join(dir, "session.jsonl")
 	cmd := exec.Command(bin, "run", "-x", "100", "-y", "100",
 		"-state", filepath.Join(dir, "state"), "-record", record, gDir)
-	cmd.Env = append(c.Env(),
-		"HAUNT_RUNTIME_DIR="+rt,
-		"HAUNT_CONFIG_DIR="+cfgDir,
+	cmd.Env = append(c.Env(), rig.env()...)
+	cmd.Env = append(cmd.Env,
 		"HAUNT_TEST_NOTES="+notes,
 		// A variable the manifest does not name, to check it stays behind.
 		"HAUNT_TEST_SECRET=do-not-pass-this-on",
@@ -193,16 +93,7 @@ env = ["HAUNT_TEST_NOTES"]
 	})
 	waitFor(t, stdout, "READY")
 
-	return actingRun{dir: dir, bin: bin, rt: rt, record: record, notes: notes, backend: backend}
-}
-
-// brainLine is the [brain] section's body: a native process, or the old
-// built-in brain this test was written against.
-func brainLine(brain string) string {
-	if brain == "" {
-		return "builtin = true"
-	}
-	return `command = ["./brain"]`
+	return actingRun{dir: dir, bin: bin, rt: rig.RT, record: record, notes: notes, fakeLog: rig.FakeLog}
 }
 
 func brainCap(brain string) string {
@@ -222,8 +113,8 @@ func (r actingRun) say(t *testing.T, text string) {
 }
 
 // TestGhostActsThroughTheModel: art, a persona, a tool server and no code
-// anywhere. The model is offered the tool during an ordinary conversation,
-// the driver runs it, and a file on disk changes — which is the difference
+// anywhere. Hermes is offered the tool through haunt's MCP server, the
+// driver runs it, and a file on disk changes — which is the difference
 // between a companion that can do things and one that can describe doing
 // them.
 func TestGhostActsThroughTheModel(t *testing.T) {
@@ -235,18 +126,15 @@ func TestGhostActsThroughTheModel(t *testing.T) {
 	// The thing itself: the tool ran and wrote to the file.
 	waitFileContains(t, run.notes, "milk")
 	// And then the model answered, with the tool's result in front of it.
-	waitRecordContains(t, run.record, "there, it is written down")
+	waitFakeLog(t, run.fakeLog, 10*time.Second, repliedTo("note that"))
 
-	run.backend.mu.Lock()
-	defer run.backend.mu.Unlock()
-	if !run.backend.offered {
-		t.Error("the tools never reached the model")
+	list := waitFakeLog(t, run.fakeLog, time.Second, func(e fakeEntry) bool { return e.Kind == "tools_list" })
+	if !slices.Contains(list.Tools, "notes__append") {
+		t.Errorf("the tools never reached the model: %v", list.Tools)
 	}
-	if !run.backend.sawTool {
-		t.Fatal("the tool's result was never handed back to the model")
-	}
-	if !strings.Contains(run.backend.toolText, "appended milk") {
-		t.Errorf("tool result = %q, want what the server said", run.backend.toolText)
+	call := waitFakeLog(t, run.fakeLog, time.Second, func(e fakeEntry) bool { return e.Kind == "tool_call" })
+	if call.IsError || !strings.Contains(call.Text, "appended milk") {
+		t.Errorf("tool result = %+v, want what the server said", call)
 	}
 }
 
@@ -318,22 +206,5 @@ func TestToolServerEnvironmentIsFiltered(t *testing.T) {
 	}
 	if strings.Contains(string(data), "leaked") {
 		t.Errorf("a variable the manifest never named reached the tool server:\n%s", data)
-	}
-}
-
-// waitFileContains polls a file the tool server writes to, which is how a
-// test tells "the ghost did something" from "the ghost said it had".
-func waitFileContains(t *testing.T, path, want string) {
-	t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
-	for {
-		data, _ := os.ReadFile(path)
-		if strings.Contains(string(data), want) {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("%s never contained %q; have:\n%s", path, want, data)
-		}
-		time.Sleep(200 * time.Millisecond)
 	}
 }

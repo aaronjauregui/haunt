@@ -321,18 +321,21 @@ func TestEnsureProfile(t *testing.T) {
 		t.Errorf("SOUL.md was not regenerated")
 	}
 
-	c.MemoryProvider = "haunt"
+	// A profile left naming the deleted memory provider loses it.
+	raw, _ = os.ReadFile(cfgPath)
+	stale := strings.Replace(string(raw), "memory:\n", "memory:\n    provider: haunt\n", 1)
+	if stale == string(raw) {
+		t.Fatalf("no memory section to plant a provider in:\n%s", raw)
+	}
+	if err := os.WriteFile(cfgPath, []byte(stale), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := c.EnsureProfile(spec); err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range []string{"__init__.py", "plugin.yaml"} {
-		if _, err := os.Stat(filepath.Join(p.Dir, "plugins", "haunt", f)); err != nil {
-			t.Errorf("plugin file %s: %v", f, err)
-		}
-	}
 	raw, _ = os.ReadFile(cfgPath)
-	if !strings.Contains(string(raw), "provider: haunt") {
-		t.Errorf("memory provider not selected:\n%s", raw)
+	if strings.Contains(string(raw), "provider: haunt") {
+		t.Errorf("stale memory provider kept:\n%s", raw)
 	}
 
 	opened, err := c.OpenProfile("Moth")

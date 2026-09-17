@@ -4,14 +4,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aaronjauregui/haunt/internal/ai"
 	"github.com/aaronjauregui/haunt/internal/hlog"
 )
 
-// A tool's answer is the one thing in a prompt the driver does not
-// generate and cannot predict the size of: an MCP server is somebody
-// else's program, and a file or a query dump used to go in whole. Six of
-// them may run in one exchange.
+// A tool's answer is the one thing in a turn the driver does not generate
+// and cannot predict the size of: an MCP server is somebody else's
+// program, and a file or a query dump used to go in whole.
 func TestALongToolAnswerIsCut(t *testing.T) {
 	g := &Ghost{log: hlog.Discard()}
 	ref := toolRef{Server: "notes", Tool: "search"}
@@ -75,24 +73,5 @@ func TestCuttingAToolAnswerKeepsItsShape(t *testing.T) {
 	got := g.readable(toolRef{Server: "cal", Tool: "today"}, lines)
 	if strings.Count(got, "\n") < 50 {
 		t.Errorf("the answer was flattened: %d newlines left", strings.Count(got, "\n"))
-	}
-}
-
-// The measurement behind the reply trace: what was actually sent, counting
-// the tool-call arguments that ride along with an assistant turn.
-func TestPromptCharsCountsWhatIsSent(t *testing.T) {
-	var call ai.ToolCall
-	call.Function.Name, call.Function.Arguments = "ab", "cde"
-	msgs := []ai.Message{
-		{Role: "system", Content: "abcde"},
-		{Role: "user", Content: "fghij"},
-		{Role: "assistant", ToolCalls: []ai.ToolCall{call}},
-		{Role: "tool", Content: "klm"},
-	}
-	if got, want := promptChars(msgs), 5+5+2+3+3; got != want {
-		t.Errorf("promptChars = %d, want %d", got, want)
-	}
-	if got := promptChars(nil); got != 0 {
-		t.Errorf("promptChars(nil) = %d, want 0", got)
 	}
 }

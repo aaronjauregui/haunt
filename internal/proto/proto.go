@@ -32,17 +32,7 @@ const (
 	EventTimer EventType = "timer" // a timer the brain scheduled fired
 
 	// External.
-	EventMessage EventType = "message" // inbound text (chat, CLI, socket)
-
-	// EventCorrect is the person saying the ghost is wrong about a subject:
-	// Name is the subject, Fact is the id of the belief being retired (0 for
-	// none), Text is what is true instead (empty for a plain retraction).
-	//
-	// It is handled by the driver before the brain ever sees it, and it is
-	// the one inbound event a brain may not forge — filing a fact adds
-	// something the person can see and object to, and retiring one removes
-	// the evidence. A brain may propose and must not perform.
-	EventCorrect EventType = "correct"
+	EventMessage EventType = "message" // inbound text (typed, CLI, socket)
 
 	// System.
 	// EventCron is a manifest-scheduled trigger firing. Name is the
@@ -59,8 +49,7 @@ const (
 	// application, Text its title. Requires the window capability.
 	EventWindow EventType = "window"
 
-	// AI results, delivered after chat/imagine intents.
-	EventAIReply EventType = "ai_reply" // Text holds the full reply
+	// AI results, delivered after imagine, look and act intents.
 	EventAIImage EventType = "ai_image" // Name holds the cached image path
 	EventAIError EventType = "ai_error" // Text holds the failure reason
 	// EventAILook answers a look intent: Text is what the vision model
@@ -152,11 +141,6 @@ type Event struct {
 	Text string `json:"text,omitempty"`
 	// From identifies the sending ghost for cross-ghost messages.
 	From string `json:"from,omitempty"`
-	// Fact identifies which belief an EventCorrect retires, by the id
-	// `haunt journal -entities` prints beside it. Zero means retire
-	// nothing, which is the case where a fact has not gone wrong so much
-	// as out of date.
-	Fact int `json:"fact,omitempty"`
 	// Tag echoes the tag of the intent this event answers, so a brain that
 	// has several AI requests in flight can tell their results apart.
 	Tag string `json:"tag,omitempty"`
@@ -227,14 +211,12 @@ const (
 	IntentKVSet         IntentType = "kv_set"         // persist a value
 	IntentLog           IntentType = "log"            // debug output
 	IntentTell          IntentType = "tell"           // message another ghost
-	IntentChat          IntentType = "chat"           // LLM reply to Text, streamed to the balloon
 	IntentImagine       IntentType = "imagine"        // generate an image of Text
-	IntentNote          IntentType = "note"           // journal a self-note; recent notes join LLM context
+	IntentNote          IntentType = "note"           // write a line in the journal
 	IntentSetExpression IntentType = "set_expression" // wear a declared pose
 	IntentPlayClip      IntentType = "play_clip"      // run a declared animation
 	IntentLook          IntentType = "look"           // show the focused window to a vision model
 	IntentWatch         IntentType = "watch"          // the user asked for window awareness; ask and start it
-	IntentCorrect       IntentType = "correct"        // the user wants to fix a belief; the driver runs the whole dialogue
 	IntentAct           IntentType = "act"            // run one tool on a declared server
 	IntentIntend        IntentType = "intend"         // hold a purpose, across restarts
 	IntentResolve       IntentType = "resolve"        // that purpose is discharged
@@ -259,20 +241,9 @@ type Intent struct {
 	DelayMS int `json:"delay_ms,omitempty"`
 	// Value is the payload for IntentKVSet.
 	Value string `json:"value,omitempty"`
-	// Tag labels an AI request; the resulting ai_reply/ai_image/ai_error
-	// event carries it back.
+	// Tag labels an AI request; the resulting ai_image/ai_look/acted/
+	// ai_error event carries it back.
 	Tag string `json:"tag,omitempty"`
-	// Silent suppresses the balloon for IntentChat and keeps the exchange
-	// out of conversation history — for brain-internal LLM calls such as
-	// rewriting a user request into an image prompt.
-	Silent bool `json:"silent,omitempty"`
-	// SelfPrompt marks IntentChat text as a stage direction the ghost gave
-	// itself rather than something the user said. The model still receives
-	// it — that is how the ghost is steered — but history and memory record
-	// only the reply, and record it as unprompted. Without this, a ghost
-	// that speaks first slowly fills its own memory with utterances it
-	// attributes to a user who never made them.
-	SelfPrompt bool `json:"self_prompt,omitempty"`
 	// Choices turn an IntentSay into a question: the balloon shows the text
 	// and then these options, and the one the user picks comes back as an
 	// EventChoice carrying the intent's Tag.
@@ -295,25 +266,14 @@ type Intent struct {
 	// and the brain does not. Zero means the line stays until something
 	// replaces it.
 	LingerMS int `json:"linger_ms,omitempty"`
-	// About names the subject an utterance concerns, so that what the ghost
-	// concludes is filed under it in the entity index rather than only
-	// dissolving into the memory pool. It is how a ghost comes to know who
-	// its neighbour *is* rather than merely reacting to it each time: a
-	// remark made about another resident ghost becomes one of the handful
-	// of things this ghost would say about it if asked.
-	//
-	// The brain names the subject because the brain is the thing that knows
-	// what it is talking about; the driver only files it. Ignored on an
-	// intent that produces no words.
-	About string `json:"about,omitempty"`
 	// Args is the JSON arguments object for IntentAct, passed to the tool
 	// server unchanged. The driver does not validate it against the tool's
 	// schema: that contract is the server's, it will reject a bad call
 	// itself, and a driver re-implementing somebody else's schema badly is
 	// a driver that refuses calls that would have worked.
 	Args json.RawMessage `json:"args,omitempty"`
-	// Wait is what the ghost says while an IntentChat or IntentImagine is
-	// still being answered — "thinking…", "let me look that up". The driver
+	// Wait is what the ghost says while an IntentImagine is still being
+	// answered — "painting…", "hold on". The driver
 	// draws the waiting indicator itself, on its own delay, so a brain that
 	// supplies nothing still shows one; this is the character's words for
 	// it, which are the brain's business and nobody else's.
@@ -378,10 +338,6 @@ func (i *Intent) Validate() error {
 		if i.Text == "" {
 			return fmt.Errorf("tell intent with empty text")
 		}
-	case IntentChat:
-		if i.Text == "" {
-			return fmt.Errorf("chat intent with empty text")
-		}
 	case IntentImagine:
 		if i.Text == "" {
 			return fmt.Errorf("imagine intent with empty prompt")
@@ -403,16 +359,6 @@ func (i *Intent) Validate() error {
 	// watch carries nothing: it is a request to put a question, and every
 	// term of that question is the driver's.
 	case IntentWatch:
-	// correct carries nothing either, and for a stronger reason. Filing a
-	// fact adds something the person can see and object to; retiring one
-	// removes the evidence, so a brain that could name the subject or the
-	// belief could take out what the person actually said and put something
-	// else in its place, with nothing anywhere showing that it had. This
-	// intent is only the brain saying *they want to fix something*. Which
-	// subject, which belief and what is true instead are read off the
-	// driver's own index, asked in the driver's own balloon, and answered
-	// where the brain cannot hear it.
-	case IntentCorrect:
 	case IntentIntend:
 		if i.Name == "" {
 			return fmt.Errorf("intend intent with empty name")

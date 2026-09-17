@@ -4,7 +4,8 @@
 // spawns the haunt MCP server from it and talks MCP to it over stdio, and
 // answers the API server's session and chat endpoints in hermes's own SSE
 // shape (internal/hermes/testdata/remind.sse). The "model" is a script
-// keyed on the input.
+// keyed on the input: $FAKEHERMES_SCRIPT names a JSON file of rules, and
+// without one the default rules below apply.
 //
 // Everything it sees is appended to $FAKEHERMES_LOG as JSON lines, so the
 // test can assert on what reached the brain.
@@ -58,6 +59,57 @@ func logEntry(e map[string]any) {
 	}
 	defer f.Close()
 	f.Write(append(b, '\n'))
+}
+
+// --- the model ---------------------------------------------------------------
+
+// rule is one scripted answer. The first rule whose Match is contained in
+// the input (case-insensitively; "" matches anything) answers the turn.
+type rule struct {
+	Match string `json:"match"`
+	// DelayMS is silence before anything is said or done, for a model that
+	// takes its time.
+	DelayMS int `json:"delay_ms"`
+	// Tool, if set, is a haunt tool called before replying, with Args.
+	Tool string         `json:"tool"`
+	Args map[string]any `json:"args"`
+	// Reply is what the model says. {tool} is replaced by the tool's
+	// result and {input} by the input.
+	Reply string `json:"reply"`
+}
+
+var defaultRules = []rule{
+	{Match: "[haunt event]", Reply: "NO_REPLY"},
+	{Match: "remind me", Tool: "intend",
+		Args:  map[string]any{"text": "check the oven", "delay_ms": 600000},
+		Reply: "Done: {tool}"},
+	{Match: "", Reply: "echo: {input}"},
+}
+
+func loadRules() ([]rule, error) {
+	path := os.Getenv("FAKEHERMES_SCRIPT")
+	if path == "" {
+		return defaultRules, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var rules []rule
+	if err := json.Unmarshal(data, &rules); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return rules, nil
+}
+
+func pick(rules []rule, input string) rule {
+	lower := strings.ToLower(input)
+	for _, r := range rules {
+		if strings.Contains(lower, strings.ToLower(r.Match)) {
+			return r
+		}
+	}
+	return rule{Reply: "NO_REPLY"}
 }
 
 // --- profile ---------------------------------------------------------------
@@ -126,6 +178,11 @@ func run() error {
 		return errors.New("config.yaml has no mcp_servers.haunt")
 	}
 
+	rules, err := loadRules()
+	if err != nil {
+		return fmt.Errorf("reading the script: %w", err)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
 
@@ -149,7 +206,7 @@ func run() error {
 		logEntry(map[string]any{"kind": "tools_list", "tools": tools})
 	}()
 
-	s := &server{key: key, mcp: mcp, ready: ready, mcpErr: func() error { return mcpErr }, sessions: map[string]bool{}}
+	s := &server{key: key, mcp: mcp, ready: ready, rules: rules, mcpErr: func() error { return mcpErr }, sessions: map[string]bool{}}
 	ln, err := net.Listen("tcp", net.JoinHostPort(host, port))
 	if err != nil {
 		return err
@@ -358,6 +415,7 @@ type server struct {
 	mcp    *mcpClient
 	ready  chan struct{}
 	mcpErr func() error
+	rules  []rule
 
 	mu       sync.Mutex
 	sessions map[string]bool
@@ -477,34 +535,27 @@ func (s *server) chat(w http.ResponseWriter, r *http.Request) {
 	})
 	e.send("message.started", map[string]any{"message": map[string]any{"id": msgID, "role": "assistant"}})
 
-	var reply string
-	switch {
-	case strings.HasPrefix(body.Input, "[haunt event]"):
-		reply = "NO_REPLY"
-	case strings.Contains(strings.ToLower(body.Input), "remind me"):
-		const tool = "mcp__haunt__intend"
-		args := map[string]any{"text": "check the oven", "delay_ms": 600000}
-		e.send("tool.started", map[string]any{"message_id": msgID, "tool_name": tool, "preview": "check the oven", "args": args})
-		if err := s.mcpErr(); err != nil {
-			e.send("tool.failed", map[string]any{"message_id": msgID, "tool_name": tool, "error": err.Error()})
-			reply = "The tool was not there: " + err.Error()
-			break
+	rl := pick(s.rules, body.Input)
+	if rl.DelayMS > 0 {
+		select {
+		case <-time.After(time.Duration(rl.DelayMS) * time.Millisecond):
+		case <-r.Context().Done():
+			logEntry(map[string]any{"kind": "abandoned", "session": id, "input": body.Input})
+			return
 		}
-		res, err := s.mcp.callTool(r.Context(), "intend", args)
-		text := ""
-		if len(res.Content) > 0 {
-			text = res.Content[0].Text
-		}
-		logEntry(map[string]any{"kind": "tool_call", "name": "intend", "text": text, "is_error": res.IsError, "error": errString(err)})
+	}
+	reply := strings.ReplaceAll(rl.Reply, "{input}", body.Input)
+	if rl.Tool != "" {
+		tool := "mcp__haunt__" + rl.Tool
+		e.send("tool.started", map[string]any{"message_id": msgID, "tool_name": tool, "preview": "", "args": rl.Args})
+		text, err := s.callTool(r.Context(), rl.Tool, rl.Args)
 		if err != nil {
 			e.send("tool.failed", map[string]any{"message_id": msgID, "tool_name": tool, "error": err.Error()})
-			reply = "The tool failed: " + err.Error()
-			break
+			text = "the tool failed: " + err.Error()
+		} else {
+			e.send("tool.completed", map[string]any{"message_id": msgID, "tool_name": tool, "preview": nil, "args": nil})
 		}
-		e.send("tool.completed", map[string]any{"message_id": msgID, "tool_name": tool, "preview": nil, "args": nil})
-		reply = "Done: " + text
-	default:
-		reply = "echo: " + body.Input
+		reply = strings.ReplaceAll(reply, "{tool}", text)
 	}
 
 	for i := 0; i < len(reply); i += 4 {
@@ -524,6 +575,25 @@ func (s *server) chat(w http.ResponseWriter, r *http.Request) {
 		"message_id": msgID, "completed": true, "partial": false, "interrupted": false,
 	})
 	e.send("done", map[string]any{})
+}
+
+// callTool calls one haunt tool through the MCP server and logs what came
+// back.
+func (s *server) callTool(ctx context.Context, name string, args map[string]any) (string, error) {
+	if err := s.mcpErr(); err != nil {
+		logEntry(map[string]any{"kind": "tool_call", "name": name, "error": err.Error()})
+		return "", err
+	}
+	if args == nil {
+		args = map[string]any{}
+	}
+	res, err := s.mcp.callTool(ctx, name, args)
+	text := ""
+	if len(res.Content) > 0 {
+		text = res.Content[0].Text
+	}
+	logEntry(map[string]any{"kind": "tool_call", "name": name, "text": text, "is_error": res.IsError, "error": errString(err)})
+	return text, err
 }
 
 // messages answers `order=latest&limit=N` as hermes does: the newest N,

@@ -2,7 +2,6 @@ package ghost
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 
@@ -19,16 +18,11 @@ func TestWhyRoundTrip(t *testing.T) {
 	g := whyGhost()
 	when := time.Date(2026, 3, 4, 9, 0, 0, 0, time.UTC)
 	g.noteWhy(Why{
-		Time:  when,
-		User:  "what tea should I get",
-		Reply: "the smoky one, like last time",
-		Recalled: []Recalled{{
-			Kind: kindExchange, When: when.Add(-90 * 24 * time.Hour),
-			Sim: 0.71, Uses: 2, Text: "The user said: I liked the lapsang",
-		}},
-		Window:       WhyWindow{App: "firefox", Title: "tea shop"},
-		System:       "You are a ghost.\n\nThings this reminds you of:\n- lapsang",
-		HistoryTurns: 3,
+		Time:   when,
+		User:   "what tea should I get",
+		Reply:  "the smoky one, like last time",
+		Acted:  []string{"mcp__haunt__look"},
+		Window: WhyWindow{App: "firefox", Title: "tea shop"},
 	})
 
 	raw, ok, err := storeGet(g.store, whyKey)
@@ -46,19 +40,15 @@ func TestWhyRoundTrip(t *testing.T) {
 	if w.Reply != "the smoky one, like last time" || w.User != "what tea should I get" {
 		t.Errorf("the exchange did not survive: %+v", w)
 	}
-	if len(w.Recalled) != 1 || w.Recalled[0].Sim != 0.71 || w.Recalled[0].Uses != 2 {
-		t.Errorf("the recalled memory did not survive: %+v", w.Recalled)
+	if len(w.Acted) != 1 || w.Acted[0] != "mcp__haunt__look" {
+		t.Errorf("the tools did not survive: %+v", w.Acted)
 	}
 	if w.Window.App != "firefox" || w.Window.Title != "tea shop" {
 		t.Errorf("the window did not survive: %+v", w.Window)
 	}
-	if !strings.Contains(w.System, "lapsang") {
-		t.Errorf("the prompt did not survive: %q", w.System)
-	}
 }
 
-// The ring is short on purpose — a full system prompt is kilobytes and the
-// question is about what was just said.
+// The ring is short on purpose: the question is about what was just said.
 func TestWhyIsBounded(t *testing.T) {
 	g := whyGhost()
 	for i := 0; i < whyKept+5; i++ {
@@ -95,29 +85,6 @@ func TestWhySurvivesACorruptTrace(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Reply != "after the corruption" {
 		t.Errorf("got %+v, want just the new trace", got)
-	}
-}
-
-// recalledTrace must report the selection recall actually made, scores and
-// all — an account reconstructed afterwards would be a plausible story
-// rather than what happened.
-func TestRecalledTraceKeepsTheScores(t *testing.T) {
-	picked := []scored{
-		{m: memory{Kind: kindSummary, Text: "you drink tea most mornings", Uses: 4}, sim: 0.81},
-		{m: memory{Kind: kindExchange, Text: "the lapsang one"}, sim: 0.62},
-	}
-	got := recalledTrace(picked)
-	if len(got) != 2 {
-		t.Fatalf("traced %d, want 2", len(got))
-	}
-	if got[0].Sim != 0.81 || got[0].Kind != kindSummary || got[0].Uses != 4 {
-		t.Errorf("first entry lost its reasons: %+v", got[0])
-	}
-	if got[1].Sim != 0.62 {
-		t.Errorf("second entry lost its score: %+v", got[1])
-	}
-	if recalledTrace(nil) != nil {
-		t.Error("an empty recall should trace as nothing, not an empty list")
 	}
 }
 

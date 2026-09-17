@@ -12,15 +12,13 @@ import (
 	"github.com/aaronjauregui/haunt/internal/store"
 )
 
-// cmdJournal prints a ghost's self-notes: what it chose to remember, plus
-// whatever consolidation has since concluded. Half debugging tool, half the
-// point — and with -entities, the answer to "what does it think it knows
-// about me", which is a thing a person is entitled to read rather than
-// infer from how the ghost behaves.
+// cmdJournal prints a ghost's journal: the action log, a line for each thing
+// it did. What a ghost on hermes remembers about the person is hermes
+// memory, readable in the profile's memories/ (and editable by telling the
+// ghost).
 func cmdJournal(args []string) error {
 	fs := flag.NewFlagSet("journal", flag.ExitOnError)
 	state := fs.String("state", "", "override state directory")
-	entities := fs.Bool("entities", false, "print the entity index instead: subjects and what it knows about them")
 	intentions := fs.Bool("intentions", false, "print what it is still meaning to do")
 	fs.Parse(args)
 
@@ -34,9 +32,6 @@ func cmdJournal(args []string) error {
 		return err
 	}
 	defer s.Close()
-	if *entities {
-		return printEntities(s)
-	}
 	if *intentions {
 		return printIntentions(s)
 	}
@@ -55,38 +50,6 @@ func cmdJournal(args []string) error {
 	for _, n := range notes {
 		fmt.Printf("%s  %s\n", n.Time.Format("2006-01-02 15:04"), n.Text)
 	}
-	return nil
-}
-
-// printEntities lists the subjects the ghost has concluded things about,
-// most-talked-about first.
-func printEntities(s *store.Store) error {
-	all, err := s.All()
-	if err != nil {
-		return err
-	}
-	var ents []ghost.Entity
-	for k, v := range all {
-		if !strings.HasPrefix(k, ghost.EntityKeyPrefix) {
-			continue
-		}
-		e, err := ghost.DecodeEntity(v)
-		if err != nil || e.Name == "" {
-			continue
-		}
-		ents = append(ents, e)
-	}
-	if len(ents) == 0 {
-		// An empty index is a young ghost, not a failure.
-		fmt.Println("(it has not concluded anything about anyone yet)")
-		return nil
-	}
-	sortEntities(ents)
-	for _, e := range ents {
-		printEntity(e, true)
-	}
-	fmt.Println()
-	fmt.Println("Something wrong here? `haunt correct <subject> <number> \"what is true\"`.")
 	return nil
 }
 
@@ -109,10 +72,9 @@ func resolveStateDir(override string, args []string) (string, error) {
 // printIntentions lists what the ghost has taken on and not discharged.
 //
 // It belongs beside the journal rather than in a command of its own: the
-// journal is what the ghost has concluded, the entity index is who it
-// thinks people are, and this is what it is still meaning to do. All three
-// are the same question — what is my ghost carrying — asked about different
-// tenses, and a person checking one will want the others nearby.
+// journal is what the ghost has done, and this is what it is still meaning
+// to do. Both are the same question — what is my ghost carrying — asked
+// about different tenses.
 func printIntentions(s *store.Store) error {
 	raw, ok, err := s.Get(ghost.IntentionsStoreKey)
 	if err != nil {

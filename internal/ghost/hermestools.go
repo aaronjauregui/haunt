@@ -23,9 +23,11 @@ import (
 // allowed" and "that did not work" are both things it needs to hear to say
 // something sensible next.
 //
-// Deliberately absent: remember and note (hermes's memory tool is the one
-// writer of what the model concludes), move (nothing a model should
-// decide) and watch (a permission question, asked from the menu).
+// Deliberately absent: remember, note and anything that edits beliefs
+// (hermes's memory tool is the one writer of what the model concludes, and
+// a correction is an edit to it — docs/hermes-brain.md, section 13), move
+// (nothing a model should decide) and watch (a permission question, asked
+// from the menu).
 
 // hermesTools is the control.Tools a running ghost offers.
 type hermesTools struct{ g *Ghost }
@@ -132,18 +134,6 @@ var builtinTools = map[string]builtinTool{
 		schema: schema(),
 		call:   toolIntentions,
 	},
-	"correct": {
-		desc: "Propose a correction to what you believe about a subject, from the person's own words. " +
-			"fact_id is the belief to retire (from beliefs); truth is what is true instead. " +
-			"The person is asked to confirm before anything changes.",
-		schema: schema("subject:string", "fact_id?:integer", "truth?:string"),
-		call:   toolCorrect,
-	},
-	"beliefs": {
-		desc:   "List the standing beliefs you hold about a subject (or everyone), with ids and who said them.",
-		schema: schema("subject?:string", "text?:string"),
-		call:   toolBeliefs,
-	},
 	"tell": {
 		desc:   "Say something to another ghost in the room, by name.",
 		schema: schema("ghost:string", "text:string"),
@@ -162,13 +152,6 @@ func (t hermesTools) List() []control.ToolSpec {
 	sort.Strings(names)
 	specs := make([]control.ToolSpec, 0, len(names))
 	for _, name := range names {
-		// With haunt's memory provider selected, beliefs and correct reach
-		// the model through it (plugins/hermes/haunt), and offering them
-		// twice would be two names for one door. They stay callable here:
-		// the provider calls them over this same socket.
-		if g.hermesCfg.MemoryProvider == "haunt" && (name == "beliefs" || name == "correct") {
-			continue
-		}
 		bt := builtinTools[name]
 		specs = append(specs, control.ToolSpec{
 			Name:        name,
@@ -180,11 +163,10 @@ func (t hermesTools) List() []control.ToolSpec {
 		g.startToolServers()
 		offered, _ := g.offerable()
 		for _, o := range offered {
-			s := o.Schema
-			if len(s) == 0 {
-				s = json.RawMessage(`{"type":"object"}`)
+			if len(o.Schema) == 0 {
+				o.Schema = json.RawMessage(`{"type":"object"}`)
 			}
-			specs = append(specs, control.ToolSpec{Name: o.Name, Description: o.Description, Schema: s})
+			specs = append(specs, o)
 		}
 	}
 	return specs
@@ -356,6 +338,10 @@ func toolClip(g *Ghost, _ context.Context, args json.RawMessage) (string, error)
 	return "playing " + a.Name, nil
 }
 
+// pictureLinger is how long a picture the model drew stays up. The turn's
+// words wait for it (see hermesBrain.run).
+const pictureLinger = 20 * time.Second
+
 func toolDraw(g *Ghost, _ context.Context, args json.RawMessage) (string, error) {
 	var a struct {
 		Prompt string `json:"prompt"`
@@ -370,7 +356,7 @@ func toolDraw(g *Ghost, _ context.Context, args json.RawMessage) (string, error)
 	if !g.ensureCapability("imagine") {
 		return "", refuse("the imagine capability is not granted")
 	}
-	path, err := g.imagine(a.Prompt, a.Fresh, "painting…", 20000)
+	path, err := g.imagine(a.Prompt, a.Fresh, "painting…", int(pictureLinger/time.Millisecond))
 	if err != nil {
 		return "", err
 	}
@@ -484,161 +470,6 @@ func toolIntentions(g *Ghost, _ context.Context, _ json.RawMessage) (string, err
 		b.WriteByte('\n')
 	}
 	return strings.TrimRight(b.String(), "\n"), nil
-}
-
-func toolCorrect(g *Ghost, _ context.Context, args json.RawMessage) (string, error) {
-	var a struct {
-		Subject string `json:"subject"`
-		FactID  int    `json:"fact_id"`
-		Truth   string `json:"truth"`
-	}
-	if err := decode(args, &a); err != nil {
-		return "", err
-	}
-	if !g.memoryEnabled() {
-		return "", refuse("this ghost keeps no beliefs to correct")
-	}
-	return g.proposeCorrection(strings.TrimSpace(a.Subject), a.FactID, strings.TrimSpace(a.Truth))
-}
-
-// proposeCorrection is the model's way into revision, and it is only a
-// proposal. The model read the person's words and may have the subject or
-// the polarity wrong, which is the failure revision exists to fix — so the
-// driver says what it is about to change, in its own balloon, and changes
-// it only on a yes.
-func (g *Ghost) proposeCorrection(subject string, factID int, truth string) (string, error) {
-	if subject == "" {
-		return "", fmt.Errorf("which subject?")
-	}
-	if factID <= 0 && truth == "" {
-		return "", fmt.Errorf("nothing to retire and nothing to record")
-	}
-	e, known := g.entityNamed(subject)
-	var retired string
-	if factID > 0 {
-		if !known {
-			return "", fmt.Errorf("you hold no beliefs about %q", subject)
-		}
-		for _, f := range e.StandingFacts() {
-			if f.ID == factID {
-				retired = f.Text
-			}
-		}
-		if retired == "" {
-			return "", fmt.Errorf("%s has no standing belief %d (see beliefs)", e.Name, factID)
-		}
-		subject = e.Name
-	}
-	var line string
-	switch {
-	case retired != "" && truth != "":
-		line = fmt.Sprintf("Noted: %s no longer %q; now %q. Right?", subject, shortFact(retired), shortFact(truth))
-	case retired != "":
-		line = fmt.Sprintf("Noted: %s no longer %q. Right?", subject, shortFact(retired))
-	default:
-		line = fmt.Sprintf("Noted about %s: %q. Right?", subject, shortFact(truth))
-	}
-	if !g.canAskNow() {
-		return "", refuse("the person could not be asked to confirm, so nothing changed")
-	}
-	if g.ask(line, correctYes, correctNo) != correctYes {
-		return "The person did not confirm, so nothing changed.", nil
-	}
-	if !known {
-		// A subject the ghost has never concluded anything about, told to
-		// it by the person: filed with the person's authority, so nothing
-		// the ghost later infers can overrule it.
-		g.memMu.Lock()
-		g.recordEntity(subject, g.subjectKind(subject), FactPerson, []string{truth})
-		g.memMu.Unlock()
-		g.execNote("The person told you about " + subject + ": " + clip(truth, actNoteChars))
-		return fmt.Sprintf("Recorded, confirmed by the person: %s: %q", subject, truth), nil
-	}
-	done, err := g.applyCorrection(subject, factID, truth)
-	if err != nil {
-		return "", err
-	}
-	g.execNote("The person corrected you. " + done)
-	return "Confirmed by the person and recorded. " + done, nil
-}
-
-const (
-	correctYes = "Yes, that's right"
-	correctNo  = "No, leave it"
-)
-
-// entityNamed finds one subject in the belief store.
-func (g *Ghost) entityNamed(name string) (Entity, bool) {
-	slug := entitySlug(name)
-	if slug == "" {
-		return Entity{}, false
-	}
-	for _, e := range g.loadEntities() {
-		if e.key == entityKeyPrefix+slug {
-			return e, true
-		}
-	}
-	return Entity{}, false
-}
-
-func toolBeliefs(g *Ghost, _ context.Context, args json.RawMessage) (string, error) {
-	var a struct {
-		Subject string `json:"subject"`
-		// Text asks about whoever an utterance names, for recall ahead of
-		// a turn (the memory provider's prefetch). Nothing named is an
-		// empty answer rather than a sentence, so nothing is added.
-		Text string `json:"text"`
-	}
-	if err := decode(args, &a); err != nil {
-		return "", err
-	}
-	if !g.memoryEnabled() {
-		return "", refuse("this ghost keeps no beliefs")
-	}
-	var ents []Entity
-	if strings.TrimSpace(a.Text) != "" {
-		ents = g.knownIn(a.Text)
-		if len(ents) == 0 {
-			return "", nil
-		}
-	} else if s := strings.TrimSpace(a.Subject); s != "" {
-		e, ok := g.entityNamed(s)
-		if !ok {
-			return "You hold no beliefs about " + s + ".", nil
-		}
-		ents = []Entity{e}
-	} else {
-		ents = g.loadEntities()
-	}
-	var b strings.Builder
-	for _, e := range ents {
-		facts := e.StandingFacts()
-		if len(facts) == 0 {
-			continue
-		}
-		b.WriteString(e.Name)
-		if e.Kind != "" {
-			b.WriteString(" (" + e.Kind + ")")
-		}
-		b.WriteString(":\n")
-		for _, f := range facts {
-			fmt.Fprintf(&b, "  #%d %s [%s]\n", f.ID, f.Text, sourceWords(f.From))
-		}
-	}
-	if b.Len() == 0 {
-		return "You hold no standing beliefs.", nil
-	}
-	return strings.TrimRight(b.String(), "\n"), nil
-}
-
-func sourceWords(s FactSource) string {
-	switch s {
-	case FactPerson:
-		return "the person said so"
-	case FactExchange:
-		return "you said so in conversation"
-	}
-	return "you concluded it"
 }
 
 func toolTell(g *Ghost, _ context.Context, args json.RawMessage) (string, error) {

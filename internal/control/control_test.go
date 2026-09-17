@@ -96,20 +96,19 @@ func TestSendToMissingGhost(t *testing.T) {
 	}
 }
 
-// The control socket accepts two things and no more: a message, and a
-// person correcting what their ghost believes. Everything else — lifecycle,
-// input, timers — is driver-internal, and an external program that could
-// forge one could make a ghost act as though it had seen something it
-// never saw.
-func TestOnlyMessagesAndCorrectionsAreAccepted(t *testing.T) {
-	for _, ok := range []proto.EventType{proto.EventMessage, proto.EventCorrect} {
-		if !allowedInbound[ok] {
-			t.Errorf("%q should be accepted on the control socket", ok)
-		}
+// The control socket accepts one event and no more: a message. Everything
+// else — lifecycle, input, timers — is driver-internal, and an external
+// program that could forge one could make a ghost act as though it had
+// seen something it never saw. (A correction used to be the second; it is
+// now something the person says, and the model edits its memory.)
+func TestOnlyMessagesAreAccepted(t *testing.T) {
+	if !allowedInbound[proto.EventMessage] {
+		t.Errorf("%q should be accepted on the control socket", proto.EventMessage)
 	}
 	for _, no := range []proto.EventType{
 		proto.EventBoot, proto.EventShutdown, proto.EventClick,
-		proto.EventTimer, proto.EventAIReply, proto.EventObserved,
+		proto.EventTimer, proto.EventAIImage, proto.EventObserved,
+		"correct",
 	} {
 		if allowedInbound[no] {
 			t.Errorf("%q must not be injectable from outside", no)

@@ -62,7 +62,7 @@ func (g *Ghost) go_(topic hlog.Topic, what string, fn func()) {
 }
 
 // backgroundGrace is how long teardown waits for that work. Long enough for
-// an embedding call against a local model to land, short enough that a
+// a store write or a gateway to stop, short enough that a
 // wedged backend does not hold the terminal of somebody who just pressed
 // Ctrl-C. Whatever is still running when it expires is abandoned, which is
 // where we were before counting them at all.

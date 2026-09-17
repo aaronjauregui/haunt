@@ -1,8 +1,6 @@
 package ghost
 
 import (
-	"strings"
-
 	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/proto"
 )
@@ -14,8 +12,7 @@ import (
 // A ghost sees what its neighbours do in public — it spoke, it moved, it
 // was poked, it drew something — and may react without being addressed at
 // all. Two personas with different characters then develop dynamics nobody
-// wrote, which is the same emergence the memory index gives one ghost,
-// happening at the scale of a household.
+// wrote.
 //
 // Three rules hold it together, and all three are inherited rather than
 // invented here.
@@ -55,51 +52,10 @@ func (g *Ghost) announce(action, detail string) {
 // observation happens on the far side of it.
 func (g *Ghost) observed(from, action, detail string) {
 	g.log.Debug(hlog.Control, "observed: %s %s %s", from, action, detail)
-	g.noteNeighbour(from)
 	g.publish(proto.Event{
 		Type: proto.EventObserved,
 		From: from,
 		Name: action,
 		Text: detail,
 	})
-}
-
-// Who else is in the room, as far as this ghost can tell.
-//
-// It is not told: it learns the names by watching, which is the only way it
-// finds out anything about its neighbours and is exactly the boundary the
-// stage draws. The list exists for one small purpose — labelling what the
-// ghost concludes about a neighbour as being about a *ghost* rather than a
-// person or a project, when that conclusion goes into the entity index.
-// Getting the label wrong would cost a word in a prompt, so this is
-// deliberately the cheapest thing that could work rather than a roster.
-
-// noteNeighbour remembers that this name belongs to another ghost.
-func (g *Ghost) noteNeighbour(name string) {
-	if name == "" {
-		return
-	}
-	g.roomMu.Lock()
-	defer g.roomMu.Unlock()
-	if g.room == nil {
-		g.room = map[string]bool{}
-	}
-	g.room[name] = true
-}
-
-// isNeighbour reports whether a name is one this ghost has watched act.
-func (g *Ghost) isNeighbour(name string) bool {
-	g.roomMu.Lock()
-	defer g.roomMu.Unlock()
-	return g.room[strings.TrimSpace(name)]
-}
-
-// subjectKind labels a subject for the entity index. Only one label is ever
-// inferred here: everything else a ghost concludes about is a person, a
-// project or a place, and deciding which is the consolidating model's job.
-func (g *Ghost) subjectKind(name string) string {
-	if g.isNeighbour(name) {
-		return "ghost"
-	}
-	return ""
 }
