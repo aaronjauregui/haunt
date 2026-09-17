@@ -1,6 +1,6 @@
 GO ?= go
 
-.PHONY: build test vet fmt demo demo-ai demo-troupe demo-seriko demo-sleep demo-headless install-user clean
+.PHONY: build test vet fmt demo demo-ai spin-ai demo-troupe demo-seriko demo-sleep demo-headless install-user clean
 
 build:
 	$(GO) build ./...
@@ -29,6 +29,12 @@ demo:
 # IDLE_MS=10000 shortens the wait before it speaks unprompted.
 demo-ai:
 	GHOST=wisp ./scripts/demo.sh
+
+# The AI ghost on a real model, with no window: a scripted conversation
+# (boot, idle, a reminder, "what can you do?") and its history with reasons.
+# About five minutes, and a few turns of the model's quota.
+spin-ai:
+	./scripts/hermes-spin.sh
 
 # Two ghosts at once, in one nested sway. Whisper is scripted and wisp runs
 # on the built-in brain, so they behave differently — which is the point.

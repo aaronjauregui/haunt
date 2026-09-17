@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# hermes-docker — run hermes inside its container, as a drop-in for the
+# `hermes` executable. Point haunt at it with
+#
+#   [hermes]
+#   command = ["/abs/path/to/haunt/scripts/hermes-docker"]
+#
+# The container sees only what a ghost's brain needs, each at the path it
+# has on the host so nothing in the profile has to be rewritten:
+#
+#   - HERMES_HOME (the ghost's profile dir, or the hermes root when run by
+#     hand), read-write;
+#   - the haunt binary, read-only, because hermes spawns `haunt mcp-serve`
+#     from the path written in the profile's config.yaml. That path is the
+#     running haunt's own executable, which is this script's parent;
+#   - the directory holding the control sockets, which `mcp-serve` dials;
+#   - the provider keys from $HAUNT_HERMES_ENV (default
+#     ~/.config/haunt/hermes.env), passed as environment so no profile ever
+#     holds one and a profile can be thrown away.
+#
+# Networking is the host's: haunt writes API_SERVER_HOST=127.0.0.1 into the
+# profile's .env, and hermes lets .env override the environment, so the
+# gateway can only be reached from the host through the host's loopback.
+#
+# Environment: HERMES_IMAGE (default hermes-agent:6005aa1, built from the
+# commit docs/hermes-brain.md was checked against).
+set -euo pipefail
+
+image="${HERMES_IMAGE:-hermes-agent:6005aa1}"
+keys="${HAUNT_HERMES_ENV:-${XDG_CONFIG_HOME:-$HOME/.config}/haunt/hermes.env}"
+home="${HERMES_HOME:-$HOME/.hermes}"
+mkdir -p "$home"
+home="$(cd "$home" && pwd -P)"
+
+args=(
+    --rm -i
+    --network host
+    -e HERMES_UID="$(id -u)" -e HERMES_GID="$(id -g)"
+    -e HERMES_HOME="$home"
+    -e HERMES_WRITE_SAFE_ROOT="$home"
+    -e HERMES_LAZY_INSTALL_TARGET="$home/lazy-packages"
+    # The image's web dashboard would listen on the host's network; -e
+    # outranks --env-file, so the keys file cannot turn it on.
+    -e HERMES_DASHBOARD=0
+    # haunt supervises the gateway. Under the image's own supervisor
+    # (s6), `gateway run` registers a supervised copy and the boot
+    # reconciler starts another, and the two race for the profile.
+    -e HERMES_GATEWAY_NO_SUPERVISE=1
+    -v "$home:$home"
+    -w "$home"
+)
+# A profile gateway also writes to its root (<root>/shared-state.db, for
+# hermes's group chat). The real root holds the other ghosts' profiles, so
+# the container gets a private stand-in kept inside this profile instead.
+if [ "$(basename "$(dirname "$home")")" = profiles ]; then
+    stash="$home/.container-root"
+    mkdir -p "$stash/profiles/$(basename "$home")"
+    args+=(-v "$stash:$(dirname "$(dirname "$home")")")
+fi
+[ -t 0 ] && [ -t 1 ] && args+=(-t)
+[ -r "$keys" ] && args+=(--env-file "$keys")
+
+# The control sockets. XDG_RUNTIME_DIR itself is not mounted (it holds the
+# Wayland, D-Bus and agent sockets); only haunt's directory under it is.
+sockets="${HAUNT_RUNTIME_DIR:-${XDG_RUNTIME_DIR:-/tmp}/haunt}"
+mkdir -p -m 700 "$sockets"
+args+=(-v "$sockets:$sockets")
+[ -n "${HAUNT_RUNTIME_DIR:-}" ] && args+=(-e HAUNT_RUNTIME_DIR="$HAUNT_RUNTIME_DIR")
+[ -n "${XDG_RUNTIME_DIR:-}" ] && args+=(-e XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR")
+
+# The haunt binary, when haunt is the one asking.
+parent="$(readlink -f "/proc/$PPID/exe" 2>/dev/null || true)"
+case "$(basename "$parent")" in
+haunt*) args+=(-v "$parent:$parent:ro") ;;
+esac
+
+# One container per hermes home. A leftover from a haunt that was killed
+# outright (SIGKILL reaches only this script, not the container) is removed
+# before starting, which is also what `gateway run --replace` would do.
+name="hermes-$(printf '%s' "$home" | sha256sum | cut -c1-12)"
+docker rm -f "$name" >/dev/null 2>&1 || true
+args+=(--name "$name")
+
+# haunt stops the gateway with SIGTERM to this script's process group and
+# SIGKILL ten seconds later, so the container gets eight.
+stop() { docker stop -t 8 "$name" >/dev/null 2>&1 || true; }
+trap stop TERM INT HUP
+
+docker run "${args[@]}" "$image" "$@" &
+child=$!
+while :; do
+    wait "$child" && exit 0 || status=$?
+    # A trapped signal interrupts wait with status > 128; the container
+    # is still stopping, so wait again for its real exit.
+    if kill -0 "$child" 2>/dev/null; then continue; fi
+    exit "$status"
+done
