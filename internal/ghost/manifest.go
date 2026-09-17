@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/BurntSushi/toml"
 
 	"github.com/aaronjauregui/haunt/internal/proto"
 	"github.com/aaronjauregui/haunt/internal/shell"
+	hermesskills "github.com/aaronjauregui/haunt/third_party/hermes-skills"
 )
 
 // Manifest is ghost.toml, the package descriptor. v1 covers identity, shell
@@ -20,6 +22,7 @@ type Manifest struct {
 	Shell    ShellSection     `toml:"shell"`
 	Brain    BrainSection     `toml:"brain"`
 	Persona  PersonaSection   `toml:"persona"`
+	Hermes   HermesSection    `toml:"hermes"`
 	Triggers []TriggerSection `toml:"trigger"`
 	Tools    []ToolSection    `toml:"tool"`
 }
@@ -30,6 +33,15 @@ type PersonaSection struct {
 	// System is the character's text, which leads the hermes profile's
 	// SOUL.md (docs/hermes-brain.md, section 5.3).
 	System string `toml:"system"`
+}
+
+// HermesSection is what a ghost on hermes asks of hermes itself.
+type HermesSection struct {
+	// BundledSkills names skills from hermes's own library to install in
+	// the ghost's profile. Profiles opt out of that library, since nearly
+	// all of it needs a shell, files or the web; only the few in
+	// third_party/hermes-skills may be named.
+	BundledSkills []string `toml:"bundled_skills"`
 }
 
 // ToolSection declares one MCP tool server the ghost would like to act
@@ -197,6 +209,12 @@ func LoadManifest(dir string) (*Manifest, error) {
 	for _, c := range m.Ghost.Capabilities {
 		if _, ok := KnownCapabilities[c]; !ok {
 			return nil, fmt.Errorf("%s: unknown capability %q", path, c)
+		}
+	}
+	for _, name := range m.Hermes.BundledSkills {
+		if !slices.Contains(hermesskills.Names(), name) {
+			return nil, fmt.Errorf("%s: hermes.bundled_skills: %q is not one a ghost may use (%s)",
+				path, name, strings.Join(hermesskills.Names(), ", "))
 		}
 	}
 	seenTool := map[string]bool{}

@@ -256,6 +256,9 @@ type Ghost struct {
 	toolsUp bool
 	servers []*mcp.Server
 	toolCat map[string]toolEntry
+	// skillsWarned is the package skills already reported as hidden
+	// (hermestools.go), so a gateway restart does not repeat them.
+	skillsWarned map[string]bool
 
 	aiSvc    *ai.Service
 	cacheDir string

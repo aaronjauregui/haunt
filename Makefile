@@ -31,8 +31,9 @@ demo-ai:
 	GHOST=wisp ./scripts/demo.sh
 
 # The AI ghost on a real model, with no window: a scripted conversation
-# (boot, idle, a reminder, "what can you do?") and its history with reasons.
-# About five minutes, and a few turns of the model's quota.
+# (boot, idle, a reminder, "what can you do?", haunt's and wisp's skills) and its
+# history with reasons, answering the ghost's questions with a virtual keyboard.
+# About 17 minutes, and a few dozen turns of the model's quota.
 spin-ai:
 	./scripts/hermes-spin.sh
 

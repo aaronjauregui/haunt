@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -312,4 +313,87 @@ func walkSkills(root string, fn func(Skill)) error {
 		return nil
 	}
 	return err
+}
+
+// A ghost's toolsets and hermes tools, as hermes names them for the
+// visibility conditions (model_tools.get_toolset_for_tool at the pinned
+// commit): platform_toolsets.api_server with the MCP server filed under
+// mcp-haunt.
+var (
+	ghostToolsets = []string{"memory", "session_search", "skills", "mcp-haunt"}
+	ghostTools    = []string{"memory", "session_search", "skill_manage", "skill_view", "skills_list"}
+)
+
+// MCPToolName is the name hermes gives a tool the haunt MCP server
+// offers (tools/mcp_tool_schema.py): prefixed, with anything outside
+// [A-Za-z0-9_] folded to an underscore, dashes included.
+func MCPToolName(tool string) string {
+	b := []byte("mcp__haunt__" + tool)
+	for i := len("mcp__haunt__"); i < len(b); i++ {
+		c := b[i]
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_') {
+			b[i] = '_'
+		}
+	}
+	return string(b)
+}
+
+// Unmet lists, for each skill in fsys, the requires_toolsets and
+// requires_tools entries a ghost offering tools (named as the haunt MCP
+// server names them) would not satisfy. Hermes hides such a skill from
+// its index without a word, so a skill meant to use a declared tool
+// server's tool, and spelling it wrong, would simply never be used.
+// Skills with nothing unmet are left out.
+func Unmet(fsys fs.FS, tools []string) (map[string][]string, error) {
+	have := map[string]bool{}
+	for _, t := range ghostTools {
+		have[t] = true
+	}
+	for _, t := range tools {
+		have[MCPToolName(t)] = true
+	}
+	entries, err := fs.ReadDir(fsys, ".")
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := map[string][]string{}
+	for _, e := range entries {
+		data, err := fs.ReadFile(fsys, path.Join(e.Name(), "SKILL.md"))
+		if !e.IsDir() || err != nil {
+			continue
+		}
+		head, _, ok := strings.Cut(strings.TrimPrefix(string(data), "---\n"), "\n---")
+		if !ok || !strings.HasPrefix(string(data), "---\n") {
+			continue
+		}
+		var fm struct {
+			Metadata struct {
+				Hermes struct {
+					Toolsets []string `yaml:"requires_toolsets"`
+					Tools    []string `yaml:"requires_tools"`
+				}
+			}
+		}
+		if yaml.Unmarshal([]byte(head), &fm) != nil {
+			continue
+		}
+		var unmet []string
+		for _, ts := range fm.Metadata.Hermes.Toolsets {
+			if !slices.Contains(ghostToolsets, ts) {
+				unmet = append(unmet, "toolset "+ts)
+			}
+		}
+		for _, t := range fm.Metadata.Hermes.Tools {
+			if !have[t] {
+				unmet = append(unmet, "tool "+t)
+			}
+		}
+		if len(unmet) > 0 {
+			out[e.Name()] = unmet
+		}
+	}
+	return out, nil
 }

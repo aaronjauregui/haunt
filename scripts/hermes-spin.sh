@@ -13,9 +13,24 @@
 #     the intentions list;
 #   - "what can you do?": only what a ghost can do (no files, commands,
 #     web or mail);
+#   - the morning check-in: a `morning` occasion a few minutes in, which
+#     loads haunt's morning-check-in skill and asks for the one thing
+#     today; the spin answers "I'll tell you" and types a goal, which
+#     shows in the intentions list;
 #   - the focus session: "did something first: skill_view, …" (it loaded
 #     haunt's focus-session skill), then an `intend` for the session,
-#     which shows in the intentions list.
+#     which shows in the intentions list;
+#   - the end of the session: time is up, "How did it go?" (the spin
+#     answers "Made progress"), `resolve`, then the offer of a break
+#     (the spin answers "I'm done");
+#   - the weekly review: `skill_view` of weekly-review, `intentions`, a
+#     question per goal (the spin keeps each) and one about next week
+#     (the spin says nothing new);
+#   - the ghost story: `skill_view` of wisp's own ghost-story skill, which
+#     `journal -skills` lists under "From its package".
+#
+# The ghost's questions are answered by scripts/spinkeys, a virtual
+# keyboard on the demo's headless sway, picking the option that matches.
 #
 # The demo's workdir, hermes profile included, is removed at the end, so
 # every spin starts from nothing. SPIN_OUT keeps the demo's log (default: a
@@ -30,14 +45,27 @@ if [ -z "$out" ]; then
 fi
 mkdir -p "$out"
 
+go build -o "$out/spinkeys" ./scripts/spinkeys || exit 1
+
+# The morning occasion, six minutes out: after hermes is up and the boot
+# turn is over, most of the time. If hermes is slower, the occasion waits
+# for the turn in flight.
+morning=$(( $(date +%s) + 360 ))
+morning_cron="$(date -d "@$morning" +'%-M %-H') * * *"
+
+# Debug for balloon and input, because the spin waits for their "choices
+# offered" and "input line opened" lines to know a question is up.
 GHOST=wisp IDLE_MS="${IDLE_MS:-45000}" WLR_BACKENDS=headless HAUNT_LOG="${HAUNT_LOG:-info}" \
+    HAUNT_DEBUG="${HAUNT_DEBUG:-balloon,input}" WISP_MORNING_CRON="$morning_cron" \
     ./scripts/demo.sh > "$out/demo.log" 2>&1 &
 demo=$!
 stop() {
+    [ -n "${KEYS_PID:-}" ] && kill "$KEYS_PID" 2>/dev/null
     # A background job ignores SIGINT; the demo cleans up on TERM too.
     kill -TERM "$demo" 2>/dev/null
     wait "$demo" 2>/dev/null
 }
+trap 'stop; exit 1' INT TERM
 
 for _ in $(seq 1 180); do
     grep -q 'hermes is up' "$out/demo.log" && break
@@ -54,12 +82,81 @@ fi
 runtime=$(sed -n 's/.*HAUNT_RUNTIME_DIR=\(\S*\) .*/\1/p' "$out/demo.log" | head -1)
 work=$(sed -n 's/.*-state \(\S*\)\/data\/haunt\/ghosts.*/\1/p' "$out/demo.log" | head -1)
 state="$work/data/haunt/ghosts/wisp"
+display=$(sed -n 's/.*nested sway is up on \(\S*\);.*/\1/p' "$out/demo.log" | head -1)
 export HAUNT_RUNTIME_DIR="$runtime" HERMES_HOME="$work/hermes"
 haunt() { "$work/haunt" "$@" 2>&1; }
 step() { printf '\n=== %s %s\n' "$(date +%T)" "$*"; }
 
+coproc KEYS { "$out/spinkeys" -display "$display"; }
+keys() {
+    echo "$*" >&"${KEYS[1]}"
+    local reply
+    read -r reply <&"${KEYS[0]}"
+    [ "$reply" = ok ] || echo "spinkeys: $* -> $reply"
+}
+
+# The ghost's questions and input lines, numbered from the start of the
+# run. Each answer takes the next one, so a question already up when the
+# spin gets to it (an occasion fires on the minute) is not missed.
+asked=0
+typed=0
+
+# answer PATTERN [SECONDS]: wait for the ghost's next question, and pick
+# the first choice matching PATTERN (case-insensitive), or the first choice
+# if none does.
+answer() {
+    local pattern=$1 wait=${2:-120} i line opts n=1
+    for ((i = 0; i < wait; i++)); do
+        line=$(grep 'choices offered:' "$out/demo.log" | sed -n "$((asked + 1))p")
+        [ -n "$line" ] && break
+        sleep 1
+    done
+    if [ -z "$line" ]; then
+        echo "(no question within ${wait}s)"
+        return 1
+    fi
+    asked=$((asked + 1))
+    opts=${line#*choices offered: }
+    IFS='|' read -ra choices <<< "$opts"
+    for i in "${!choices[@]}"; do
+        if [[ "${choices[$i],,}" =~ ${pattern,,} ]]; then
+            n=$((i + 1))
+            break
+        fi
+    done
+    sleep 2 # as a person would: read it first
+    echo "asked: $opts -> answering $n"
+    keys key "$n"
+}
+
+# typein TEXT [SECONDS]: wait for the ghost's next input line (the
+# ask_text tool), and type TEXT into it.
+typein() {
+    local text=$1 wait=${2:-60} i
+    for ((i = 0; i < wait; i++)); do
+        [ "$(grep -c 'input line opened' "$out/demo.log")" -gt "$typed" ] && break
+        sleep 1
+    done
+    if [ "$i" -ge "$wait" ]; then
+        echo "(no input line within ${wait}s)"
+        return 1
+    fi
+    typed=$((typed + 1))
+    sleep 2
+    echo "typing: $text"
+    keys type "$text"
+    keys enter
+}
+
 step "boot and one idle turn"
 sleep 60
+
+step "the morning check-in (haunt's skill, from a cron occasion at $(date -d "@$morning" +%H:%M))"
+now=$(date +%s)
+[ "$now" -lt "$morning" ] && sleep $((morning - now))
+answer "tell" 240 && typein "finish the quarterly report"
+sleep 45
+haunt journal -intentions -state "$state"
 
 step "a reminder"
 haunt say -ghost wisp "remind me in two minutes to stretch"
@@ -77,15 +174,31 @@ sleep 60
 haunt journal -intentions -state "$state"
 
 step "a focus session (haunt's skill)"
-# Length and subject are both given, so the skill has nothing to ask:
-# an ask would wait for a click nobody can make here.
-haunt say -ghost wisp "let's do a focus session: 25 minutes on the quarterly report"
+# Length and subject are both given, so the skill has nothing to ask
+# before it starts.
+haunt say -ghost wisp "let's do a 2 minute focus session on the slides"
 sleep 90
+haunt journal -intentions -state "$state"
+
+step "the end of the focus session"
+answer "progress" 180 && answer "done" 120
+sleep 45
+haunt journal -intentions -state "$state"
+
+step "a ghost story (wisp's own skill)"
+haunt say -ghost wisp "tell me a ghost story"
+sleep 90
+
+step "a weekly review (haunt's skill)"
+# Keep every goal, and nothing new: answer each question until none comes.
+haunt say -ghost wisp "let's do a weekly review"
+answer "keep|nothing|^ *no" 180 && while answer "keep|nothing|^ *no" 60; do :; done
+sleep 30
 haunt journal -intentions -state "$state"
 haunt journal -skills -state "$state" wisp
 
 step "the conversation, with reasons"
-haunt history -n 30 -why -state "$state"
+haunt history -n 60 -why -state "$state"
 
 stop
 if docker ps -q --filter name=hermes- 2>/dev/null | grep -q .; then

@@ -45,6 +45,9 @@ capabilities = ["message", "llm"]
 
 [persona]
 system = "`+persona+`"
+
+[hermes]
+bundled_skills = ["humanizer"]
 `)
 	// A skill of the ghost's own, and a script beside it that must not be
 	// installed.
@@ -224,10 +227,14 @@ system = "`+persona+`"
 	if !slices.Equal(sk.Dirs, []string{hermes.SkillsDir}) || len(sk.Missing) > 0 {
 		t.Errorf("skills.external_dirs = %v (missing %v), want [%s]", sk.Dirs, sk.Missing, hermes.SkillsDir)
 	}
-	for _, want := range []string{"ghost/kitchen-watch", "haunt/focus-session", "haunt/morning-check-in"} {
+	for _, want := range []string{"ghost/kitchen-watch", "haunt/focus-session", "haunt/morning-check-in", "hermes/humanizer"} {
 		if !slices.Contains(sk.Skills, want) {
 			t.Errorf("skills = %v, missing %s", sk.Skills, want)
 		}
+	}
+	// Only the bundled skill the manifest named.
+	if slices.Contains(sk.Skills, "hermes/weekly-review-planning") {
+		t.Errorf("skills = %v: a bundled skill nobody asked for is installed", sk.Skills)
 	}
 	if _, err := os.Stat(filepath.Join(profile, hermes.SkillsDir, "ghost", "kitchen-watch", "check.sh")); !os.IsNotExist(err) {
 		t.Errorf("a script was installed with the ghost's skill (%v)", err)
@@ -259,7 +266,7 @@ system = "`+persona+`"
 		t.Fatalf("haunt journal -skills: %v: %s", err, out)
 	}
 	for _, want := range []string{"Learned (it wrote these itself):\n  (none)", "From its package:\n  kitchen-watch: Mind the oven.",
-		"From haunt:\n  focus-session: "} {
+		"From haunt:\n  ", "  focus-session: ", "From hermes:\n  humanizer: "} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("journal -skills lacks %q:\n%s", want, out)
 		}

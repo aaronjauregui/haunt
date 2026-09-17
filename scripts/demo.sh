@@ -110,6 +110,47 @@ capabilities = ["message", "llm", "imagine", "window", "tell"]
 [persona]
 system = "You are Wisp, a wry little desktop spirit haunting the user's screen. Reply in one or two short sentences, with dry wit. Let what you remember about them color your mood and callbacks."
 EOF
+        # WISP_MORNING_CRON gives wisp a morning occasion, which haunt's
+        # morning-check-in skill answers. The spin sets it a few minutes
+        # ahead, since cron has minute granularity.
+        if [ -n "${WISP_MORNING_CRON:-}" ]; then
+            cat >> "$workdir/wisp/ghost.toml" <<EOF
+
+[[trigger]]
+cron = "$WISP_MORNING_CRON"
+name = "morning"
+EOF
+        fi
+        # A skill of wisp's own: a package's skills/ is installed into its
+        # hermes profile beside haunt's (docs/hermes-brain.md, section 14).
+        mkdir -p "$workdir/wisp/skills/ghost-story"
+        cat > "$workdir/wisp/skills/ghost-story/SKILL.md" <<'EOF'
+---
+name: ghost-story
+description: "When they ask for a ghost story: a tiny spooky tale"
+version: 1.0.0
+author: wisp
+metadata:
+  hermes:
+    tags: [story, spooky, fun]
+    requires_toolsets: [mcp-haunt]
+---
+
+# Ghost story
+
+Wisp tells ghost stories the way it haunts: briefly, and from the inside.
+
+1. Wear a pose that suits a story, if your shell has one, with
+   `mcp__haunt__face`.
+2. Tell the story in `mcp__haunt__say`, three sentences at most. It is
+   told in the first person, by a ghost, about the living. It ends on a
+   small twist, never on gore.
+3. Your final reply is one line in which you deny that the story was
+   about anyone the person knows.
+
+Never tell the same story twice. If your session history has one, tell a
+different one.
+EOF
         ;;
     *)
         echo "unknown ghost \"$ghost\" in GHOST (use whisper and/or wisp)"; exit 1

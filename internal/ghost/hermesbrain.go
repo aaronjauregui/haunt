@@ -16,6 +16,7 @@ import (
 	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/proto"
 	"github.com/aaronjauregui/haunt/skills"
+	hermesskills "github.com/aaronjauregui/haunt/third_party/hermes-skills"
 )
 
 // The hermes brain is what a ghost with no [brain] section runs on: its
@@ -860,9 +861,10 @@ func (g *Ghost) openHermes() (*hermes.Gateway, *hermes.Client, error) {
 }
 
 // hermesSkills is what the profile's skills are installed from: the ghost
-// package's skills/ directory, if it has one, and haunt's own. The
-// package's come first, so a persona author can replace one of haunt's
-// routines by writing a skill of the same name.
+// package's skills/ directory, if it has one, haunt's own, and the
+// bundled hermes skills the manifest names. The package's come first, so
+// a persona author can replace one of haunt's routines by writing a skill
+// of the same name.
 func (g *Ghost) hermesSkills() []hermes.SkillSource {
 	return []hermes.SkillSource{
 		{
@@ -874,6 +876,13 @@ func (g *Ghost) hermesSkills() []hermes.SkillSource {
 			Name:  "haunt",
 			About: "Routines for a desktop ghost, done with your haunt tools.",
 			FS:    skills.Haunt,
+		},
+		{
+			// Named like the skills hermes seeds itself, so the journal
+			// lists them together.
+			Name:  hermes.SkillHermes,
+			About: "Know-how from hermes's own library.",
+			FS:    hermesskills.Only(g.manifest.Hermes.BundledSkills),
 		},
 	}
 }

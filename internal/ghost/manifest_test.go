@@ -241,3 +241,20 @@ args = { within = "2h" }
 		t.Fatalf("err = %v, want a complaint about args with no tool", err)
 	}
 }
+
+// A ghost may ask for a few of hermes's bundled skills by name, and only
+// those: the rest assume a shell, files or the web.
+func TestManifestBundledSkills(t *testing.T) {
+	const head = "[ghost]\nname = \"wisp\"\ncapabilities = [\"message\", \"llm\"]\n\n[hermes]\n"
+	m, err := LoadManifest(writeManifest(t, head+`bundled_skills = ["humanizer", "weekly-review-planning"]`+"\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Hermes.BundledSkills; len(got) != 2 || got[0] != "humanizer" {
+		t.Errorf("bundled_skills = %v", got)
+	}
+	_, err = LoadManifest(writeManifest(t, head+`bundled_skills = ["google-workspace"]`+"\n"))
+	if err == nil || !strings.Contains(err.Error(), "google-workspace") || !strings.Contains(err.Error(), "humanizer") {
+		t.Fatalf("err = %v, want google-workspace refused and the allowed ones listed", err)
+	}
+}

@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/aaronjauregui/haunt/internal/control"
+	"github.com/aaronjauregui/haunt/internal/hermes"
 	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/proto"
 )
@@ -169,7 +172,39 @@ func (t hermesTools) List() []control.ToolSpec {
 			specs = append(specs, o)
 		}
 	}
+	g.warnHiddenSkills(specs)
 	return specs
+}
+
+// warnHiddenSkills logs the package's skills that hermes will not list,
+// because they need a toolset or a tool this ghost does not offer. Most
+// likely a tool from a [[tool]] server, spelled as the server spells it
+// rather than as hermes does (mcp__haunt__<server>__<tool>, with dashes
+// made underscores), or a server that is not running.
+func (g *Ghost) warnHiddenSkills(specs []control.ToolSpec) {
+	names := make([]string, len(specs))
+	for i, s := range specs {
+		names[i] = s.Name
+	}
+	unmet, err := hermes.Unmet(os.DirFS(filepath.Join(g.dir, "skills")), names)
+	if err != nil {
+		g.log.Warn(hlog.Brain, "reading the package's skills: %v", err)
+		return
+	}
+	g.toolMu.Lock()
+	defer g.toolMu.Unlock()
+	for skill, missing := range unmet {
+		line := skill + ": " + strings.Join(missing, ", ")
+		if g.skillsWarned[line] {
+			continue
+		}
+		if g.skillsWarned == nil {
+			g.skillsWarned = map[string]bool{}
+		}
+		g.skillsWarned[line] = true
+		g.log.Warn(hlog.Brain, "hermes will not list the skill %s: it needs %s, which this ghost does not offer",
+			skill, strings.Join(missing, ", "))
+	}
 }
 
 // Call runs one tool.

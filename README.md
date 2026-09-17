@@ -80,11 +80,22 @@ the profile (`memories/MEMORY.md`, `memories/USER.md`) for you to read.
 
 Routines are hermes skills: short Markdown procedures the model loads when
 one fits. Haunt gives every ghost a few of its own (`skills/`: a morning
-check-in, a focus session), a ghost package can carry more in a `skills/`
+check-in, a focus session, a weekly review, keeping an eye on a goal,
+drawing on request), a ghost package can carry more in a `skills/`
 directory of its own, and the ghost may write new ones as it learns how you
-like things done. `haunt journal -skills` lists all three kinds. Haunt
-installs its own and the package's read-only, so the model cannot rewrite
-them.
+like things done. Hermes's own library is left out, because nearly all of
+it needs a shell, files or the web; a manifest may ask for the few that do
+not by name:
+
+```toml
+[hermes]
+bundled_skills = ["humanizer", "weekly-review-planning"]   # also meeting-action-items, songwriting-and-ai-music
+```
+
+`haunt journal -skills` lists all of these. Haunt installs its own, the
+package's and the bundled ones read-only, so the model cannot rewrite them.
+A morning occasion (`[[trigger]]` with `name = "morning"` and no tool) runs
+the morning check-in, and one named `weekly` runs the weekly review.
 
 Ask it to remember to *do* something:
 
@@ -224,6 +235,20 @@ The brakes are the driver's. `[ai.budget] tool_requests_per_hour` (60)
 caps how fast it may act, `[ai] tool_timeout` bounds one call, and the
 model is only woken unasked out of the same daily allowance as speaking
 first, which a restart does not refill.
+
+A package skill can be written for one of these tools. Hermes shows it only
+when the tool is there, under the name hermes gives it —
+`mcp__haunt__<server>__<tool>`, with dashes and dots made underscores:
+
+```yaml
+metadata:
+  hermes:
+    requires_toolsets: [mcp-haunt]
+    requires_tools: [mcp__haunt__notes__append]
+```
+
+The driver logs a warning for a package skill whose tools it does not
+offer, since hermes hides such a skill without a word.
 
 ### Being woken by the world
 

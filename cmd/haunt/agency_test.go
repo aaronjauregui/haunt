@@ -9,8 +9,10 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"testing/fstest"
 	"time"
 
+	"github.com/aaronjauregui/haunt/internal/hermes"
 	"github.com/aaronjauregui/haunt/internal/testenv"
 )
 
@@ -131,6 +133,14 @@ func TestGhostActsThroughTheModel(t *testing.T) {
 	list := waitFakeLog(t, run.fakeLog, time.Second, func(e fakeEntry) bool { return e.Kind == "tools_list" })
 	if !slices.Contains(list.Tools, "notes__append") {
 		t.Errorf("the tools never reached the model: %v", list.Tools)
+	}
+	// A package skill that needs the server's tool names it the way
+	// hermes does, and the tools the model was offered satisfy it
+	// (docs/hermes-brain.md, section 14, direction 5).
+	skill := fstest.MapFS{"shopping/SKILL.md": {Data: []byte("---\nname: shopping\ndescription: x\n" +
+		"metadata:\n  hermes:\n    requires_toolsets: [mcp-haunt]\n    requires_tools: [mcp__haunt__notes__append]\n---\n")}}
+	if unmet, err := hermes.Unmet(skill, list.Tools); err != nil || len(unmet) > 0 {
+		t.Errorf("a skill needing notes.append is hidden: %v %v", unmet, err)
 	}
 	call := waitFakeLog(t, run.fakeLog, time.Second, func(e fakeEntry) bool { return e.Kind == "tool_call" })
 	if call.IsError || !strings.Contains(call.Text, "appended milk") {
