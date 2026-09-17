@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,6 +15,7 @@ import (
 	"github.com/aaronjauregui/haunt/internal/hermes"
 	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/proto"
+	"github.com/aaronjauregui/haunt/skills"
 )
 
 // The hermes brain is what a ghost with no [brain] section runs on: its
@@ -703,6 +705,7 @@ func (g *Ghost) openHermes() (*hermes.Gateway, *hermes.Client, error) {
 		Persona: g.hermesPersona(),
 		Serve:   []string{self, "mcp-serve", "--ghost", name},
 		Env:     env,
+		Skills:  g.hermesSkills(),
 	})
 	if err != nil {
 		return nil, nil, err
@@ -727,6 +730,25 @@ func (g *Ghost) openHermes() (*hermes.Gateway, *hermes.Client, error) {
 		}
 	}
 	return gw, client, nil
+}
+
+// hermesSkills is what the profile's skills are installed from: the ghost
+// package's skills/ directory, if it has one, and haunt's own. The
+// package's come first, so a persona author can replace one of haunt's
+// routines by writing a skill of the same name.
+func (g *Ghost) hermesSkills() []hermes.SkillSource {
+	return []hermes.SkillSource{
+		{
+			Name:  "ghost",
+			About: "Routines that came with " + g.manifest.Ghost.Name + ".",
+			FS:    os.DirFS(filepath.Join(g.dir, "skills")),
+		},
+		{
+			Name:  "haunt",
+			About: "Routines for a desktop ghost, done with your haunt tools.",
+			FS:    skills.Haunt,
+		},
+	}
 }
 
 // hermesPersona is what SOUL.md is written from.

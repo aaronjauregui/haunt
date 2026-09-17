@@ -78,6 +78,14 @@ memory, and when you tell it it has something wrong it corrects that
 memory — there is no separate belief store to edit. What hermes holds is in
 the profile (`memories/MEMORY.md`, `memories/USER.md`) for you to read.
 
+Routines are hermes skills: short Markdown procedures the model loads when
+one fits. Haunt gives every ghost a few of its own (`skills/`: a morning
+check-in, a focus session), a ghost package can carry more in a `skills/`
+directory of its own, and the ghost may write new ones as it learns how you
+like things done. `haunt journal -skills` lists all three kinds. Haunt
+installs its own and the package's read-only, so the model cannot rewrite
+them.
+
 Ask it to remember to *do* something:
 
     remind me in 10 minutes to check the build
@@ -319,11 +327,11 @@ Hyprland config if the service does not start.
     haunt new mycompanion
     cd mycompanion && haunt run .
 
-That scaffolds a whole ghost: a manifest and a persona. There is no brain
-in it and nothing to compile — a ghost that declares no brain runs on
-hermes, which talks in your persona, remembers you, takes on reminders,
-draws when asked, uses whatever tool servers you gave it, and speaks first
-now and then. What is left to do is the art.
+That scaffolds a whole ghost: a manifest, a persona and an example skill.
+There is no brain in it and nothing to compile — a ghost that declares no
+brain runs on hermes, which talks in your persona, remembers you, takes on
+reminders, draws when asked, uses whatever tool servers you gave it, and
+speaks first now and then. What is left to do is the art.
 
     haunt new -brain mycompanion
 
@@ -398,6 +406,7 @@ what the shell has.
 | `haunt history` / `haunt journal` | what was said / what it did |
 | `haunt history -why` | why it said that: what woke it, what it saw, what it did |
 | `haunt journal -intentions` | what it is still meaning to do |
+| `haunt journal -skills` | the routines it has, and which it wrote itself |
 | `haunt perms grant window` | let it notice what you are working on (or ask it from its menu) |
 | `haunt perms [grant\|revoke <cap>]` | what it may do — revocable while it runs |
 | `haunt shush` / `unshush` | quiet hours, now |

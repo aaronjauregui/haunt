@@ -39,9 +39,17 @@ func TestNewScaffoldsAPersonaGhost(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, e := range entries {
-		if e.Name() != "ghost.toml" && e.Name() != "README.md" {
+		if e.Name() != "ghost.toml" && e.Name() != "README.md" && e.Name() != "skills" {
 			t.Errorf("scaffold includes %q; the persona ghost should need no build step", e.Name())
 		}
+	}
+	// Its example skill is shown only where the ghost's tools are.
+	skill, err := os.ReadFile(filepath.Join(dir, "wisp", "skills", "wind-down", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(skill), "---\nname: wind-down\n") || !strings.Contains(string(skill), "requires_toolsets: [mcp-haunt]") {
+		t.Errorf("example skill:\n%s", skill)
 	}
 }
 

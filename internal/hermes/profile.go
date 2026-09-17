@@ -154,16 +154,29 @@ type ProfileSpec struct {
 	// environment (XDG_* survive, HAUNT_* do not), so anything haunt's own
 	// socket lookup depends on has to be named here.
 	Env map[string]string
+	// Skills are installed into the profile, read-only, and listed in
+	// skills.external_dirs (skills.go). On a name clash the earlier
+	// source wins.
+	Skills []SkillSource
+}
+
+// ProfileDir is where a ghost's profile is, whether or not it exists.
+func (c Config) ProfileDir(ghost string) (string, error) {
+	root, err := c.Root()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "profiles", ProfileName(ghost)), nil
 }
 
 // OpenProfile reads an existing profile's key and port without changing
 // anything, for the CLI.
 func (c Config) OpenProfile(ghost string) (Profile, error) {
-	root, err := c.Root()
+	dir, err := c.ProfileDir(ghost)
 	if err != nil {
 		return Profile{}, err
 	}
-	p := Profile{Ghost: ghost, Dir: filepath.Join(root, "profiles", ProfileName(ghost))}
+	p := Profile{Ghost: ghost, Dir: dir}
 	env, err := readEnv(filepath.Join(p.Dir, ".env"))
 	if err != nil {
 		return Profile{}, fmt.Errorf("ghost %q has no hermes profile yet: %w", ghost, err)
@@ -178,9 +191,10 @@ func (c Config) OpenProfile(ghost string) (Profile, error) {
 
 // EnsureProfile creates or refreshes a ghost's profile.
 //
-// What is haunt's is rewritten every time: SOUL.md, and the keys in
-// config.yaml that make the profile a ghost's — the API server, the
-// toolset restriction, the haunt MCP server. Everything else in
+// What is haunt's is rewritten every time: SOUL.md, the skills under
+// SkillsDir, and the keys in config.yaml that make the profile a ghost's —
+// the API server, the toolset restriction, the haunt MCP server, haunt's
+// entry in skills.external_dirs. Everything else in
 // config.yaml is left as the person set it, the model above all, and
 // MEMORY.md, USER.md and the session database are never touched: they are
 // the ghost's life, not its configuration.
@@ -261,7 +275,11 @@ func (c Config) EnsureProfile(spec ProfileSpec) (Profile, error) {
 			}
 		}
 	}
-	if err := c.writeConfig(filepath.Join(p.Dir, "config.yaml"), spec); err != nil {
+	hasSkills, err := installSkills(p.Dir, spec.Skills)
+	if err != nil {
+		return Profile{}, fmt.Errorf("installing skills: %w", err)
+	}
+	if err := c.writeConfig(filepath.Join(p.Dir, "config.yaml"), spec, hasSkills); err != nil {
 		return Profile{}, err
 	}
 	return p, nil
@@ -283,7 +301,7 @@ const noBundledSkills = ".no-bundled-skills"
 // hermes_cli/config_defaults.py) at the commit docs/hermes-brain.md pins.
 const configVersion = 45
 
-func (c Config) writeConfig(path string, spec ProfileSpec) error {
+func (c Config) writeConfig(path string, spec ProfileSpec, hasSkills bool) error {
 	doc := map[string]any{}
 	if data, err := os.ReadFile(path); err == nil {
 		if err := yaml.Unmarshal(data, &doc); err != nil {
@@ -347,6 +365,35 @@ func (c Config) writeConfig(path string, spec ProfileSpec) error {
 		delete(memory, "provider")
 	}
 
+	// Haunt's skill directory is one entry among whatever the person
+	// listed. Relative, because hermes resolves it against HERMES_HOME,
+	// which is the profile on the host and in a container alike.
+	skills := section("skills")
+	dirs := []any{}
+	if list, ok := skills["external_dirs"].([]any); ok {
+		for _, d := range list {
+			if d != SkillsDir {
+				dirs = append(dirs, d)
+			}
+		}
+	} else if d, ok := skills["external_dirs"].(string); ok && d != "" && d != SkillsDir {
+		dirs = append(dirs, d)
+	}
+	if hasSkills {
+		dirs = append(dirs, SkillsDir)
+	}
+	if len(dirs) > 0 {
+		skills["external_dirs"] = dirs
+	} else {
+		delete(skills, "external_dirs")
+	}
+	if _, set := skills["guard_agent_created"]; !set {
+		// The security scan hermes runs on skills the model writes. A
+		// ghost has no shell to run a bad one, but the person may open
+		// this profile with `hermes -p`, which has. Only defaulted.
+		skills["guard_agent_created"] = true
+	}
+
 	servers := section("mcp_servers")
 	serve := map[string]any{
 		"command":         spec.Serve[0],
@@ -364,7 +411,8 @@ func (c Config) writeConfig(path string, spec ProfileSpec) error {
 		return err
 	}
 	header := []byte("# Written by haunt for ghost " + spec.Ghost + ". The api_server, toolset,\n" +
-		"# tool_search and mcp_servers.haunt settings are rewritten on every start;\n" +
+		"# tool_search and mcp_servers.haunt settings, and the " + SkillsDir + " entry in\n" +
+		"# skills.external_dirs, are rewritten on every start;\n" +
 		"# everything else (the model above all) is yours to change.\n")
 	return writeIfChanged(path, append(header, out...), 0o600)
 }

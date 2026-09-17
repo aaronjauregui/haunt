@@ -16,8 +16,11 @@ func testGhostDir(t *testing.T) string {
 		"ghost.toml":    "[ghost]\nname = \"spook\"\n\n[brain]\nwasm = \"brain.wasm\"\n",
 		"brain.wasm":    "\x00asm-fake",
 		"art/shell.png": "not-really-png",
-		".hidden":       "excluded",
-		"brain/main.go": "excluded build dir",
+		// A ghost on hermes carries its routines as skills.
+		"skills/tidy/SKILL.md":           "---\nname: tidy\n---\n",
+		"skills/tidy/references/desk.md": "reference",
+		".hidden":                        "excluded",
+		"brain/main.go":                  "excluded build dir",
 	}
 	for rel, content := range files {
 		path := filepath.Join(dir, rel)
@@ -53,7 +56,8 @@ func TestPackSignVerifyExtract(t *testing.T) {
 	if err := p.Extract(dest); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"ghost.toml", "brain.wasm", "art/shell.png"} {
+	for _, want := range []string{"ghost.toml", "brain.wasm", "art/shell.png",
+		"skills/tidy/SKILL.md", "skills/tidy/references/desk.md"} {
 		if _, err := os.Stat(filepath.Join(dest, want)); err != nil {
 			t.Errorf("extracted package missing %s", want)
 		}

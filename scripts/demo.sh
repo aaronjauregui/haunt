@@ -32,6 +32,8 @@ runtime="$(mktemp -d /tmp/hd-XXXXXX)"
 cleanup() {
     kill $(jobs -p) 2>/dev/null || true
     wait 2>/dev/null || true
+    # A hermes profile holds the ghost's skills read-only.
+    chmod -R u+w "$workdir" 2>/dev/null || true
     rm -rf "$workdir" "$runtime"
 }
 trap cleanup EXIT TERM INT

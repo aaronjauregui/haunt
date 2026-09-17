@@ -122,6 +122,34 @@ type serverEntry struct {
 
 type profileConfig struct {
 	MCPServers map[string]serverEntry `yaml:"mcp_servers"`
+	Skills     struct {
+		ExternalDirs []string `yaml:"external_dirs"`
+	} `yaml:"skills"`
+}
+
+// findSkills does what hermes's index does with skills.external_dirs: each
+// entry is resolved against HERMES_HOME, and every SKILL.md under it is a
+// skill, named category/skill as the index groups them. A directory that
+// does not exist is skipped, and reported.
+func findSkills(home string, dirs []string) (skills, missing []string) {
+	for _, d := range dirs {
+		root := d
+		if !filepath.IsAbs(root) {
+			root = filepath.Join(home, d)
+		}
+		if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
+			missing = append(missing, d)
+			continue
+		}
+		filepath.WalkDir(root, func(p string, e os.DirEntry, err error) error {
+			if err == nil && e.Name() == "SKILL.md" {
+				rel, _ := filepath.Rel(root, filepath.Dir(p))
+				skills = append(skills, rel)
+			}
+			return nil
+		})
+	}
+	return skills, missing
 }
 
 func readDotenv(path string) (map[string]string, error) {
@@ -177,6 +205,9 @@ func run() error {
 	if !ok || entry.Command == "" {
 		return errors.New("config.yaml has no mcp_servers.haunt")
 	}
+
+	skills, missing := findSkills(home, cfg.Skills.ExternalDirs)
+	logEntry(map[string]any{"kind": "skills", "dirs": cfg.Skills.ExternalDirs, "skills": skills, "missing": missing})
 
 	rules, err := loadRules()
 	if err != nil {

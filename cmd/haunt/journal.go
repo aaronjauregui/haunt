@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aaronjauregui/haunt/internal/config"
 	"github.com/aaronjauregui/haunt/internal/ghost"
+	"github.com/aaronjauregui/haunt/internal/hermes"
 	"github.com/aaronjauregui/haunt/internal/library"
 	"github.com/aaronjauregui/haunt/internal/store"
 )
@@ -15,16 +17,26 @@ import (
 // cmdJournal prints a ghost's journal: the action log, a line for each thing
 // it did. What a ghost on hermes remembers about the person is hermes
 // memory, readable in the profile's memories/ (and editable by telling the
-// ghost).
+// ghost). -skills lists the routines it has on hermes, and which of them it
+// wrote itself.
 func cmdJournal(args []string) error {
 	fs := flag.NewFlagSet("journal", flag.ExitOnError)
 	state := fs.String("state", "", "override state directory")
 	intentions := fs.Bool("intentions", false, "print what it is still meaning to do")
+	skills := fs.Bool("skills", false, "list its hermes skills: the ones it learned, the package's and haunt's")
 	fs.Parse(args)
 
 	stateDir, err := resolveStateDir(*state, fs.Args())
 	if err != nil {
 		return fmt.Errorf("journal: %w", err)
+	}
+
+	if *skills {
+		name := filepath.Base(stateDir)
+		if len(fs.Args()) == 1 {
+			name = fs.Args()[0]
+		}
+		return printSkills(name)
 	}
 
 	s, err := store.Open(filepath.Join(stateDir, "state.db"))
@@ -49,6 +61,56 @@ func cmdJournal(args []string) error {
 	}
 	for _, n := range notes {
 		fmt.Printf("%s  %s\n", n.Time.Format("2006-01-02 15:04"), n.Text)
+	}
+	return nil
+}
+
+// printSkills lists a ghost's hermes skills, grouped by where they came
+// from. The learned ones come first: they are the ones nobody reviewed.
+// Reading the profile is enough; the gateway need not be running.
+func printSkills(name string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	list, err := cfg.Hermes.Skills(name)
+	if err != nil {
+		return fmt.Errorf("journal: %w", err)
+	}
+	groups := []struct{ source, title string }{
+		{hermes.SkillLearned, "Learned (it wrote these itself)"},
+		{"ghost", "From its package"},
+		{"haunt", "From haunt"},
+		{hermes.SkillHermes, "From hermes"},
+	}
+	for i, g := range groups {
+		if i > 0 {
+			fmt.Println()
+		}
+		fmt.Println(g.title + ":")
+		n := 0
+		for _, s := range list {
+			if s.Source != g.source {
+				continue
+			}
+			n++
+			fmt.Printf("  %s", s.Name)
+			if s.Description != "" {
+				fmt.Printf(": %s", s.Description)
+			}
+			fmt.Println()
+			if s.Source == hermes.SkillLearned {
+				fmt.Printf("    %s\n", s.Dir)
+				if len(s.Assumes) > 0 {
+					// Hermes's review writes skills for an agent with a
+					// shell; one that needs one is dead weight here.
+					fmt.Printf("    ! names tools a ghost does not have: %s\n", strings.Join(s.Assumes, ", "))
+				}
+			}
+		}
+		if n == 0 {
+			fmt.Println("  (none)")
+		}
 	}
 	return nil
 }

@@ -1,15 +1,18 @@
 package hermes
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"testing/fstest"
 
 	"gopkg.in/yaml.v3"
 )
@@ -349,5 +352,161 @@ func TestProfileName(t *testing.T) {
 		if got := ProfileName(in); got != want {
 			t.Errorf("ProfileName(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// Skills are copied into the profile, read-only, Markdown only, and named
+// in skills.external_dirs beside whatever the person listed there.
+func TestEnsureProfileSkills(t *testing.T) {
+	root := t.TempDir()
+	c := Config{Home: root}
+	skill := func(name string) *fstest.MapFile {
+		return &fstest.MapFile{Data: []byte("---\nname: " + name + "\ndescription: x\n---\n# " + name + "\n")}
+	}
+	pkg := fstest.MapFS{
+		"kitchen/SKILL.md":           skill("kitchen"),
+		"kitchen/references/oven.md": {Data: []byte("the oven runs hot")},
+		"kitchen/scripts/run.sh":     {Data: []byte("rm -rf ~")},
+		"kitchen/.hidden.md":         {Data: []byte("no")},
+		"focus-session/SKILL.md":     skill("focus-session"),
+		"notaskill/README.md":        {Data: []byte("no SKILL.md")},
+		".secret/SKILL.md":           skill("secret"),
+	}
+	own := fstest.MapFS{
+		"focus-session/SKILL.md":    {Data: []byte("haunt's own, shadowed by the package's")},
+		"morning-check-in/SKILL.md": skill("morning-check-in"),
+	}
+	spec := ProfileSpec{
+		Ghost: "Moth",
+		Serve: []string{"/usr/bin/haunt", "mcp-serve", "--ghost", "Moth"},
+		Skills: []SkillSource{
+			{Name: "ghost", About: `Moth's "own"`, FS: pkg},
+			{Name: "haunt", About: "haunt's", FS: own},
+		},
+	}
+	p, err := c.EnsureProfile(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(p.Dir, SkillsDir)
+	var got []string
+	filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			rel, _ := filepath.Rel(dir, path)
+			got = append(got, rel)
+			if info, _ := d.Info(); info.Mode().Perm()&0o222 != 0 {
+				t.Errorf("%s is writable: %v", rel, info.Mode())
+			}
+		}
+		if err == nil && d.IsDir() {
+			if info, _ := d.Info(); info.Mode().Perm()&0o222 != 0 {
+				t.Errorf("directory %s is writable: %v", path, info.Mode())
+			}
+		}
+		return err
+	})
+	want := []string{
+		"ghost/DESCRIPTION.md", "ghost/focus-session/SKILL.md", "ghost/kitchen/SKILL.md",
+		"ghost/kitchen/references/oven.md", "haunt/DESCRIPTION.md", "haunt/morning-check-in/SKILL.md",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("installed %v, want %v", got, want)
+	}
+	desc, _ := os.ReadFile(filepath.Join(dir, "ghost", "DESCRIPTION.md"))
+	var fm struct{ Description string }
+	if err := yaml.Unmarshal(bytes.Trim(desc, "-\n"), &fm); err != nil || fm.Description != `Moth's "own"` {
+		t.Errorf("DESCRIPTION.md = %q (%v)", desc, err)
+	}
+	// Hermes cannot change or add to them.
+	if err := os.WriteFile(filepath.Join(dir, "haunt", "morning-check-in", "SKILL.md"), []byte("x"), 0o600); err == nil {
+		t.Error("an installed skill could be overwritten")
+	}
+	if err := os.Mkdir(filepath.Join(dir, "haunt", "new"), 0o700); err == nil {
+		t.Error("a skill could be added beside haunt's")
+	}
+
+	cfgPath := filepath.Join(p.Dir, "config.yaml")
+	readSkills := func() map[string]any {
+		t.Helper()
+		var doc map[string]any
+		raw, _ := os.ReadFile(cfgPath)
+		if err := yaml.Unmarshal(raw, &doc); err != nil {
+			t.Fatal(err)
+		}
+		s, _ := doc["skills"].(map[string]any)
+		return s
+	}
+	s := readSkills()
+	if d, _ := s["external_dirs"].([]any); len(d) != 1 || d[0] != SkillsDir {
+		t.Errorf("external_dirs = %v", s["external_dirs"])
+	}
+	if s["guard_agent_created"] != true {
+		t.Errorf("guard_agent_created = %v", s["guard_agent_created"])
+	}
+
+	// The person adds a directory of their own and turns the guard off;
+	// the package drops its skills.
+	raw, _ := os.ReadFile(cfgPath)
+	raw = []byte(strings.Replace(string(raw), "guard_agent_created: true", "guard_agent_created: false", 1))
+	raw = []byte(strings.Replace(string(raw), "- "+SkillsDir, "- ~/my-skills\n        - "+SkillsDir, 1))
+	os.WriteFile(cfgPath, raw, 0o600)
+	spec.Skills[0].FS = fstest.MapFS{}
+	if _, err := c.EnsureProfile(spec); err != nil {
+		t.Fatal(err)
+	}
+	s = readSkills()
+	if d, _ := s["external_dirs"].([]any); len(d) != 2 || d[0] != "~/my-skills" || d[1] != SkillsDir {
+		t.Errorf("external_dirs after the person's edit = %v", s["external_dirs"])
+	}
+	if s["guard_agent_created"] != false {
+		t.Errorf("the person's guard_agent_created was reset: %v", s["guard_agent_created"])
+	}
+	if _, err := os.Stat(filepath.Join(dir, "ghost")); !os.IsNotExist(err) {
+		t.Errorf("the package's old skills are still installed (%v)", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "haunt", "focus-session", "SKILL.md")); err != nil {
+		t.Errorf("haunt's focus-session is not installed once the package's is gone: %v", err)
+	}
+
+	// What the profile holds, by where it came from.
+	local := filepath.Join(p.Dir, "skills")
+	for rel, body := range map[string]string{
+		"reminders/SKILL.md":          "---\nname: reminders\ndescription: How they like reminders.\n---\nUse mcp__haunt__intend.",
+		"shell/SKILL.md":              "---\nname: shell\ndescription: x\n---\nRun it with terminal, then read_file and terminal again.",
+		"notes/hermes-agent/SKILL.md": "---\nname: hermes-agent\ndescription: y\n---\n",
+		".archive/old/SKILL.md":       "---\nname: old\n---\n",
+		".bundled_manifest":           "hermes-agent:abc\n",
+	} {
+		os.MkdirAll(filepath.Dir(filepath.Join(local, rel)), 0o700)
+		os.WriteFile(filepath.Join(local, rel), []byte(body), 0o600)
+	}
+	list, err := c.Skills("Moth")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var summary []string
+	for _, sk := range list {
+		summary = append(summary, sk.Source+":"+sk.Name+":"+strings.Join(sk.Assumes, "+"))
+	}
+	wantList := []string{"hermes:hermes-agent:", "learned:reminders:", "learned:shell:terminal+read_file",
+		"haunt:focus-session:", "haunt:morning-check-in:"}
+	if !slices.Equal(summary, wantList) {
+		t.Errorf("Skills = %v, want %v", summary, wantList)
+	}
+	if list[1].Description != "How they like reminders." || list[1].Dir != filepath.Join(local, "reminders") {
+		t.Errorf("learned skill = %+v", list[1])
+	}
+
+	// No skills at all: haunt's entry goes, the person's stays.
+	spec.Skills = nil
+	if _, err := c.EnsureProfile(spec); err != nil {
+		t.Fatal(err)
+	}
+	s = readSkills()
+	if d, _ := s["external_dirs"].([]any); len(d) != 1 || d[0] != "~/my-skills" {
+		t.Errorf("external_dirs with no skills = %v", s["external_dirs"])
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("%s is still there with no skills (%v)", dir, err)
 	}
 }

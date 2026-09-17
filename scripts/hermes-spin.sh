@@ -12,7 +12,10 @@
 #   - the reminder: filed by `intend`, spoken when due, then gone from
 #     the intentions list;
 #   - "what can you do?": only what a ghost can do (no files, commands,
-#     web or mail).
+#     web or mail);
+#   - the focus session: "did something first: skill_view, …" (it loaded
+#     haunt's focus-session skill), then an `intend` for the session,
+#     which shows in the intentions list.
 #
 # The demo's workdir, hermes profile included, is removed at the end, so
 # every spin starts from nothing. SPIN_OUT keeps the demo's log (default: a
@@ -72,6 +75,14 @@ sleep 30
 step "waiting for the reminder to come due"
 sleep 60
 haunt journal -intentions -state "$state"
+
+step "a focus session (haunt's skill)"
+# Length and subject are both given, so the skill has nothing to ask:
+# an ask would wait for a click nobody can make here.
+haunt say -ghost wisp "let's do a focus session: 25 minutes on the quarterly report"
+sleep 90
+haunt journal -intentions -state "$state"
+haunt journal -skills -state "$state" wisp
 
 step "the conversation, with reasons"
 haunt history -n 30 -why -state "$state"

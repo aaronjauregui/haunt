@@ -52,7 +52,7 @@ func cmdNew(args []string) error {
 }
 
 // personaGhost is the whole ghost as a personality: a manifest, a persona,
-// and a note about where the art goes.
+// one example skill, and a note about where the art goes.
 func personaGhost(name string) (map[string]string, string) {
 	return map[string]string{
 		"ghost.toml": fmt.Sprintf(`[ghost]
@@ -115,9 +115,41 @@ at least 64K.
   block in `+"`ghost.toml`"+` and add `+"`\"tools\"`"+` to the
   capabilities. Its tools reach the model through haunt, so there is
   nothing to write.
+- **Routines** are skills: a directory under `+"`skills/`"+` with a
+  `+"`SKILL.md`"+` that says, in plain words, when the routine applies and
+  which of the ghost's tools to use (`+"`mcp__haunt__ask`"+`,
+  `+"`mcp__haunt__intend`"+` …). The model sees each skill's name and
+  description (cut at 60 characters, so put the cue first), and reads the
+  rest when one fits. `+"`skills/wind-down`"+`
+  is an example; haunt adds its own (a morning check-in, a focus session),
+  and one here with the same name replaces haunt's. Only Markdown is
+  installed. Keep `+"`requires_toolsets: [mcp-haunt]`"+` in each.
 - **Logic of its own** — reactions, commands, state — means a brain:
   `+"`haunt new -brain <name>`"+` scaffolds one in Go.
 `, name, name),
+
+		"skills/wind-down/SKILL.md": `---
+name: wind-down
+description: "End of the day: note what is left for tomorrow"
+metadata:
+  hermes:
+    requires_toolsets: [mcp-haunt]
+---
+
+# Wind-down
+
+Use when they say they are done for the day, or on
+[haunt event] kind=session shape=late.
+
+1. Call mcp__haunt__intentions, and mention at most one thing still open.
+2. Ask with mcp__haunt__ask: "Anything to pick up tomorrow?", with the
+   choices "Yes" and "No, all done".
+3. On "Yes", ask mcp__haunt__ask_text what it is, then call
+   mcp__haunt__intend with it and delay_ms set to reach tomorrow morning.
+4. Say good night in a few words.
+
+If they are clearly still working, reply NO_REPLY and try nothing.
+`,
 	}, "cd " + name + " && haunt run ."
 }
 

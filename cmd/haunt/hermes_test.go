@@ -46,6 +46,14 @@ capabilities = ["message", "llm"]
 [persona]
 system = "`+persona+`"
 `)
+	// A skill of the ghost's own, and a script beside it that must not be
+	// installed.
+	kitchen := filepath.Join(gDir, "skills", "kitchen-watch")
+	if err := os.MkdirAll(kitchen, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(kitchen, "SKILL.md"), []byte("---\nname: kitchen-watch\ndescription: Mind the oven.\n---\n"), 0o644)
+	os.WriteFile(filepath.Join(kitchen, "check.sh"), []byte("#!/bin/sh\n"), 0o755)
 
 	const posX, posY = 100, 100
 	record := filepath.Join(dir, "session.jsonl")
@@ -210,6 +218,21 @@ system = "`+persona+`"
 		t.Errorf("platform_toolsets.api_server = %v, want haunt among them", pc.PlatformToolsets["api_server"])
 	}
 
+	// The gateway found haunt's skills and the ghost's, in the profile
+	// where a container would see them too.
+	sk := waitFakeLog(t, fakeLog, time.Second, func(e fakeEntry) bool { return e.Kind == "skills" })
+	if !slices.Equal(sk.Dirs, []string{hermes.SkillsDir}) || len(sk.Missing) > 0 {
+		t.Errorf("skills.external_dirs = %v (missing %v), want [%s]", sk.Dirs, sk.Missing, hermes.SkillsDir)
+	}
+	for _, want := range []string{"ghost/kitchen-watch", "haunt/focus-session", "haunt/morning-check-in"} {
+		if !slices.Contains(sk.Skills, want) {
+			t.Errorf("skills = %v, missing %s", sk.Skills, want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(profile, hermes.SkillsDir, "ghost", "kitchen-watch", "check.sh")); !os.IsNotExist(err) {
+		t.Errorf("a script was installed with the ghost's skill (%v)", err)
+	}
+
 	// 4. Stopping the ghost stops the gateway and its MCP server.
 	start := waitFakeLog(t, fakeLog, time.Second, func(e fakeEntry) bool { return e.Kind == "start" })
 	listening := waitFakeLog(t, fakeLog, time.Second, func(e fakeEntry) bool { return e.Kind == "listening" })
@@ -227,6 +250,20 @@ system = "`+persona+`"
 		t.Errorf("something still answers on %s", listening.Addr)
 	}
 	waitFakeLog(t, fakeLog, time.Second, func(e fakeEntry) bool { return e.Kind == "mcp_stopped" })
+
+	// `haunt journal -skills` reads the profile, with the ghost gone.
+	jc := exec.Command(bin, "journal", "-skills", "-state", stateDir, "wisp")
+	jc.Env = append(os.Environ(), "HAUNT_CONFIG_DIR="+cfgDir)
+	out, err = jc.CombinedOutput()
+	if err != nil {
+		t.Fatalf("haunt journal -skills: %v: %s", err, out)
+	}
+	for _, want := range []string{"Learned (it wrote these itself):\n  (none)", "From its package:\n  kitchen-watch: Mind the oven.",
+		"From haunt:\n  focus-session: "} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("journal -skills lacks %q:\n%s", want, out)
+		}
+	}
 
 	// The store, read directly now the ghost is gone: the errand, and the
 	// reasons for both turns.
@@ -322,6 +359,9 @@ func newHermesRig(t *testing.T, dir string, rules []fakeRule, extra string) herm
 	if err := os.MkdirAll(r.CfgDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// The profile's skills are installed read-only, which t.TempDir's
+	// cleanup cannot remove. Registered after the TempDir, so it runs first.
+	t.Cleanup(func() { exec.Command("chmod", "-R", "u+w", filepath.Join(dir, "hermes")).Run() })
 	build(t, r.Bin, ".")
 	fake := filepath.Join(dir, "fakehermes")
 	build(t, fake, "./testdata/fakehermes")
@@ -406,6 +446,9 @@ type fakeEntry struct {
 	IsError       bool              `json:"is_error"`
 	Error         string            `json:"error"`
 	Name          string            `json:"name"`
+	Dirs          []string          `json:"dirs"`
+	Skills        []string          `json:"skills"`
+	Missing       []string          `json:"missing"`
 }
 
 // waitFakeLog returns the first log entry matching, waiting up to d for it.
