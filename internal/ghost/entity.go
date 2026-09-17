@@ -133,7 +133,7 @@ type Fact struct {
 	//
 	// Nothing populates it yet. Its only consumer would be demoting a
 	// denied summary, which is deferred behind a measurement — see
-	// ROADMAP.md 10. The field goes in now on the strength of the migration
+	// docs/hermes-brain.md. The field goes in now on the strength of the migration
 	// argument alone: a format field is cheap today and a migration across
 	// installed ghosts later is what gets a direction deferred forever. If
 	// that demotion is never built, this is the field to question first.

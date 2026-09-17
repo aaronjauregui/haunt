@@ -12,11 +12,12 @@ there is no compatibility with SHIORI, SSTP or SakuraScript, and this runs
 on wlroots-based Wayland compositors (sway, Hyprland) and others that
 implement `zwlr_layer_shell_v1`.
 
-Four documents sit behind this one: `DESIGN.md` for what haunt is meant to
-be and why, `STATUS.md` for what exists and what was measured, `ROADMAP.md`
-for what to build next, and `BACKLOG.md` for the flat list of what is open.
-All four are development documents — user and ghost-author documentation is
-itself a roadmap item.
+Two documents sit behind this one: `DESIGN.md` for what haunt is meant to
+be and why, and `docs/hermes-brain.md` for the one large piece of planned
+work, which replaces the LLM path described below with
+[hermes-agent](https://github.com/nousresearch/hermes-agent) as the ghost's
+brain. Until that lands, everything in this file describes what the tree
+does today. The code is heavily commented and is the record of what exists.
 
 ## Try it
 
