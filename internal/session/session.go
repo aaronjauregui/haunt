@@ -274,6 +274,17 @@ func (m *Model) Observe(app, title string, at time.Time) []Fact {
 	return facts
 }
 
+// Stretch is how long the window in front now has been in front, as of
+// at: zero when nothing is (the person is away, or the window is one the
+// ghost ignores). The same stretch a dwell is measured on, so a title
+// change starts it again.
+func (m *Model) Stretch(at time.Time) time.Duration {
+	if m.app == "" && m.title == "" || m.since.IsZero() || at.Before(m.since) {
+		return 0
+	}
+	return at.Sub(m.since)
+}
+
 // Away ends the current stretch without recording anything: the screen was
 // locked, the desktop was bare, or the focused application is one the user
 // asked never to be watched. An ignored window must not extend a dwell, and

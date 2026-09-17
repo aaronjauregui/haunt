@@ -390,8 +390,9 @@ func readSSE(r io.Reader, fn func(event string, data []byte) bool) error {
 }
 
 // Messages reads back the last n entries of the ghost's session, oldest
-// first, for `haunt history`. Tool traffic is left out: it is the record of
-// how an answer was reached, and the history is what was said.
+// first, for `haunt history`. Tool traffic is not an entry of its own: it
+// is the record of how an answer was reached, and the history is what was
+// said. Hermes's own calls ride on the reply they led to (Message.Looked).
 func (c *Client) Messages(ctx context.Context, n int) ([]Message, error) {
 	id, err := c.Session(ctx)
 	if err != nil {
@@ -408,34 +409,100 @@ func (c *Client) Messages(ctx context.Context, n int) ([]Message, error) {
 	defer resp.Body.Close()
 	var out struct {
 		Data []struct {
-			Role      string          `json:"role"`
-			Content   json.RawMessage `json:"content"`
-			ToolCalls json.RawMessage `json:"tool_calls"`
-			Timestamp float64         `json:"timestamp"`
+			Role       string          `json:"role"`
+			Content    json.RawMessage `json:"content"`
+			ToolCallID string          `json:"tool_call_id"`
+			ToolCalls  []struct {
+				ID       string `json:"id"`
+				Function struct {
+					Name      string          `json:"name"`
+					Arguments json.RawMessage `json:"arguments"`
+				} `json:"function"`
+			} `json:"tool_calls"`
+			Timestamp float64 `json:"timestamp"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, fmt.Errorf("hermes: reading the history: %w", err)
 	}
 	msgs := make([]Message, 0, len(out.Data))
-	for _, m := range out.Data {
-		if m.Role != "user" && m.Role != "assistant" {
-			continue
+	var looked []Lookup
+	byCall := map[string]int{}
+	last := -1 // the turn's latest reply, which its lookups go on
+	endTurn := func() {
+		if last >= 0 {
+			msgs[last].Looked = looked
 		}
-		var text string
-		if json.Unmarshal(m.Content, &text) != nil {
-			text = string(m.Content)
+		looked, byCall, last = nil, map[string]int{}, -1
+	}
+	for _, m := range out.Data {
+		text := rawText(m.Content)
+		switch m.Role {
+		case "tool":
+			if i, ok := byCall[m.ToolCallID]; ok {
+				looked[i].Result = clip(text, lookupResult)
+			}
+			continue
+		case "user":
+			endTurn()
+		case "assistant":
+			for _, tc := range m.ToolCalls {
+				if tc.Function.Name == "" || strings.HasPrefix(tc.Function.Name, "mcp__haunt__") {
+					continue
+				}
+				byCall[tc.ID] = len(looked)
+				looked = append(looked, Lookup{
+					Tool: tc.Function.Name,
+					Args: clip(rawText(tc.Function.Arguments), lookupArgs),
+				})
+			}
+		default:
+			continue
 		}
 		if strings.TrimSpace(text) == "" {
 			continue
 		}
 		sec := int64(m.Timestamp)
-		msgs = append(msgs, Message{
+		msg := Message{
 			Role: m.Role,
 			Text: text,
 			Time: time.Unix(sec, int64((m.Timestamp-float64(sec))*1e9)),
-		})
+		}
+		if m.Role == "assistant" {
+			msg.Interim = len(m.ToolCalls) > 0
+			last = len(msgs)
+		}
+		msgs = append(msgs, msg)
 	}
+	endTurn()
 	// "latest" pages back from the newest and still answers oldest first.
 	return msgs, nil
+}
+
+// How much of a lookup the history shows.
+const (
+	lookupArgs   = 120
+	lookupResult = 160
+)
+
+// rawText is a JSON value as text: a string's contents, or anything else
+// as written.
+func rawText(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	if string(raw) == "null" {
+		return ""
+	}
+	return string(raw)
+}
+
+// clip shortens s to one line of at most n runes.
+func clip(s string, n int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > n {
+		return string(r[:n-1]) + "…"
+	}
+	return s
 }

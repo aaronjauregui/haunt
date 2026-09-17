@@ -11,6 +11,7 @@ import (
 
 	"github.com/aaronjauregui/haunt/internal/hermes"
 	"github.com/aaronjauregui/haunt/internal/proto"
+	"github.com/aaronjauregui/haunt/internal/session"
 	"github.com/aaronjauregui/haunt/internal/wlclient"
 )
 
@@ -236,7 +237,7 @@ func TestHermesNeedsTheLLMCapability(t *testing.T) {
 }
 
 // While a turn is in flight, the person's words wait their turn and an
-// unprompted event is dropped.
+// idle event, which is only true in the moment, is dropped.
 func TestHermesOneTurnAtATime(t *testing.T) {
 	_, b, ft := hermesGhost(t, 5)
 	release := make(chan struct{})
@@ -263,6 +264,86 @@ func TestHermesOneTurnAtATime(t *testing.T) {
 	}
 }
 
+// What is still worth raising after a turn waits for it: an occasion is
+// sent once the turn in flight ends, a newer word from the same neighbour
+// replaces an older one, and nothing waits forever.
+func TestHermesEventsWaitForTheTurn(t *testing.T) {
+	g, b, ft := hermesGhost(t, 5)
+	release := make(chan struct{})
+	ft.reply = func(ctx context.Context, req hermes.TurnRequest) (hermes.Reply, error) {
+		if req.Input == "first" {
+			<-release
+		}
+		return hermes.Reply{Text: hermes.NoReply}, nil
+	}
+	g.markPrompted()
+	b.Deliver(proto.Event{Type: proto.EventMessage, Text: "first"})
+	waitBusy(t, b)
+	g.endResponding()
+	b.Deliver(proto.Event{Type: proto.EventCron, Name: "morning"})
+	b.Deliver(proto.Event{Type: proto.EventMessage, From: "Moth", Text: "boo"})
+	b.Deliver(proto.Event{Type: proto.EventMessage, From: "Moth", Text: "boo"})
+	b.Deliver(proto.Event{Type: proto.EventIdle})
+	b.deferMu.Lock()
+	n := len(b.deferred)
+	// One of them has been waiting a while, and says so when sent.
+	b.deferred[0].at = time.Now().Add(-3 * time.Minute)
+	b.deferMu.Unlock()
+	if n != 2 {
+		t.Errorf("%d turns waiting, want the occasion and one told", n)
+	}
+	// Charged on arrival: the first opens a paid chain, which the second
+	// rides; idle was never charged.
+	if got := spent(g.curiosity); got != 1 {
+		t.Errorf("%d wakes charged, want 1", got)
+	}
+	close(release)
+	for range 3 {
+		waitTurn(t, ft)
+	}
+	time.Sleep(50 * time.Millisecond)
+	got := ft.sent()
+	want := []string{"first", "[haunt event] kind=occasion name=morning waited=3m", "[haunt event] kind=told from=Moth text=boo"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("sent %q, want %q", got, want)
+	}
+	// Both were silent, so both were refunded.
+	if got := spent(g.curiosity); got != 0 {
+		t.Errorf("%d wakes still charged after silence", got)
+	}
+
+	// Too old to raise: dropped, and refunded.
+	release = make(chan struct{})
+	g.markPrompted()
+	b.Deliver(proto.Event{Type: proto.EventMessage, Text: "first"})
+	waitBusy(t, b)
+	g.endResponding()
+	b.Deliver(proto.Event{Type: proto.EventCron, Name: "evening"})
+	b.deferMu.Lock()
+	b.deferred[0].at = time.Now().Add(-deferMaxAge - time.Minute)
+	b.deferMu.Unlock()
+	close(release)
+	waitTurn(t, ft)
+	time.Sleep(50 * time.Millisecond)
+	if got := ft.sent(); len(got) != 4 {
+		t.Errorf("sent %q, want the stale occasion dropped", got)
+	}
+	if got := spent(g.curiosity); got != 0 {
+		t.Errorf("a dropped wake stayed charged: %d", got)
+	}
+}
+
+func waitBusy(t *testing.T, b *hermesBrain) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for !b.busy.Load() {
+		if time.Now().After(deadline) {
+			t.Fatal("the turn never started")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 // Envelopes carry fields, not instructions.
 func TestHermesEnvelopes(t *testing.T) {
 	g, b, ft := hermesGhost(t, 5)
@@ -279,6 +360,15 @@ func TestHermesEnvelopes(t *testing.T) {
 	b.Deliver(proto.Event{Type: proto.EventSession, Session: &proto.SessionFact{Kind: "dwell", App: "nvim", Title: "x.go", Minutes: 42}})
 	if in := waitTurn(t, ft); in != `[haunt event] kind=session shape=dwell app=nvim title=x.go minutes=42` {
 		t.Errorf("session sent %q", in)
+	}
+	// Idle says how long the window in front has been there.
+	g.endResponding()
+	g.sess = session.New(session.Config{})
+	g.sess.Observe("nvim", "x.go", time.Now().Add(-42*time.Minute))
+	g.noteWindow("nvim", "x.go")
+	b.Deliver(proto.Event{Type: proto.EventIdle})
+	if in := waitTurn(t, ft); in != `[haunt event] kind=idle minutes=2 last_window="nvim: x.go" seen_for=42m` {
+		t.Errorf("idle sent %q", in)
 	}
 	g.endResponding()
 	g.markObliged()
@@ -383,4 +473,15 @@ func mustGet(t *testing.T, g *Ghost, key string) string {
 func itoa(n int) string {
 	b, _ := json.Marshal(n)
 	return string(b)
+}
+
+func TestEnvelopeMinutes(t *testing.T) {
+	for d, want := range map[time.Duration]string{
+		0: "", 59 * time.Second: "", 42*time.Minute + 5*time.Second: "42m",
+		60 * time.Minute: "1h0m", 125 * time.Minute: "2h5m",
+	} {
+		if got := minutes(d); got != want {
+			t.Errorf("minutes(%s) = %q, want %q", d, got, want)
+		}
+	}
 }

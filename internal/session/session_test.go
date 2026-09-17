@@ -486,3 +486,24 @@ func TestSnapshotHoldsNoTitles(t *testing.T) {
 		}
 	}
 }
+
+// Stretch is the time in front of the current window, for the idle
+// envelope: timed like a dwell, and nothing while away.
+func TestStretch(t *testing.T) {
+	m := New(Config{})
+	if d := m.Stretch(t0); d != 0 {
+		t.Errorf("stretch before any window = %s", d)
+	}
+	_, at := poll(m, "nvim", "session.go", t0, 42*time.Minute)
+	if d := m.Stretch(at); d != 42*time.Minute {
+		t.Errorf("stretch = %s, want 42m", d)
+	}
+	m.Observe("nvim", "main.go", at)
+	if d := m.Stretch(at.Add(time.Minute)); d != time.Minute {
+		t.Errorf("stretch after a title change = %s, want 1m", d)
+	}
+	m.Away(at.Add(2 * time.Minute))
+	if d := m.Stretch(at.Add(3 * time.Minute)); d != 0 {
+		t.Errorf("stretch while away = %s", d)
+	}
+}

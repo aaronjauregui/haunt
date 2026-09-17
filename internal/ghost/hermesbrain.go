@@ -32,9 +32,10 @@ import (
 // what to make of an event and whether to say anything at all.
 //
 // One turn runs at a time. The person's words queue behind a turn in
-// flight; anything unprompted that arrives meanwhile is dropped, because by
-// the time the turn ends it is stale and the ghost has just been talking
-// anyway.
+// flight. Something unprompted that arrives meanwhile waits too, if it is
+// still worth raising once the turn is over (see deferrable); what is only
+// true in the moment — the person going idle, a neighbour's remark — is
+// dropped, because by then it is stale and the ghost has just been talking.
 type hermesBrain struct {
 	g      *Ghost
 	turner hermes.Turner
@@ -45,6 +46,12 @@ type hermesBrain struct {
 	turns chan hermesTurn
 	busy  atomic.Bool
 	done  chan struct{}
+
+	// deferred is what arrived during a turn and waits for the ghost to be
+	// free, oldest first. deferMu also covers the moment a turn ends, so an
+	// event cannot be put here just after the worker last looked.
+	deferMu  sync.Mutex
+	deferred []deferredTurn
 
 	// Only the bus's delivery goroutine touches these, one event at a time.
 	lastPoke    time.Time
@@ -69,6 +76,23 @@ type hermesTurn struct {
 	// screen.
 	after func(shown bool)
 }
+
+// deferredTurn is an unprompted turn waiting for the one in flight.
+type deferredTurn struct {
+	// key names what it is about; a newer turn with the same key replaces
+	// it, since only the latest word on one subject is worth sending.
+	key  string
+	turn hermesTurn
+	at   time.Time
+}
+
+// Waiting unprompted turns: how many, and for how long. Past the age, the
+// moment has gone; an errand is still carried on every turn's context
+// (turnContext), so a reminder that expires here is not lost.
+const (
+	maxDeferred = 4
+	deferMaxAge = 10 * time.Minute
+)
 
 // hermesQueue bounds the person's words waiting behind a turn. Past it,
 // somebody is typing faster than any model answers, and the oldest-first
@@ -134,7 +158,46 @@ func newHermesBrain(g *Ghost, turner hermes.Turner, stop func() error) *hermesBr
 func (b *hermesBrain) work() {
 	defer close(b.done)
 	for t := range b.turns {
+		b.busy.Store(true)
 		b.g.guard(hlog.Brain, "a hermes turn", func() { b.run(t) })
+		b.deferMu.Lock()
+		b.busy.Store(false)
+		if len(b.turns) == 0 {
+			b.sendDeferredLocked(time.Now())
+		}
+		b.deferMu.Unlock()
+	}
+}
+
+// sendDeferredLocked queues the oldest waiting turn that is still fresh,
+// refunding the ones that are not.
+func (b *hermesBrain) sendDeferredLocked(now time.Time) {
+	for len(b.deferred) > 0 {
+		d := b.deferred[0]
+		b.deferred = b.deferred[1:]
+		waited := now.Sub(d.at)
+		if waited > deferMaxAge {
+			b.g.log.Debug(hlog.Brain, "%s dropped: it waited %s for a turn to end", d.key, waited.Round(time.Second))
+			d.turn.refund()
+			continue
+		}
+		// Charging checked this when it arrived; a game may have started
+		// since.
+		if b.g.desktop != nil && b.g.desktop.Fullscreen() {
+			b.g.log.Debug(hlog.Brain, "%s dropped: something is fullscreen", d.key)
+			d.turn.refund()
+			continue
+		}
+		// The model should know it is hearing about this late.
+		if m := minutes(waited); m != "" {
+			d.turn.input += " waited=" + m
+		}
+		select {
+		case b.turns <- d.turn:
+		default:
+			d.turn.refund()
+		}
+		return
 	}
 }
 
@@ -151,7 +214,7 @@ func (b *hermesBrain) Deliver(e proto.Event) error {
 				g.log.Warn(hlog.Store, "recording the first boot: %v", err)
 			}
 		}
-		b.unprompted("boot", hermes.Envelope("boot", hermes.F("first_time", !met)), nil)
+		b.unprompted("boot", "boot", hermes.Envelope("boot", hermes.F("first_time", !met)), nil)
 
 	case proto.EventClick:
 		if !b.lastPoke.IsZero() && e.Time.Sub(b.lastPoke) <= doubleClick {
@@ -170,23 +233,24 @@ func (b *hermesBrain) Deliver(e proto.Event) error {
 			return nil
 		}
 		if e.From != "" {
-			b.unprompted("told", hermes.Envelope("told",
+			b.unprompted("told", "told:"+e.From+"\x00"+text, hermes.Envelope("told",
 				hermes.F("from", e.From), hermes.F("text", text)), nil)
 			return nil
 		}
 		b.person(text)
 
 	case proto.EventIdle:
-		b.unprompted("idle", hermes.Envelope("idle",
+		b.unprompted("idle", "", hermes.Envelope("idle",
 			hermes.F("minutes", int(g.idleTimeout()/time.Minute)),
-			hermes.F("last_window", g.currentWindow().line())), nil)
+			hermes.F("last_window", g.currentWindow().line()),
+			hermes.F("seen_for", minutes(g.windowStretch(time.Now())))), nil)
 
 	case proto.EventSession:
 		if e.Session == nil {
 			return nil
 		}
 		s := e.Session
-		b.unprompted("session", hermes.Envelope("session",
+		b.unprompted("session", "session", hermes.Envelope("session",
 			hermes.F("shape", s.Kind),
 			hermes.F("app", s.App),
 			hermes.F("title", s.Title),
@@ -206,14 +270,14 @@ func (b *hermesBrain) Deliver(e proto.Event) error {
 			})
 			return nil
 		}
-		b.unprompted("occasion", hermes.Envelope("occasion", hermes.F("name", e.Name)), nil)
+		b.unprompted("occasion", "occasion:"+e.Name, hermes.Envelope("occasion", hermes.F("name", e.Name)), nil)
 
 	case proto.EventIntention:
 		it, ok := g.intentionNamed(e.Name)
 		if !ok {
 			return nil
 		}
-		b.unprompted("intention", hermes.Envelope("intention_due",
+		b.unprompted("intention", "intention:"+it.Name, hermes.Envelope("intention_due",
 			hermes.F("name", it.Name),
 			hermes.F("text", it.Text),
 			hermes.F("asked", it.Asked)),
@@ -234,7 +298,7 @@ func (b *hermesBrain) Deliver(e proto.Event) error {
 			return nil
 		}
 		b.lastReacted = e.Time
-		b.unprompted("observed", hermes.Envelope("observed",
+		b.unprompted("observed", "", hermes.Envelope("observed",
 			hermes.F("from", e.From),
 			hermes.F("action", e.Name),
 			hermes.F("text", e.Text)), nil)
@@ -255,9 +319,13 @@ func (b *hermesBrain) person(text string) {
 // driver will pay for that. The allowance is charged here, before sending
 // and at the moment the event arrived, so a slow model cannot turn a
 // response into an interruption; it is refunded if the model says nothing.
-func (b *hermesBrain) unprompted(what, envelope string, after func(bool)) {
+//
+// key says whether the event can wait for a turn in flight: empty means it
+// is only true now and is dropped instead, and otherwise it names what the
+// event is about (deferredTurn).
+func (b *hermesBrain) unprompted(what, key, envelope string, after func(bool)) {
 	g := b.g
-	if b.busy.Load() || len(b.turns) > 0 {
+	if key == "" && b.inTurn() {
 		g.log.Debug(hlog.Brain, "%s dropped: the ghost is already in a turn", what)
 		return
 	}
@@ -265,15 +333,51 @@ func (b *hermesBrain) unprompted(what, envelope string, after func(bool)) {
 		g.log.Debug(hlog.Brain, "%s dropped: the llm capability is not granted", what)
 		return
 	}
+	// Not under deferMu: charging reaches the room's allowance.
 	ok, refund := g.chargeInitiative(what)
 	if !ok {
 		return
 	}
+	t := hermesTurn{input: envelope, refund: refund, after: after}
+	b.deferMu.Lock()
+	defer b.deferMu.Unlock()
+	if b.inTurn() {
+		if key == "" {
+			g.log.Debug(hlog.Brain, "%s dropped: the ghost is already in a turn", what)
+			refund()
+			return
+		}
+		b.deferLocked(key, t)
+		return
+	}
 	select {
-	case b.turns <- hermesTurn{input: envelope, refund: refund, after: after}:
+	case b.turns <- t:
 	default:
 		refund()
 	}
+}
+
+// inTurn is whether a turn is running or waiting to.
+func (b *hermesBrain) inTurn() bool {
+	return b.busy.Load() || len(b.turns) > 0
+}
+
+// deferLocked keeps t until the turn in flight is over.
+func (b *hermesBrain) deferLocked(key string, t hermesTurn) {
+	for i, d := range b.deferred {
+		if d.key == key {
+			d.turn.refund()
+			b.deferred = append(b.deferred[:i], b.deferred[i+1:]...)
+			break
+		}
+	}
+	if len(b.deferred) >= maxDeferred {
+		b.g.log.Debug(hlog.Brain, "%s dropped: too much is waiting for a turn to end", b.deferred[0].key)
+		b.deferred[0].turn.refund()
+		b.deferred = b.deferred[1:]
+	}
+	b.g.log.Debug(hlog.Brain, "%s waits for the turn in flight", key)
+	b.deferred = append(b.deferred, deferredTurn{key: key, turn: t, at: time.Now()})
 }
 
 // Menu entries. The menu is the driver's, and everything on it is either
@@ -311,8 +415,6 @@ func (b *hermesBrain) menu() {
 // run is one turn, start to finish.
 func (b *hermesBrain) run(t hermesTurn) {
 	g := b.g
-	b.busy.Store(true)
-	defer b.busy.Store(false)
 	if t.refund == nil {
 		t.refund = noRefund
 	}
@@ -582,6 +684,31 @@ func (g *Ghost) idleTimeout() time.Duration {
 		return time.Duration(g.opts.IdleTimeoutMS) * time.Millisecond
 	}
 	return 2 * time.Minute
+}
+
+// windowStretch is how long the focused window has been in front, or zero
+// when the ghost is not watching or sees nothing.
+func (g *Ghost) windowStretch(now time.Time) time.Duration {
+	g.sessMu.Lock()
+	defer g.sessMu.Unlock()
+	if g.sess == nil {
+		return 0
+	}
+	return g.sess.Stretch(now)
+}
+
+// minutes renders a duration for an envelope as "42m" or "2h5m", leaving
+// out anything under a minute.
+func minutes(d time.Duration) string {
+	m := int(d / time.Minute)
+	switch {
+	case m <= 0:
+		return ""
+	case m < 60:
+		return fmt.Sprintf("%dm", m)
+	default:
+		return fmt.Sprintf("%dh%dm", m/60, m%60)
+	}
 }
 
 // intentionNamed finds one standing intention.

@@ -53,4 +53,19 @@ type Message struct {
 	Role string
 	Text string
 	Time time.Time
+	// Looked is what hermes itself did on the way to a reply, for `haunt
+	// history -why`: its memory, session search and skill calls, with
+	// what they returned. The ghost's own tools are left out; the driver
+	// records those.
+	Looked []Lookup
+	// Interim is a reply written alongside tool calls, before the turn's
+	// last word.
+	Interim bool
+}
+
+// Lookup is one of hermes's own tool calls, and its result, both cut short.
+type Lookup struct {
+	Tool   string
+	Args   string
+	Result string
 }

@@ -90,15 +90,18 @@ func cmdHistory(args []string) error {
 			text = "(said nothing)"
 		}
 		fmt.Printf("%-6s %s\n", who+":", text)
-		if !*why || t.Role != "assistant" {
+		if !*why || t.Role != "assistant" || t.Interim {
+			// An interim line is part of the turn whose last reply
+			// carries the reasons.
 			continue
 		}
 		w, ok := traceFor(traces, t.Text)
-		if !ok {
+		if ok {
+			printWhy(w)
+		} else {
 			fmt.Println("       (no reasons kept for this one — it is older than the trace)")
-			continue
 		}
-		printWhy(w)
+		printLooked(t.Looked)
 	}
 	return nil
 }
@@ -122,8 +125,24 @@ func hermesHistory(name, session string, n int) ([]hermes.Message, error) {
 	if err := c.Health(ctx); err != nil {
 		return nil, fmt.Errorf("%s's hermes gateway is not running, and the conversation is kept there (%v)", name, err)
 	}
-	// Twice as many messages as turns: a turn is a line each way.
-	return c.Messages(ctx, 2*n)
+	// A turn is a line each way, and a tool call and its result are two
+	// more; the caller keeps the last n.
+	return c.Messages(ctx, 6*n)
+}
+
+// printLooked lists what hermes consulted or changed on its own before a
+// reply: its memory, earlier sessions, its skills.
+func printLooked(looked []hermes.Lookup) {
+	for _, l := range looked {
+		line := "       · hermes used " + l.Tool
+		if l.Args != "" && l.Args != "{}" {
+			line += " " + l.Args
+		}
+		if l.Result != "" {
+			line += "\n           → " + l.Result
+		}
+		fmt.Println(line)
+	}
 }
 
 // traceFor finds the reasons behind a reply, and consumes the match so two
@@ -140,8 +159,9 @@ func traceFor(traces []ghost.Why, reply string) (ghost.Why, bool) {
 	return ghost.Why{}, false
 }
 
-// printWhy renders one reply's reasons under the line it explains. What
-// hermes recalled and was prompted with is in hermes's session, not here.
+// printWhy renders one reply's reasons under the line it explains, from
+// the driver's trace. What hermes looked up is in its session
+// (printLooked); what it was prompted with is not given out by its API.
 func printWhy(w ghost.Why) {
 	const indent = "       "
 	switch {

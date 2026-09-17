@@ -82,9 +82,14 @@ func newFakeHermes(t *testing.T) (*fakeHermes, *httptest.Server) {
 		}
 		w.Write([]byte(`{"object":"list","data":[
 			{"role":"user","content":"hello","timestamp":1789614336.5},
-			{"role":"assistant","content":"","tool_calls":[{}]},
-			{"role":"tool","content":"{\"result\":\"ok\"}"},
-			{"role":"assistant","content":"hi there","timestamp":1789614337}]}`))
+			{"role":"assistant","content":"Let me think.","tool_calls":[
+				{"id":"c1","type":"function","function":{"name":"session_search","arguments":"{\"query\": \"oven\"}"}},
+				{"id":"c2","type":"function","function":{"name":"mcp__haunt__face","arguments":"{}"}}]},
+			{"role":"tool","tool_call_id":"c1","content":"{\"results\": [\"they burned the bread\"]}"},
+			{"role":"tool","tool_call_id":"c2","content":"{\"result\":\"ok\"}"},
+			{"role":"assistant","content":"hi there","timestamp":1789614337},
+			{"role":"user","content":"bye"},
+			{"role":"assistant","content":"bye!"}]}`))
 	}))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -226,8 +231,13 @@ func TestMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(msgs) != 2 || msgs[0].Text != "hello" || msgs[1].Text != "hi there" || msgs[0].Time.Unix() != 1789614336 {
-		t.Errorf("messages %+v", msgs)
+	if len(msgs) != 5 || msgs[0].Text != "hello" || msgs[2].Text != "hi there" || msgs[0].Time.Unix() != 1789614336 ||
+		!msgs[1].Interim || msgs[2].Interim {
+		t.Fatalf("messages %+v", msgs)
+	}
+	want := []Lookup{{Tool: "session_search", Args: `{"query": "oven"}`, Result: `{"results": ["they burned the bread"]}`}}
+	if !slices.Equal(msgs[2].Looked, want) || msgs[1].Looked != nil || msgs[4].Looked != nil {
+		t.Errorf("lookups %+v, want %+v on the first turn's last reply only", msgs[2].Looked, want)
 	}
 }
 
