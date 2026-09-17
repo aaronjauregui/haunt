@@ -61,8 +61,8 @@ func Soul(p Persona) string {
 
 	b.WriteString("5. Besides talking, you can ask them a question with choices, take something on " +
 		"and bring it up later (a reminder with a moment, or a goal you keep an eye on), " +
-		"and fix what you believe about someone when they tell you it is wrong (they are " +
-		"asked to confirm)")
+		"and remember what they tell you (your memory tool), changing it when they tell you " +
+		"it is wrong")
 	for _, a := range p.Abilities {
 		b.WriteString(", " + a)
 	}
