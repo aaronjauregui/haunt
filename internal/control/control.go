@@ -5,11 +5,13 @@ package control
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/aaronjauregui/haunt/internal/hlog"
@@ -46,12 +48,21 @@ func SocketPath(name string) (string, error) {
 	return filepath.Join(dir, name+".sock"), nil
 }
 
-// Server accepts inbound events and forwards them to a publish function.
+// Server accepts inbound events and forwards them to a publish function,
+// and answers tool requests from whatever SetTools installed.
 type Server struct {
 	ln      net.Listener
 	path    string
 	publish func(proto.Event) error
 	log     *hlog.Logger
+
+	// ctx is cancelled by Close, which is how a tool call still running
+	// when the ghost shuts down is told to stop.
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	mu    sync.RWMutex
+	tools Tools
 }
 
 // Listen starts the control server for the named ghost. Stale sockets from
@@ -73,7 +84,8 @@ func Listen(name string, publish func(proto.Event) error, log *hlog.Logger) (*Se
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{ln: ln, path: path, publish: publish, log: log}
+	ctx, cancel := context.WithCancel(context.Background())
+	s := &Server{ln: ln, path: path, publish: publish, log: log, ctx: ctx, cancel: cancel}
 	go s.accept()
 	return s, nil
 }
@@ -89,7 +101,9 @@ func (s *Server) accept() {
 }
 
 // serve reads JSONL events; each line is either accepted and published or
-// answered with an error line. The reply is "ok" or "error: ...".
+// answered with an error line. The reply is "ok" or "error: ...". A tool
+// request (see tools.go) is answered in its own format and ends the
+// connection.
 // idleTimeout is how long a connected client may say nothing before the
 // connection is dropped. Generous: `haunt say` writes immediately, and the
 // only thing this has to catch is a client that never writes at all.
@@ -110,6 +124,10 @@ func (s *Server) serve(conn net.Conn) {
 		if len(sc.Bytes()) == 0 {
 			continue
 		}
+		if isRequest(sc.Bytes()) {
+			s.serveRequest(conn, sc.Bytes())
+			return
+		}
 		reply := "ok"
 		var e proto.Event
 		if err := json.Unmarshal(sc.Bytes(), &e); err != nil {
@@ -128,6 +146,7 @@ func (s *Server) serve(conn net.Conn) {
 
 // Close stops the server and removes the socket file.
 func (s *Server) Close() {
+	s.cancel()
 	s.ln.Close()
 	os.Remove(s.path)
 }
@@ -141,7 +160,7 @@ func Send(name string, e proto.Event) error {
 	}
 	conn, err := net.Dial("unix", path)
 	if err != nil {
-		return fmt.Errorf("ghost %q does not appear to be running: %w", name, err)
+		return &NotRunningError{Ghost: name, Err: err}
 	}
 	defer conn.Close()
 	b, err := json.Marshal(e)

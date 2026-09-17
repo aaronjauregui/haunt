@@ -70,6 +70,8 @@ func main() {
 		err = cmdJournal(os.Args[2:])
 	case "history":
 		err = cmdHistory(os.Args[2:])
+	case "mcp-serve":
+		err = cmdMCPServe(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -107,7 +109,8 @@ func usage() {
   haunt perms [name] | perms grant|revoke <capability> [name]
   haunt shush [duration] | unshush
   haunt journal [-entities|-intentions] [name | -state DIR]
-  haunt history [-n N] [-why [-prompt]] [name | -state DIR]`)
+  haunt history [-n N] [-why [-prompt]] [name | -state DIR]
+  haunt mcp-serve -ghost NAME`)
 }
 
 func cmdRun(args []string) error {
