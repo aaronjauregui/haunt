@@ -34,36 +34,45 @@ const lookQuestion = "In one sentence, what is the person doing in this window? 
 
 // execLook captures the focused window and asks the vision model about it.
 func (g *Ghost) execLook(in proto.Intent) {
-	tag := in.Tag
-	// The capability was settled before the lock (see consent.go).
-	if g.aiSvc == nil || !g.aiSvc.VisionEnabled() {
-		g.publishAIError("no vision model configured in the haunt config", tag)
+	answer, app, err := g.look(in.Text)
+	if err != nil {
+		g.publishAIError(err.Error(), in.Tag)
 		return
 	}
+	g.publish(proto.Event{
+		Type: proto.EventAILook,
+		Text: answer,
+		Name: app,
+		Tag:  in.Tag,
+	})
+}
+
+// look is execLook with the answer handed back: what the vision model said
+// and which application it was shown, or why it was not shown anything.
+func (g *Ghost) look(asked string) (answer, app string, err error) {
+	// The capability was settled before the lock (see consent.go).
+	if g.aiSvc == nil || !g.aiSvc.VisionEnabled() {
+		return "", "", fmt.Errorf("no vision model configured in the haunt config")
+	}
 	if g.desktop == nil || g.desktop.Mechanism() == "none" {
-		g.publishAIError("no compositor IPC, so there is no way to know what to look at", tag)
-		return
+		return "", "", fmt.Errorf("no compositor IPC, so there is no way to know what to look at")
 	}
 	if g.desktop.Fullscreen() {
 		// Whatever is fullscreen is a game or a film, and interrupting it
 		// is what the rest of the design already refuses to do.
-		g.publishAIError("not while something is fullscreen", tag)
-		return
+		return "", "", fmt.Errorf("not while something is fullscreen")
 	}
 
 	win, err := g.desktop.ActiveWindow()
 	if err != nil {
-		g.publishAIError("cannot see the screen: "+err.Error(), tag)
-		return
+		return "", "", fmt.Errorf("cannot see the screen: %w", err)
 	}
 	if win.W <= 0 || win.H <= 0 {
-		g.publishAIError("nothing is focused", tag)
-		return
+		return "", "", fmt.Errorf("nothing is focused")
 	}
 	if g.ignoredApp(win.AppID) {
 		g.log.Info(hlog.Screen, "not looking at %s: it is on the ignore list", win.AppID)
-		g.publishAIError("that application is on the ignore list", tag)
-		return
+		return "", "", fmt.Errorf("that application is on the ignore list")
 	}
 
 	// Visibly indicated while active, as the design requires: a ghost that
@@ -73,19 +82,17 @@ func (g *Ghost) execLook(in proto.Intent) {
 	png, err := captureWindow(win.X, win.Y, win.W, win.H)
 	if err != nil {
 		g.log.Warn(hlog.Screen, "capture: %v", err)
-		g.publishAIError("cannot capture the screen: "+err.Error(), tag)
-		return
+		return "", "", fmt.Errorf("cannot capture the screen: %w", err)
 	}
 
 	question := lookQuestion
-	if strings.TrimSpace(in.Text) != "" {
-		question = in.Text
+	if strings.TrimSpace(asked) != "" {
+		question = asked
 	}
-	answer, err := g.aiSvc.Look(context.Background(), question, png)
+	answer, err = g.aiSvc.Look(context.Background(), question, png)
 	if err != nil {
 		g.log.Warn(hlog.Screen, "look: %v", err)
-		g.publishAIError(err.Error(), tag)
-		return
+		return "", "", err
 	}
 
 	// The answer goes to the brain, not to the balloon: what the ghost
@@ -93,12 +100,7 @@ func (g *Ghost) execLook(in proto.Intent) {
 	// have a terminal open" unprompted is the tiresome version of this
 	// feature.
 	g.hideBalloon()
-	g.publish(proto.Event{
-		Type: proto.EventAILook,
-		Text: answer,
-		Name: win.AppID,
-		Tag:  tag,
-	})
+	return answer, win.AppID, nil
 }
 
 // captureWindow grabs one window with grim. Screen capture has no client

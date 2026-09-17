@@ -1,0 +1,63 @@
+event: run.started
+data: {"user_message": {"role": "user", "content": "Can you remind me in ten minutes to check the oven?"}, "runtime": {"provider": "", "model": "", "route_source": "global", "requested": {"provider": "", "model": ""}}, "session_id": "haunt-fake", "run_id": "run_0742ac2cc506455e944becf171c5ad7b", "seq": 1, "ts": 1789614365.38744}
+
+event: message.started
+data: {"message": {"id": "msg_104bee2cbdd54cb682a6abf2745f346d", "role": "assistant"}, "session_id": "haunt-fake", "run_id": "run_0742ac2cc506455e944becf171c5ad7b", "seq": 2, "ts": 1789614365.3874488}
+
+event: tool.started
+data: {"message_id": "msg_104bee2cbdd54cb682a6abf2745f346d", "tool_name": "mcp__haunt__intend", "preview": "check the oven", "args": {"text": "check the oven", "delay_ms": 600000}, "session_id": "haunt-fake", "run_id": "run_0742ac2cc506455e944becf171c5ad7b", "seq": 3, "ts": 1789614366.0214152}
+
+event: tool.completed
+data: {"message_id": "msg_104bee2cbdd54cb682a6abf2745f346d", "tool_name": "mcp__haunt__intend", "preview": null, "args": null, "session_id": "haunt-fake", "run_id": "run_0742ac2cc506455e944becf171c5ad7b", "seq": 4, "ts": 1789614366.0290444}
+
+event: assistant.delta
+data: {"message_id": "msg_104bee2cbdd54cb682a6abf2745f346d", "delta": "\n\nDone", "session_id": "haunt-fake", "run_id": "run_0742ac2cc506455e944becf171c5ad7b", "seq": 5, "ts": 1789614366.0338612}
+
+event: assistant.delta
+data: {"message_id": "msg_104bee2cbdd54cb682a6abf2745f346d", "delta": ". I'", "session_id": "haunt-fake", "run_id": "run_0742ac2cc506455e944becf171c5ad7b", "seq": 6, "ts": 1789614366.0341337}
+
+event: assistant.delta
+data: {"message_id": "msg_104bee2cbdd54cb682a6abf2745f346d", "delta": "ll r", "session_id": "haunt-fake", "run_id": "run_0742ac2cc506455e944becf171c5ad7b", "seq": 7, "ts": 1789614366.0343885}
+
+event: assistant.delta
+data: {"message_id": "msg_104bee2cbdd54cb682a6abf2745f346d", "delta": "emin", "session_id": "haunt-fake", "run_id": "run_0742ac2cc506455e944becf171c5ad7b", "seq": 8, "ts": 1789614366.0346239}
+
+event: assistant.delta
+data: {"message_id": "msg_104bee2cbdd54cb682a6abf2745f346d", "delta": "d yo", "session_id": "haunt-fake", "run_id": "run_0742ac2cc506455e944becf171c5ad7b", "seq": 9, "ts": 1789614366.034851}
+
+event: assistant.delta
+data: {"message_id": "msg_104bee2cbdd54cb682a6abf2745f346d", "delta": "u ab", "session_id": "haunt-fake", "run_id": "run_0742ac2cc506455e944becf171c5ad7b", "seq": 10, "ts": 1789614366.035058}
+
+event: assistant.delta
+data: {"message_id": "msg_104bee2cbdd54cb682a6abf2745f346d", "delta": "out ", "session_id": "haunt-fake", "run_id": "run_0742ac2cc506455e944becf171c5ad7b", "seq": 11, "ts": 1789614366.0352812}
+
+event: assistant.delta
+data: {"message_id": "msg_104bee2cbdd54cb682a6abf2745f346d", "delta": "the ", "session_id": "haunt-fake", "run_id": "run_0742ac2cc506455e944becf171c5ad7b", "seq": 12, "ts": 1789614366.0355241}
+
+event: assistant.delta
+data: {"message_id": "msg_104bee2cbdd54cb682a6abf2745f346d", "delta": "oven", "session_id": "haunt-fake", "run_id": "run_0742ac2cc506455e944becf171c5ad7b", "seq": 13, "ts": 1789614366.0357366}
+
+event: assistant.delta
+data: {"message_id": "msg_104bee2cbdd54cb682a6abf2745f346d", "delta": " in ", "session_id": "haunt-fake", "run_id": "run_0742ac2cc506455e944becf171c5ad7b", "seq": 14, "ts": 1789614366.0359502}
+
+event: assistant.delta
+data: {"message_id": "msg_104bee2cbdd54cb682a6abf2745f346d", "delta": "ten ", "session_id": "haunt-fake", "run_id": "run_0742ac2cc506455e944becf171c5ad7b", "seq": 15, "ts": 1789614366.0361638}
+
+event: assistant.delta
+data: {"message_id": "msg_104bee2cbdd54cb682a6abf2745f346d", "delta": "minu", "session_id": "haunt-fake", "run_id": "run_0742ac2cc506455e944becf171c5ad7b", "seq": 16, "ts": 1789614366.0363667}
+
+event: assistant.delta
+data: {"message_id": "msg_104bee2cbdd54cb682a6abf2745f346d", "delta": "tes.", "session_id": "haunt-fake", "run_id": "run_0742ac2cc506455e944becf171c5ad7b", "seq": 17, "ts": 1789614366.0365734}
+
+event: tool.progress
+data: {"message_id": "msg_104bee2cbdd54cb682a6abf2745f346d", "tool_name": "_thinking", "delta": "Done. I'll remind you about the oven in ten minutes.", "session_id": "haunt-fake", "run_id": "run_0742ac2cc506455e944becf171c5ad7b", "seq": 18, "ts": 1789614366.041198}
+
+event: assistant.completed
+data: {"session_id": "haunt-fake", "message_id": "msg_104bee2cbdd54cb682a6abf2745f346d", "content": "Done. I'll remind you about the oven in ten minutes.", "completed": true, "partial": false, "interrupted": false, "runtime": {"provider": "custom", "model": "fake", "route_source": "global", "requested": {"provider": "", "model": ""}}, "run_id": "run_0742ac2cc506455e944becf171c5ad7b", "seq": 19, "ts": 1789614366.0556548}
+
+event: run.completed
+data: {"session_id": "haunt-fake", "message_id": "msg_104bee2cbdd54cb682a6abf2745f346d", "completed": true, "partial": false, "interrupted": false, "messages": [{"role": "assistant", "content": "", "tool_calls": [{"id": "call_b802696a", "call_id": "call_b802696a", "response_item_id": "fc_b802696a", "type": "function", "function": {"name": "mcp__haunt__intend", "arguments": "{\"text\": \"check the oven\", \"delay_ms\": 600000}"}}], "timestamp": 1789614365.9943461, "finish_reason": "tool_calls", "reasoning": null}, {"role": "tool", "content": "{\"result\": \"ok: intend done\"}", "tool_call_id": "call_b802696a", "tool_name": "mcp__haunt__intend", "timestamp": 1789614366.0260823}, {"role": "assistant", "content": "Done. I'll remind you about the oven in ten minutes.", "timestamp": 1789614366.0416255, "finish_reason": "stop", "reasoning": null}], "usage": {"input_tokens": 20, "output_tokens": 10, "total_tokens": 30, "runtime": {"provider": "custom", "model": "fake", "route_source": "global", "requested": {"provider": "", "model": ""}}}, "runtime": {"provider": "custom", "model": "fake", "route_source": "global", "requested": {"provider": "", "model": ""}}, "run_id": "run_0742ac2cc506455e944becf171c5ad7b", "seq": 20, "ts": 1789614366.055659}
+
+event: done
+data: {"session_id": "haunt-fake", "run_id": "run_0742ac2cc506455e944becf171c5ad7b", "seq": 21, "ts": 1789614366.0556767}
+

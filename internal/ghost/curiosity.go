@@ -282,15 +282,28 @@ func (g *Ghost) openInitiative() {
 // is driver policy, and telling the brain would only invite it to complain
 // in a balloon it also is not allowed to show.
 func (g *Ghost) allowInitiative(what string) bool {
+	ok, _ := g.chargeInitiative(what)
+	return ok
+}
+
+// noRefund is what a charge that spent nothing hands back.
+func noRefund() {}
+
+// chargeInitiative is allowInitiative for a caller that may want its money
+// back: a wake that the model answered with silence interrupted nobody, and
+// attention is charged when the ghost speaks, not when it is woken (see
+// hermesbrain.go). The refund puts back whichever allowance paid, and is a
+// no-op when none did.
+func (g *Ghost) chargeInitiative(what string) (bool, func()) {
 	if g.responding() {
-		return true
+		return true, noRefund
 	}
 	// Never over a game or a film. This is the rule the design has always
 	// stated and could not enforce until the driver could see a fullscreen
 	// window.
 	if g.desktop != nil && g.desktop.Fullscreen() {
 		g.log.Debug(hlog.Curiosity, "initiative: %s dropped (something is fullscreen)", what)
-		return false
+		return false, noRefund
 	}
 	// An obligation the person put on the books, rather than something the
 	// ghost thought of. Its own allowance, and deliberately not subject to
@@ -303,25 +316,25 @@ func (g *Ghost) allowInitiative(what string) bool {
 	if g.obliged() {
 		if g.obligation == nil || g.obligation.limit <= 0 {
 			g.log.Debug(hlog.Curiosity, "obligation: %s dropped (obligations disabled)", what)
-			return false
+			return false, noRefund
 		}
 		ok, remaining := g.obligation.spend()
 		if !ok {
 			g.log.Debug(hlog.Curiosity, "obligation: %s dropped (daily obligations spent)", what)
-			return false
+			return false, noRefund
 		}
 		g.openInitiative()
 		g.log.Debug(hlog.Curiosity, "obligation: %s (%d left today)", what, remaining)
-		return true
+		return true, g.obligation.refund
 	}
 	if g.curiosity == nil || g.curiosity.limit <= 0 {
 		g.log.Debug(hlog.Curiosity, "initiative: %s dropped (curiosity disabled)", what)
-		return false
+		return false, noRefund
 	}
 	ok, remaining := g.curiosity.spend()
 	if !ok {
 		g.log.Debug(hlog.Curiosity, "initiative: %s dropped (daily curiosity spent)", what)
-		return false
+		return false, noRefund
 	}
 	// And the household ceiling, if there are other ghosts in the room.
 	// Three ghosts each within their own allowance still add up to three
@@ -329,9 +342,9 @@ func (g *Ghost) allowInitiative(what string) bool {
 	if g.opts.Initiative != nil && !g.opts.Initiative(what) {
 		g.curiosity.refund()
 		g.log.Debug(hlog.Curiosity, "initiative: %s dropped (the room's daily allowance is spent)", what)
-		return false
+		return false, noRefund
 	}
 	g.openInitiative()
 	g.log.Debug(hlog.Curiosity, "initiative: %s on the ghost's own account (%d left today)", what, remaining)
-	return true
+	return true, g.curiosity.refund
 }

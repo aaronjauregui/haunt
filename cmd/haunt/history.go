@@ -1,13 +1,17 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/aaronjauregui/haunt/internal/config"
 	"github.com/aaronjauregui/haunt/internal/ghost"
+	"github.com/aaronjauregui/haunt/internal/hermes"
 	"github.com/aaronjauregui/haunt/internal/store"
 )
 
@@ -34,17 +38,33 @@ func cmdHistory(args []string) error {
 	}
 	defer s.Close()
 
-	raw, ok, err := s.Get(ghost.HistoryStoreKey)
-	if err != nil {
+	// A ghost on hermes keeps its conversation there, and the store holds
+	// only which session it is.
+	var turns []ghost.Exchange
+	if session, onHermes, err := s.Get(ghost.HermesSessionStoreKey); err != nil {
 		return err
+	} else if onHermes {
+		name := filepath.Base(stateDir)
+		if len(fs.Args()) == 1 {
+			name = fs.Args()[0]
+		}
+		if turns, err = hermesHistory(name, session, *n); err != nil {
+			return fmt.Errorf("history: %w", err)
+		}
+	} else {
+		raw, ok, err := s.Get(ghost.HistoryStoreKey)
+		if err != nil {
+			return err
+		}
+		if ok {
+			if turns, err = ghost.DecodeHistory(raw); err != nil {
+				return fmt.Errorf("history is corrupt: %w", err)
+			}
+		}
 	}
-	if !ok {
+	if len(turns) == 0 {
 		fmt.Println("(nothing has been said yet)")
 		return nil
-	}
-	turns, err := ghost.DecodeHistory(raw)
-	if err != nil {
-		return fmt.Errorf("history is corrupt: %w", err)
 	}
 	if *n > 0 && len(turns) > *n {
 		turns = turns[len(turns)-*n:]
@@ -65,11 +85,20 @@ func cmdHistory(args []string) error {
 
 	for _, t := range turns {
 		who := "you"
-		if t.Role == "assistant" {
+		switch {
+		case t.Role == "assistant":
 			who = "ghost"
+		case hermes.IsEnvelope(t.Text):
+			// The desktop, not the person: what woke the ghost.
+			who = "event"
+			t.Text = strings.TrimSpace(strings.TrimPrefix(t.Text, hermes.EnvelopePrefix))
 		}
 		// Indent continuations so a multi-paragraph reply stays legible.
 		text := strings.ReplaceAll(strings.TrimSpace(t.Text), "\n", "\n       ")
+		if who == "ghost" && hermes.Silent(t.Text) {
+			// Hermes keeps the token as the reply; nothing was shown.
+			text = "(said nothing)"
+		}
 		fmt.Printf("%-6s %s\n", who+":", text)
 		if !*why || t.Role != "assistant" {
 			continue
@@ -82,6 +111,37 @@ func cmdHistory(args []string) error {
 		printWhy(w, *full)
 	}
 	return nil
+}
+
+// hermesHistory reads a ghost's conversation from its hermes gateway, which
+// has to be running: the session lives in hermes's own database, and haunt
+// reads it only through hermes.
+func hermesHistory(name, session string, n int) ([]ghost.Exchange, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	p, err := cfg.Hermes.OpenProfile(name)
+	if err != nil {
+		return nil, err
+	}
+	c := &hermes.Client{BaseURL: p.URL(), Key: p.Key, Ghost: name,
+		LoadSession: func() string { return session }}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := c.Health(ctx); err != nil {
+		return nil, fmt.Errorf("%s's hermes gateway is not running, and the conversation is kept there (%v)", name, err)
+	}
+	// Twice as many messages as turns: a turn is a line each way.
+	msgs, err := c.Messages(ctx, 2*n)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ghost.Exchange, 0, len(msgs))
+	for _, m := range msgs {
+		out = append(out, ghost.Exchange{Role: m.Role, Text: m.Text})
+	}
+	return out, nil
 }
 
 // traceFor finds the reasons behind a reply, and consumes the match so two
@@ -101,7 +161,10 @@ func traceFor(traces []ghost.Why, reply string) (ghost.Why, bool) {
 // printWhy renders one reply's reasons under the line it explains.
 func printWhy(w ghost.Why, showPrompt bool) {
 	const indent = "       "
-	if w.SelfPrompt {
+	switch {
+	case w.Suppressed:
+		fmt.Println(indent + "· woke, and chose not to speak")
+	case w.SelfPrompt:
 		fmt.Println(indent + "· spoke first — nobody asked")
 	}
 	if !w.Window.Empty() {
@@ -128,7 +191,10 @@ func printWhy(w ghost.Why, showPrompt bool) {
 		fmt.Printf("%s· the whole request was %s characters, of which %s were the prompt above\n",
 			indent, thousands(w.PromptChars), thousands(len(w.System)))
 	}
-	if len(w.Recalled) == 0 {
+	if w.System == "" {
+		// A reply from hermes: what it recalled and what it was prompted
+		// with are hermes's, and not recorded here.
+	} else if len(w.Recalled) == 0 {
 		fmt.Println(indent + "· nothing was recalled from further back")
 	} else {
 		fmt.Printf("%s· recalled %d thing(s) from further back:\n", indent, len(w.Recalled))

@@ -160,11 +160,18 @@ type BrainSection struct {
 	// the ghost directory) speaking the same stdio JSONL protocol. Requires
 	// the native-brain capability. Mutually exclusive with Wasm.
 	Command []string `toml:"command"`
+	// Legacy (`builtin = true`) keeps a brainless ghost on the old built-in
+	// brain instead of hermes, while hermes is being brought in. It goes
+	// when the old brain does.
+	Legacy bool `toml:"builtin"`
 }
 
 // Builtin reports whether the ghost declares no brain of its own and so
-// runs on the driver's built-in one.
+// runs on one the driver provides.
 func (b BrainSection) Builtin() bool { return b.Wasm == "" && len(b.Command) == 0 }
+
+// Hermes reports whether that provided brain is hermes (hermesbrain.go).
+func (b BrainSection) Hermes() bool { return b.Builtin() && !b.Legacy }
 
 // LoadManifest reads and validates <dir>/ghost.toml.
 func LoadManifest(dir string) (*Manifest, error) {

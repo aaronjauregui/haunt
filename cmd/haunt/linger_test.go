@@ -53,6 +53,9 @@ func TestSlowReplyOutlivesAnOlderLine(t *testing.T) {
 name = "wisp"
 capabilities = ["message", "llm"]
 
+[brain]
+builtin = true
+
 [persona]
 system = "You are Wisp."
 `)
@@ -165,6 +168,9 @@ func TestWedgedEmbeddingsDoNotSwallowTheReply(t *testing.T) {
 	writeGhost(t, gDir, `[ghost]
 name = "wisp"
 capabilities = ["message", "llm"]
+
+[brain]
+builtin = true
 
 [persona]
 system = "You are Wisp."

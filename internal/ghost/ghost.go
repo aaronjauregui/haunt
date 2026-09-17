@@ -25,6 +25,7 @@ import (
 	"github.com/aaronjauregui/haunt/internal/control"
 	"github.com/aaronjauregui/haunt/internal/defaultbrain"
 	"github.com/aaronjauregui/haunt/internal/desktop"
+	"github.com/aaronjauregui/haunt/internal/hermes"
 	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/mcp"
 	"github.com/aaronjauregui/haunt/internal/proto"
@@ -235,7 +236,18 @@ type Ghost struct {
 
 	bus   *bus.Bus
 	brain brain.Runner
-	store Store
+	// onHermes says the brain is hermes (hermesbrain.go): the model's tool
+	// calls arrive over the control socket, and memory is hermes's own plus
+	// the belief store.
+	onHermes bool
+	// hermesCfg is the [hermes] config, and hermesGW the gateway it
+	// started, if it has.
+	hermesCfg hermes.Config
+	hermesMu  sync.Mutex
+	hermesGW  *hermes.Gateway
+	// hermesLate is the brain's turner until the gateway is up.
+	hermesLate *lateTurner
+	store      Store
 	// index is the memory ring and the entity index, held in memory and
 	// written through to the store. It is loaded once — from the snapshot
 	// boot already reads — and is authoritative for as long as the ghost
@@ -464,6 +476,12 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	}
 	defer ctl.Close()
 	defer control.Forget(m.Ghost.Name)
+	// On hermes, the socket is also how the model's tool calls arrive, and
+	// the gateway is started only now that there is a socket for them.
+	if g.onHermes {
+		ctl.SetTools(hermesTools{g})
+		g.startHermes(g.hermesLate)
+	}
 
 	stopTriggers, err := g.startTriggers(opts.IdleTimeoutMS)
 	if err != nil {
@@ -698,6 +716,7 @@ func (g *Ghost) applySettings(cfg *config.File) error {
 	// AI services (backends are user-configured; absent config just means
 	// the capabilities error out when used).
 	g.aiSvc = ai.NewServiceWith(cfg.AI, g.log, g.opts.AIBudgets)
+	g.hermesCfg = cfg.Hermes
 	return nil
 }
 
@@ -710,8 +729,24 @@ func (g *Ghost) startBrain(ctx context.Context) error {
 	m := g.manifest
 	var err error
 	switch {
+	case m.Brain.Hermes():
+		g.log.Info(hlog.Brain, "no brain declared; running on hermes")
+		g.onHermes = true
+		late := newLateTurner()
+		g.brain = newHermesBrain(g, late, func() error {
+			// Set by startHermes on its own goroutine, which teardown has
+			// already waited for (waitForBackground) — but only for so long.
+			g.hermesMu.Lock()
+			gw := g.hermesGW
+			g.hermesMu.Unlock()
+			if gw == nil {
+				return nil
+			}
+			return gw.Stop()
+		})
+		g.hermesLate = late
 	case m.Brain.Builtin():
-		g.log.Info(hlog.Brain, "no brain declared; running the built-in brain")
+		g.log.Info(hlog.Brain, "running the old built-in brain ([brain] builtin = true)")
 		g.brain, err = brain.StartBuiltin(defaultbrain.Run, g.execIntent, brain.Options{})
 	case len(m.Brain.Command) > 0:
 		if !g.capabilityActive("native-brain") {

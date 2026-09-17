@@ -29,9 +29,12 @@ workdir="$(mktemp -d /tmp/haunt-demo-XXXXXX)"
 # and the control socket lives under this.
 runtime="$(mktemp -d /tmp/hd-XXXXXX)"
 # Kill child processes (not the whole group: that would kill this script
-# before the rm runs), then remove the workdir.
+# before the rm runs), wait for them, then remove the workdir. The wait
+# matters for a hermes ghost: its gateway is still closing its database in
+# the workdir for a few seconds after haunt is told to stop.
 cleanup() {
     kill $(jobs -p) 2>/dev/null || true
+    wait 2>/dev/null || true
     rm -rf "$workdir" "$runtime"
 }
 trap cleanup EXIT TERM INT
@@ -96,7 +99,10 @@ EOF
         ;;
     wisp)
         # No [brain] section and nothing to compile: art and a persona are a
-        # whole ghost, and the driver's built-in brain runs it.
+        # whole ghost, and hermes is its brain (docs/hermes-brain.md). Its
+        # profile is made under the demo's own hermes home (below), so give
+        # it a model in [hermes.model] and its keys in the file
+        # scripts/hermes-docker reads.
         cat > "$workdir/wisp/ghost.toml" <<'EOF'
 [ghost]
 name = "wisp"
@@ -145,7 +151,7 @@ if [ "$ghost_count" -gt 1 ]; then
     echo ">>   start from a clean slate:  XDG_DATA_HOME=\$(mktemp -d) make demo-troupe"
 fi
 if [[ " $ghosts " == *" wisp "* ]]; then
-    echo ">> wisp extras:  say help  |  say \"draw a whale\"  |  say \"draw again\"  |  say \"remember I like tea\""
+    echo ">> wisp runs on hermes. try:  say \"remind me in two minutes to stretch\"  |  say \"draw a whale\"  |  double-click for the menu"
     echo ">>     journal:  go run ./cmd/haunt journal -state $workdir/data/haunt/ghosts/wisp"
 fi
 run_args=(run)
@@ -168,8 +174,11 @@ if [ -n "$sleep_age" ]; then
 fi
 # The ghost's memory and cache go in the workdir, not the real library: a
 # demo is for looking at, and an imported shell you are trying out has no
-# business leaving a state directory behind under somebody's name.
-XDG_DATA_HOME="$workdir/data" HAUNT_RUNTIME_DIR="$runtime" \
+# business leaving a state directory behind under somebody's name. The same
+# goes for its hermes profile: a hermes home of its own, so a demo ghost
+# neither resumes the last demo's conversation nor writes into the real
+# ghost of the same name. ([hermes] home in the config would override it.)
+XDG_DATA_HOME="$workdir/data" HAUNT_RUNTIME_DIR="$runtime" HERMES_HOME="$workdir/hermes" \
     WAYLAND_DISPLAY="$display" "$workdir/haunt" "${run_args[@]}" "${ghost_dirs[@]}" &
 
 wait "$sway_pid"

@@ -68,6 +68,9 @@ first_token_timeout = 2
 name = "wisp"
 capabilities = ["message", "llm"]
 
+[brain]
+builtin = true
+
 [persona]
 system = "You are Wisp."
 `)

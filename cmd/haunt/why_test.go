@@ -50,6 +50,9 @@ model = "fake-embed"
 name = "wisp"
 capabilities = ["message", "llm"]
 
+[brain]
+builtin = true
+
 [persona]
 system = "You are Wisp, a wry desktop spirit."
 `)

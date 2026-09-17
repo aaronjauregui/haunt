@@ -1,0 +1,550 @@
+// fakehermes stands in for `hermes gateway run` in the end-to-end test of
+// the hermes brain (cmd/haunt/hermes_test.go). It does the parts of hermes
+// haunt depends on and nothing else: it reads the profile haunt wrote,
+// spawns the haunt MCP server from it and talks MCP to it over stdio, and
+// answers the API server's session and chat endpoints in hermes's own SSE
+// shape (internal/hermes/testdata/remind.sse). The "model" is a script
+// keyed on the input.
+//
+// Everything it sees is appended to $FAKEHERMES_LOG as JSON lines, so the
+// test can assert on what reached the brain.
+package main
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"os/exec"
+	"os/signal"
+	"path/filepath"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+
+	"gopkg.in/yaml.v3"
+)
+
+func main() {
+	if err := run(); err != nil {
+		logEntry(map[string]any{"kind": "fatal", "error": err.Error()})
+		fmt.Fprintln(os.Stderr, "fakehermes:", err)
+		os.Exit(1)
+	}
+}
+
+// --- logging ---------------------------------------------------------------
+
+var logMu sync.Mutex
+
+func logEntry(e map[string]any) {
+	path := os.Getenv("FAKEHERMES_LOG")
+	if path == "" {
+		return
+	}
+	e["pid"] = os.Getpid()
+	b, _ := json.Marshal(e)
+	logMu.Lock()
+	defer logMu.Unlock()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	f.Write(append(b, '\n'))
+}
+
+// --- profile ---------------------------------------------------------------
+
+type serverEntry struct {
+	Command string            `yaml:"command"`
+	Args    []string          `yaml:"args"`
+	Env     map[string]string `yaml:"env"`
+}
+
+type profileConfig struct {
+	MCPServers map[string]serverEntry `yaml:"mcp_servers"`
+}
+
+func readDotenv(path string) (map[string]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	env := map[string]string{}
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		env[strings.TrimSpace(k)] = strings.Trim(strings.TrimSpace(v), `"'`)
+	}
+	return env, sc.Err()
+}
+
+func run() error {
+	home := os.Getenv("HERMES_HOME")
+	if home == "" {
+		return errors.New("HERMES_HOME is not set")
+	}
+	logEntry(map[string]any{"kind": "start", "args": os.Args[1:], "home": home})
+
+	env, err := readDotenv(filepath.Join(home, ".env"))
+	if err != nil {
+		return fmt.Errorf("reading .env: %w", err)
+	}
+	key, port, host := env["API_SERVER_KEY"], env["API_SERVER_PORT"], env["API_SERVER_HOST"]
+	if key == "" || port == "" {
+		return errors.New(".env has no API_SERVER_KEY or API_SERVER_PORT")
+	}
+	if host == "" {
+		host = "127.0.0.1"
+	}
+
+	raw, err := os.ReadFile(filepath.Join(home, "config.yaml"))
+	if err != nil {
+		return fmt.Errorf("reading config.yaml: %w", err)
+	}
+	var cfg profileConfig
+	if err := yaml.Unmarshal(raw, &cfg); err != nil {
+		return fmt.Errorf("parsing config.yaml: %w", err)
+	}
+	entry, ok := cfg.MCPServers["haunt"]
+	if !ok || entry.Command == "" {
+		return errors.New("config.yaml has no mcp_servers.haunt")
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	defer stop()
+
+	mcp, err := startMCP(entry)
+	if err != nil {
+		return fmt.Errorf("starting the haunt MCP server: %w", err)
+	}
+	defer mcp.close()
+
+	// Hermes connects its MCP servers alongside serving; turns wait for it.
+	ready := make(chan struct{})
+	var tools []string
+	var mcpErr error
+	go func() {
+		defer close(ready)
+		tools, mcpErr = mcp.handshake(ctx)
+		if mcpErr != nil {
+			logEntry(map[string]any{"kind": "mcp_error", "error": mcpErr.Error()})
+			return
+		}
+		logEntry(map[string]any{"kind": "tools_list", "tools": tools})
+	}()
+
+	s := &server{key: key, mcp: mcp, ready: ready, mcpErr: func() error { return mcpErr }, sessions: map[string]bool{}}
+	ln, err := net.Listen("tcp", net.JoinHostPort(host, port))
+	if err != nil {
+		return err
+	}
+	srv := &http.Server{Handler: s.mux()}
+	go srv.Serve(ln)
+	logEntry(map[string]any{"kind": "listening", "addr": ln.Addr().String()})
+
+	<-ctx.Done()
+	logEntry(map[string]any{"kind": "stopping"})
+	sctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	srv.Shutdown(sctx)
+	return nil
+}
+
+// --- MCP client --------------------------------------------------------------
+
+type mcpClient struct {
+	cmd   *exec.Cmd
+	stdin io.WriteCloser
+	done  chan struct{}
+
+	wmu     sync.Mutex
+	mu      sync.Mutex
+	nextID  int
+	pending map[int]chan rpcResponse
+}
+
+type rpcResponse struct {
+	ID     *int            `json:"id"`
+	Result json.RawMessage `json:"result"`
+	Error  *struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// filteredEnv is what hermes hands an MCP server: a few basics and the
+// XDG directories, then the entry's own env.
+func filteredEnv(extra map[string]string) []string {
+	var out []string
+	for _, kv := range os.Environ() {
+		k, _, _ := strings.Cut(kv, "=")
+		if k == "PATH" || k == "HOME" || k == "USER" || k == "LANG" || strings.HasPrefix(k, "XDG_") {
+			out = append(out, kv)
+		}
+	}
+	for k, v := range extra {
+		out = append(out, k+"="+v)
+	}
+	return out
+}
+
+func startMCP(e serverEntry) (*mcpClient, error) {
+	cmd := exec.Command(e.Command, e.Args...)
+	cmd.Env = filteredEnv(e.Env)
+	cmd.Stderr = os.Stderr
+	// Killed with us even if we are killed hard.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	logEntry(map[string]any{"kind": "mcp_spawned", "command": e.Command, "args": e.Args, "env": e.Env, "mcp_pid": cmd.Process.Pid})
+	c := &mcpClient{cmd: cmd, stdin: stdin, done: make(chan struct{}), pending: map[int]chan rpcResponse{}}
+	go c.read(stdout)
+	return c, nil
+}
+
+func (c *mcpClient) read(r io.Reader) {
+	defer close(c.done)
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64*1024), 16<<20)
+	for sc.Scan() {
+		var resp rpcResponse
+		if json.Unmarshal(sc.Bytes(), &resp) != nil || resp.ID == nil {
+			continue
+		}
+		c.mu.Lock()
+		ch := c.pending[*resp.ID]
+		delete(c.pending, *resp.ID)
+		c.mu.Unlock()
+		if ch != nil {
+			ch <- resp
+		}
+	}
+}
+
+func (c *mcpClient) send(msg map[string]any) error {
+	msg["jsonrpc"] = "2.0"
+	b, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	c.wmu.Lock()
+	defer c.wmu.Unlock()
+	_, err = c.stdin.Write(append(b, '\n'))
+	return err
+}
+
+func (c *mcpClient) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	c.mu.Lock()
+	c.nextID++
+	id := c.nextID
+	ch := make(chan rpcResponse, 1)
+	c.pending[id] = ch
+	c.mu.Unlock()
+	if err := c.send(map[string]any{"id": id, "method": method, "params": params}); err != nil {
+		return nil, err
+	}
+	select {
+	case resp := <-ch:
+		if resp.Error != nil {
+			return nil, fmt.Errorf("%s: %d %s", method, resp.Error.Code, resp.Error.Message)
+		}
+		return resp.Result, nil
+	case <-c.done:
+		return nil, fmt.Errorf("%s: the MCP server exited", method)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (c *mcpClient) handshake(ctx context.Context) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	res, err := c.call(ctx, "initialize", map[string]any{
+		"protocolVersion": "2025-06-18",
+		"capabilities":    map[string]any{},
+		"clientInfo":      map[string]any{"name": "fakehermes", "version": "0"},
+	})
+	if err != nil {
+		return nil, err
+	}
+	logEntry(map[string]any{"kind": "initialized", "result": res})
+	if err := c.send(map[string]any{"method": "notifications/initialized"}); err != nil {
+		return nil, err
+	}
+	res, err = c.call(ctx, "tools/list", map[string]any{})
+	if err != nil {
+		return nil, err
+	}
+	var list struct {
+		Tools []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(res, &list); err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(list.Tools))
+	for _, t := range list.Tools {
+		names = append(names, t.Name)
+	}
+	return names, nil
+}
+
+type toolResult struct {
+	Content []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"content"`
+	IsError bool `json:"isError"`
+}
+
+func (c *mcpClient) callTool(ctx context.Context, name string, args any) (toolResult, error) {
+	var out toolResult
+	res, err := c.call(ctx, "tools/call", map[string]any{"name": name, "arguments": args})
+	if err != nil {
+		return out, err
+	}
+	err = json.Unmarshal(res, &out)
+	return out, err
+}
+
+func (c *mcpClient) close() {
+	c.stdin.Close()
+	select {
+	case <-c.done:
+	case <-time.After(2 * time.Second):
+	}
+	c.cmd.Process.Signal(syscall.SIGTERM)
+	exited := make(chan struct{})
+	go func() { c.cmd.Wait(); close(exited) }()
+	select {
+	case <-exited:
+	case <-time.After(3 * time.Second):
+		c.cmd.Process.Kill()
+		<-exited
+	}
+	logEntry(map[string]any{"kind": "mcp_stopped"})
+}
+
+// --- API server --------------------------------------------------------------
+
+type server struct {
+	key    string
+	mcp    *mcpClient
+	ready  chan struct{}
+	mcpErr func() error
+
+	mu       sync.Mutex
+	sessions map[string]bool
+	runN     int
+	// transcript is every stored message, oldest first, as hermes keeps
+	// them: the reply is stored even when it is NO_REPLY.
+	transcript []map[string]any
+}
+
+func (s *server) mux() *http.ServeMux {
+	m := http.NewServeMux()
+	m.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"status":"ok","platform":"hermes-agent"}`)
+	})
+	m.HandleFunc("POST /api/sessions", s.auth(s.createSession))
+	m.HandleFunc("POST /api/sessions/{id}/chat/stream", s.auth(s.chat))
+	m.HandleFunc("GET /api/sessions/{id}/messages", s.auth(s.messages))
+	return m
+}
+
+func apiError(w http.ResponseWriter, status int, code, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": code, "message": msg}})
+}
+
+func (s *server) auth(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+s.key {
+			logEntry(map[string]any{"kind": "unauthorized", "path": r.URL.Path})
+			apiError(w, http.StatusUnauthorized, "unauthorized", "invalid API key")
+			return
+		}
+		h(w, r)
+	}
+}
+
+func (s *server) createSession(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ID     string `json:"id"`
+		Title  string `json:"title"`
+		Source string `json:"source"`
+	}
+	json.NewDecoder(r.Body).Decode(&body)
+	logEntry(map[string]any{"kind": "create_session", "id": body.ID, "title": body.Title, "source": body.Source,
+		"session_key": r.Header.Get("X-Hermes-Session-Key")})
+	if body.ID == "" {
+		body.ID = fmt.Sprintf("sess_%d", time.Now().UnixNano())
+	}
+	s.mu.Lock()
+	exists := s.sessions[body.ID]
+	s.sessions[body.ID] = true
+	s.mu.Unlock()
+	if exists {
+		apiError(w, http.StatusConflict, "session_exists", "session "+body.ID+" already exists")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]any{"session": map[string]any{"id": body.ID, "title": body.Title}})
+}
+
+// sse writes events in hermes's framing: event line, one data line, blank
+// line, with session_id, run_id, seq and ts on every payload.
+type sse struct {
+	w       http.ResponseWriter
+	fl      http.Flusher
+	session string
+	run     string
+	seq     int
+}
+
+func (e *sse) send(event string, payload map[string]any) {
+	e.seq++
+	payload["session_id"] = e.session
+	payload["run_id"] = e.run
+	payload["seq"] = e.seq
+	payload["ts"] = float64(time.Now().UnixNano()) / 1e9
+	b, _ := json.Marshal(payload)
+	fmt.Fprintf(e.w, "event: %s\ndata: %s\n\n", event, b)
+	e.fl.Flush()
+}
+
+func (s *server) chat(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var body struct {
+		Input         string `json:"input"`
+		SystemMessage string `json:"system_message"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		apiError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	logEntry(map[string]any{"kind": "chat", "session": id, "input": body.Input, "system_message": body.SystemMessage,
+		"session_key": r.Header.Get("X-Hermes-Session-Key")})
+	s.mu.Lock()
+	known := s.sessions[id]
+	s.runN++
+	n := s.runN
+	s.mu.Unlock()
+	if !known {
+		apiError(w, http.StatusNotFound, "session_not_found", "no session "+id)
+		return
+	}
+
+	<-s.ready
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusOK)
+	e := &sse{w: w, fl: w.(http.Flusher), session: id, run: fmt.Sprintf("run_fake%d", n)}
+	msgID := fmt.Sprintf("msg_fake%d", n)
+
+	e.send("run.started", map[string]any{
+		"user_message": map[string]any{"role": "user", "content": body.Input},
+		"runtime":      map[string]any{"provider": "", "model": ""},
+	})
+	e.send("message.started", map[string]any{"message": map[string]any{"id": msgID, "role": "assistant"}})
+
+	var reply string
+	switch {
+	case strings.HasPrefix(body.Input, "[haunt event]"):
+		reply = "NO_REPLY"
+	case strings.Contains(strings.ToLower(body.Input), "remind me"):
+		const tool = "mcp__haunt__intend"
+		args := map[string]any{"text": "check the oven", "delay_ms": 600000}
+		e.send("tool.started", map[string]any{"message_id": msgID, "tool_name": tool, "preview": "check the oven", "args": args})
+		if err := s.mcpErr(); err != nil {
+			e.send("tool.failed", map[string]any{"message_id": msgID, "tool_name": tool, "error": err.Error()})
+			reply = "The tool was not there: " + err.Error()
+			break
+		}
+		res, err := s.mcp.callTool(r.Context(), "intend", args)
+		text := ""
+		if len(res.Content) > 0 {
+			text = res.Content[0].Text
+		}
+		logEntry(map[string]any{"kind": "tool_call", "name": "intend", "text": text, "is_error": res.IsError, "error": errString(err)})
+		if err != nil {
+			e.send("tool.failed", map[string]any{"message_id": msgID, "tool_name": tool, "error": err.Error()})
+			reply = "The tool failed: " + err.Error()
+			break
+		}
+		e.send("tool.completed", map[string]any{"message_id": msgID, "tool_name": tool, "preview": nil, "args": nil})
+		reply = "Done: " + text
+	default:
+		reply = "echo: " + body.Input
+	}
+
+	for i := 0; i < len(reply); i += 4 {
+		e.send("assistant.delta", map[string]any{"message_id": msgID, "delta": reply[i:min(i+4, len(reply))]})
+	}
+	logEntry(map[string]any{"kind": "reply", "session": id, "input": body.Input, "reply": reply})
+	now := float64(time.Now().UnixNano()) / 1e9
+	s.mu.Lock()
+	s.transcript = append(s.transcript,
+		map[string]any{"role": "user", "content": body.Input, "timestamp": now},
+		map[string]any{"role": "assistant", "content": reply, "timestamp": now})
+	s.mu.Unlock()
+	e.send("assistant.completed", map[string]any{
+		"message_id": msgID, "content": reply, "completed": true, "partial": false, "interrupted": false,
+	})
+	e.send("run.completed", map[string]any{
+		"message_id": msgID, "completed": true, "partial": false, "interrupted": false,
+	})
+	e.send("done", map[string]any{})
+}
+
+// messages answers `order=latest&limit=N` as hermes does: the newest N,
+// oldest first.
+func (s *server) messages(w http.ResponseWriter, r *http.Request) {
+	var limit int
+	fmt.Sscan(r.URL.Query().Get("limit"), &limit)
+	s.mu.Lock()
+	data := s.transcript
+	if limit > 0 && len(data) > limit {
+		data = data[len(data)-limit:]
+	}
+	b, _ := json.Marshal(map[string]any{"object": "list", "data": data})
+	s.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(b)
+}
+
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}

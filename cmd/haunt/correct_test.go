@@ -72,6 +72,9 @@ llm_requests_per_hour = 20
 name = "wisp"
 capabilities = ["message", "llm"]
 
+[brain]
+builtin = true
+
 [persona]
 system = "You are Wisp."
 history_turns = 1

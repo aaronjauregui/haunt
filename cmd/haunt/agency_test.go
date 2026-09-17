@@ -150,6 +150,9 @@ model = "fake"
 name = "wisp"
 capabilities = ["message", "llm", "tools"%s]
 
+[brain]
+%s
+
 [persona]
 system = "You are Wisp."
 
@@ -157,10 +160,10 @@ system = "You are Wisp."
 name = "notes"
 command = [%q]
 env = ["HAUNT_TEST_NOTES"]
-`, brainCap(brain), server)
+`, brainCap(brain), brainLine(brain), server)
 	if brain != "" {
 		brainBin := filepath.Join(gDir, "brain")
-		writeGhost(t, gDir, manifest+fmt.Sprintf("\n[brain]\ncommand = [%q]\n", "./brain"))
+		writeGhost(t, gDir, manifest)
 		build(t, brainBin, "./testdata/"+brain)
 	} else {
 		writeGhost(t, gDir, manifest)
@@ -191,6 +194,15 @@ env = ["HAUNT_TEST_NOTES"]
 	waitFor(t, stdout, "READY")
 
 	return actingRun{dir: dir, bin: bin, rt: rt, record: record, notes: notes, backend: backend}
+}
+
+// brainLine is the [brain] section's body: a native process, or the old
+// built-in brain this test was written against.
+func brainLine(brain string) string {
+	if brain == "" {
+		return "builtin = true"
+	}
+	return `command = ["./brain"]`
 }
 
 func brainCap(brain string) string {

@@ -64,6 +64,9 @@ func TestAnIntentionSurvivesARestart(t *testing.T) {
 name = "wisp"
 capabilities = ["message", "llm"]
 
+[brain]
+builtin = true
+
 [persona]
 system = "You are Wisp."
 `)

@@ -23,6 +23,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/aaronjauregui/haunt/internal/ai"
+	"github.com/aaronjauregui/haunt/internal/hermes"
 	"github.com/aaronjauregui/haunt/internal/quiet"
 	"github.com/aaronjauregui/haunt/internal/session"
 )
@@ -42,6 +43,8 @@ type File struct {
 	Awareness AwarenessConfig
 	Curiosity CuriosityConfig
 	Memory    MemoryConfig
+	// Hermes is where the ghosts' brain lives (docs/hermes-brain.md).
+	Hermes hermes.Config
 }
 
 // root is the on-disk shape. Separate from File so that File can carry
@@ -53,6 +56,7 @@ type root struct {
 	Awareness AwarenessConfig `toml:"awareness"`
 	Curiosity CuriosityConfig `toml:"curiosity"`
 	Memory    MemoryConfig    `toml:"memory"`
+	Hermes    hermes.Config   `toml:"hermes"`
 }
 
 // Path returns the user config file location. HAUNT_CONFIG_DIR overrides
@@ -98,6 +102,7 @@ func Load() (*File, error) {
 		Awareness: r.Awareness,
 		Curiosity: r.Curiosity,
 		Memory:    r.Memory,
+		Hermes:    r.Hermes,
 	}
 	if err := f.Awareness.derive(path); err != nil {
 		return nil, err

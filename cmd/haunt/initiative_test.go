@@ -61,6 +61,9 @@ actions_per_day = 1
 name = "wisp"
 capabilities = ["message", "llm"]
 
+[brain]
+builtin = true
+
 [persona]
 system = "You are Wisp."
 `)

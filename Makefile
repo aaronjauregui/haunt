@@ -21,9 +21,11 @@ fmt:
 demo:
 	./scripts/demo.sh
 
-# The AI ghost: a persona and no brain at all, run by the driver's built-in
-# brain. Chats via your configured LLM and draws via your image backend
-# ([ai.llm]/[ai.image] in ~/.config/haunt/config.toml).
+# The AI ghost: a persona and no brain at all, run by hermes-agent
+# (docs/hermes-brain.md, "Running on a real model": hermes in its container
+# via scripts/hermes-docker, a model in [hermes.model]). Its hermes profile
+# lives in the demo's workdir and goes with it. Draws via your image backend
+# ([ai.image] in ~/.config/haunt/config.toml).
 # IDLE_MS=10000 shortens the wait before it speaks unprompted.
 demo-ai:
 	GHOST=wisp ./scripts/demo.sh

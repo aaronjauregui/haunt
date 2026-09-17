@@ -207,6 +207,11 @@ func cosine(a, b []float32) float64 {
 
 // memoryEnabled reports whether long-term memory is configured and allowed.
 func (g *Ghost) memoryEnabled() bool {
+	// On hermes the belief store is the one memory the driver keeps, and it
+	// needs no embeddings: it is written by the person and read by name.
+	if g.onHermes {
+		return g.capabilityActive("llm")
+	}
 	return g.aiSvc != nil && g.aiSvc.EmbedEnabled() && g.capabilityActive("llm")
 }
 

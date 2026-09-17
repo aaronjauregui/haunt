@@ -283,11 +283,21 @@ func (g *Ghost) execChat(in proto.Intent, userDriven bool) {
 // lands under its own key, so "draw that again" yields a new picture instead
 // of the one already on disk.
 func (g *Ghost) execImagine(in proto.Intent, userDriven bool) {
-	prompt, tag := in.Text, in.Tag
+	path, err := g.imagine(in.Text, in.Fresh, in.Wait, in.LingerMS)
+	if err != nil {
+		g.publishAIError(err.Error(), in.Tag)
+		return
+	}
+	g.publishAIResult(proto.Event{Type: proto.EventAIImage, Name: path, Tag: in.Tag}, userDriven)
+}
+
+// imagine is execImagine for a caller that wants the answer back rather
+// than as an event: the picture's path, or why there is not one. The hermes
+// brain's draw tool is that caller (hermestools.go).
+func (g *Ghost) imagine(prompt string, fresh bool, waitText string, lingerMS int) (string, error) {
 	// Settled before the lock, as with chat.
 	if g.aiSvc == nil || !g.aiSvc.ImageEnabled() {
-		g.publishAIError("no image backend configured in the haunt config", tag)
-		return
+		return "", fmt.Errorf("no image backend configured in the haunt config")
 	}
 	// A local diffusion run takes the whole GPU for seconds at a time,
 	// which is a visible stutter in whatever is fullscreen. The refusal is
@@ -295,17 +305,15 @@ func (g *Ghost) execImagine(in proto.Intent, userDriven bool) {
 	// should hear why there isn't one.
 	if g.desktop != nil && g.desktop.Fullscreen() {
 		g.log.Info(hlog.AI, "imagine refused: something is fullscreen")
-		g.publishAIError("not while something is fullscreen — it would stutter", tag)
-		return
+		return "", fmt.Errorf("not while something is fullscreen — it would stutter")
 	}
 
 	// Content-addressed cache: same backend/model/prompt = same file.
 	salt := ""
-	if in.Fresh {
+	if fresh {
 		var nonce [8]byte
 		if _, err := rand.Read(nonce[:]); err != nil {
-			g.publishAIError("reroll: "+err.Error(), tag)
-			return
+			return "", fmt.Errorf("reroll: %w", err)
 		}
 		salt = "\x00" + hex.EncodeToString(nonce[:])
 	}
@@ -318,13 +326,12 @@ func (g *Ghost) execImagine(in proto.Intent, userDriven bool) {
 		// rather than the brain's precisely so a brain that never thought
 		// about it still shows one; a cache hit skips it, because there is
 		// nothing to wait for.
-		wait := g.startWaiting(in.Wait)
+		wait := g.startWaiting(waitText)
 		data, err = g.aiSvc.GenerateImage(g.sessionContext(), prompt)
 		wait.Stop()
 		if err != nil {
 			g.log.Warn(hlog.AI, "imagine: %v", err)
-			g.publishAIError(err.Error(), tag)
-			return
+			return "", err
 		}
 		if err := os.MkdirAll(g.cacheDir, 0o755); err == nil {
 			os.WriteFile(cachePath, data, 0o644)
@@ -333,8 +340,7 @@ func (g *Ghost) execImagine(in proto.Intent, userDriven bool) {
 
 	img, err := png.Decode(bytesReader(data))
 	if err != nil {
-		g.publishAIError("image backend returned invalid PNG: "+err.Error(), tag)
-		return
+		return "", fmt.Errorf("image backend returned invalid PNG: %w", err)
 	}
 	if g.showImageBalloon(img) {
 		// What the picture is of, to the ghosts who can see it hanging
@@ -343,10 +349,10 @@ func (g *Ghost) execImagine(in proto.Intent, userDriven bool) {
 		// something the driver has any better summary of.
 		g.announce(proto.ActedDrew, prompt)
 	}
-	if in.LingerMS > 0 {
-		g.lingerBalloon(g.balloonGen(), time.Duration(in.LingerMS)*time.Millisecond)
+	if lingerMS > 0 {
+		g.lingerBalloon(g.balloonGen(), time.Duration(lingerMS)*time.Millisecond)
 	}
-	g.publishAIResult(proto.Event{Type: proto.EventAIImage, Name: cachePath, Tag: tag}, userDriven)
+	return cachePath, nil
 }
 
 // publishAIResult delivers an AI result, extending the response window when

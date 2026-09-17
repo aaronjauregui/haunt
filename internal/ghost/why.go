@@ -70,6 +70,10 @@ type Why struct {
 	// user line is the fact rather than a gap in the record.
 	SelfPrompt bool   `json:"self_prompt,omitempty"`
 	Reply      string `json:"reply"`
+	// Suppressed says the model answered with silence (NO_REPLY): nothing
+	// reached the balloon, and the record says so rather than leaving a
+	// turn that seems to have vanished.
+	Suppressed bool `json:"suppressed,omitempty"`
 	// Recalled is what long-term memory contributed, strongest first.
 	Recalled []Recalled `json:"recalled,omitempty"`
 	// Acted is the tools that ran in the course of producing this reply,

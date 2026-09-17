@@ -168,6 +168,9 @@ image_requests_per_hour = 2
 name = "wisp"
 capabilities = ["message", "llm", "imagine"]
 
+[brain]
+builtin = true
+
 [persona]
 system = "You are Wisp, a wry desktop spirit."
 `)

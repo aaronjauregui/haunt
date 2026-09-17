@@ -70,6 +70,9 @@ name = "wisp"
 version = "0.1.0"
 capabilities = ["message", "llm"]
 
+[brain]
+builtin = true
+
 [persona]
 system = "You are Wisp."
 `
@@ -201,6 +204,9 @@ func TestNeverAskAgainIsRecorded(t *testing.T) {
 name = "wisp"
 version = "0.1.0"
 capabilities = ["message", "llm"]
+
+[brain]
+builtin = true
 
 [persona]
 system = "You are Wisp."
