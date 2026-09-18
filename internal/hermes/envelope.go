@@ -95,6 +95,17 @@ func IsEnvelope(input string) bool {
 	return strings.HasPrefix(input, EnvelopePrefix)
 }
 
+// EnvelopeKind is an envelope's kind ("idle", "session", …), or "" for
+// input that is not an envelope.
+func EnvelopeKind(input string) string {
+	rest, ok := strings.CutPrefix(input, EnvelopePrefix+" kind=")
+	if !ok {
+		return ""
+	}
+	kind, _, _ := strings.Cut(rest, " ")
+	return kind
+}
+
 // NoReply is what the model answers with to say nothing.
 const NoReply = "NO_REPLY"
 

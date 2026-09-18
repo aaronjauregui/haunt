@@ -58,3 +58,17 @@ func TestMaybeSilent(t *testing.T) {
 		}
 	}
 }
+
+func TestEnvelopeKind(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{Envelope("idle", F("minutes", 5)), "idle"},
+		{Envelope("session", F("shape", "dwell")), "session"},
+		{Envelope("help"), "help"},
+		{"what can you do?", ""},
+		{"kind=idle", ""},
+	} {
+		if got := EnvelopeKind(tc.in); got != tc.want {
+			t.Errorf("EnvelopeKind(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

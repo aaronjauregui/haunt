@@ -161,6 +161,17 @@ func (b *hermesBrain) work() {
 	for t := range b.turns {
 		b.busy.Store(true)
 		b.g.guard(hlog.Brain, "a hermes turn", func() { b.run(t) })
+		// The one line that says a turn has ended, spoken, silent or
+		// failed, and what it was about: what the evals wait on before
+		// the next step.
+		over := "turn over: event"
+		if t.person {
+			over = "turn over: person"
+		}
+		if kind := hermes.EnvelopeKind(t.input); kind != "" {
+			over += " kind=" + kind
+		}
+		b.g.log.Debug(hlog.Brain, "%s", over)
 		b.deferMu.Lock()
 		b.busy.Store(false)
 		if len(b.turns) == 0 {
