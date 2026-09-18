@@ -472,8 +472,8 @@ func weeklyCase() evalCase {
 func drawCase() evalCase {
 	return evalCase{
 		Name:  "draw",
-		Needs: []string{"ai.image"},
-		Drive: rigDrive(rigOptions{AI: []string{"image"}}, func(r *evalRig) error {
+		Needs: []string{"backend.image"},
+		Drive: rigDrive(rigOptions{Backend: []string{"image"}}, func(r *evalRig) error {
 			if err := r.start(); err != nil {
 				return err
 			}
@@ -976,8 +976,8 @@ const lookText = "Chapter 3: The Lighthouse Keeper\n\nThe lamp had not been lit 
 func lookCase() evalCase {
 	return evalCase{
 		Name:  "look",
-		Needs: []string{"foot", "ai.vision"},
-		Drive: rigDrive(rigOptions{Screen: true, AI: []string{"vision"}}, func(r *evalRig) error {
+		Needs: []string{"foot", "backend.vision"},
+		Drive: rigDrive(rigOptions{Screen: true, Backend: []string{"vision"}}, func(r *evalRig) error {
 			file := filepath.Join(r.Dir, "chapter-3.txt")
 			if err := os.WriteFile(file, []byte(lookText), 0o644); err != nil {
 				return err

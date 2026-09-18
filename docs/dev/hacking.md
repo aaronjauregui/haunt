@@ -96,7 +96,7 @@ the report lists what was missing:
   it.
 - `claude` on `PATH`, logged in to a Claude subscription, with no
   `ANTHROPIC_API_KEY` in its environment, for the judge.
-- Optionally `[ai.image]` for the `draw` case and `[ai.vision]` for
+- Optionally `[backend.image]` for the `draw` case and `[backend.vision]` for
   `look`; without them those cases are skipped.
 
 ### What a case is
@@ -151,9 +151,9 @@ info with no debug topics: a handful of lines per session.
 
     HAUNT_LOG=debug haunt run            # every topic
     HAUNT_DEBUG=brain,curiosity haunt run
-    HAUNT_AI_DEBUG=1                     # backend requests
+    HAUNT_BACKEND_DEBUG=1                     # backend requests
 
-Topics: `session`, `brain`, `ai`, `prompt`, `balloon`, `anim`, `input`,
+Topics: `session`, `brain`, `backend`, `prompt`, `balloon`, `anim`, `input`,
 `screen`, `memory`, `store`, `wayland`, `place`, `curiosity`, `tool`,
 `control`. The same settings live under `[log]` in the config; the
 environment wins. A misspelled level or topic is reported at startup.

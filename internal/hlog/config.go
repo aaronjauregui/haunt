@@ -17,7 +17,7 @@ type Config struct {
 	// blunt instrument; Topics is the sharp one.
 	Level string `toml:"level"`
 	// Topics lists the subsystems whose debug output is wanted, e.g.
-	// ["ai", "wayland"]. "all" enables everything.
+	// ["backend", "wayland"]. "all" enables everything.
 	Topics []string `toml:"debug"`
 }
 

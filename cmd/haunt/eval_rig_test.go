@@ -98,9 +98,9 @@ type rigOptions struct {
 	Config string
 	// NotesSeed is what the notes file holds before the ghost starts.
 	NotesSeed string
-	// AI names [ai.*] sections ("image", "vision") copied from the
+	// Backend names [backend.*] sections ("image", "vision") copied from the
 	// person's config into the trial's, for the draw and look tools.
-	AI []string
+	Backend []string
 	// Screen declares the screen capability, for the look tool. haunt run
 	// on a ghost's directory grants what it declares, so no prompt comes.
 	Screen bool
@@ -188,11 +188,11 @@ func newEvalRig(t *testing.T, opts rigOptions) (*evalRig, error) {
 	if err := os.MkdirAll(r.hr.CfgDir, 0o755); err != nil {
 		return nil, err
 	}
-	ai, err := rigUserAI(opts.AI)
+	copied, err := rigUserBackend(opts.Backend)
 	if err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(filepath.Join(r.hr.CfgDir, "config.toml"), []byte(cfg+ai+"\n"+opts.Config), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(r.hr.CfgDir, "config.toml"), []byte(cfg+copied+"\n"+opts.Config), 0o644); err != nil {
 		return nil, err
 	}
 	if err := rigBuild(r.hr.Bin, "."); err != nil {
@@ -1002,10 +1002,10 @@ capabilities = ["message", "tell"]
 wasm = "brain.wasm"
 `
 
-// rigUserAI copies the named [ai.*] sections from the person's config, as
+// rigUserBackend copies the named [backend.*] sections from the person's config, as
 // TOML for the trial's. A section the person has not configured is left
 // out; the case that needs it says so with Needs.
-func rigUserAI(names []string) (string, error) {
+func rigUserBackend(names []string) (string, error) {
 	if len(names) == 0 {
 		return "", nil
 	}
@@ -1017,18 +1017,18 @@ func rigUserAI(names []string) (string, error) {
 	if _, err := toml.DecodeFile(path, &raw); err != nil {
 		return "", err
 	}
-	all, _ := raw["ai"].(map[string]any)
-	ai := map[string]any{}
+	all, _ := raw["backend"].(map[string]any)
+	sections := map[string]any{}
 	for _, n := range names {
 		if sec, ok := all[n]; ok {
-			ai[n] = sec
+			sections[n] = sec
 		}
 	}
-	if len(ai) == 0 {
+	if len(sections) == 0 {
 		return "", nil
 	}
 	var b bytes.Buffer
-	if err := toml.NewEncoder(&b).Encode(map[string]any{"ai": ai}); err != nil {
+	if err := toml.NewEncoder(&b).Encode(map[string]any{"backend": sections}); err != nil {
 		return "", err
 	}
 	return b.String(), nil
@@ -1292,7 +1292,7 @@ first_token_timeout = 90
 provider = "zai"
 name = "glm-5.3"
 
-[ai.image]
+[backend.image]
 backend = "comfyui"
 
 [awareness]
@@ -1322,7 +1322,7 @@ dwell = "5m"
 	if m := got.Hermes.Model; m == nil || m.Provider != "zai" || m.Default != "glm-5.3" {
 		t.Errorf("trial [hermes.model] = %+v, want the person's", m)
 	}
-	if got.AI.Image.Backend == "comfyui" || got.Awareness.Dwell != "" {
+	if got.Backend.Image.Backend == "comfyui" || got.Awareness.Dwell != "" {
 		t.Errorf("the trial took more of the person's config than hermes:\n%s", text)
 	}
 

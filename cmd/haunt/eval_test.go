@@ -42,7 +42,7 @@ import (
 type evalCase struct {
 	Name string
 	// Needs names optional prerequisites the case cannot run without
-	// ("foot", "ai.image", "ai.vision"). Without one, every trial of the
+	// ("foot", "backend.image", "backend.vision"). Without one, every trial of the
 	// case is skipped and the report says why at the top.
 	Needs []string
 	// MaxWords raises always/length's cap of 60 words for a case whose
@@ -77,7 +77,7 @@ type evalTrial struct {
 	*testing.T
 	Case  *evalCase
 	Index int          // 1-based trial number within the case
-	User  *config.File // the person's config: [hermes], [ai.*], read once
+	User  *config.File // the person's config: [hermes], [backend.*], read once
 }
 
 // judgeItem is one reply a judged grader puts to the judge, with the
@@ -534,14 +534,14 @@ func checkPrerequisites(e prereqEnv) prereqs {
 			Detail: "set in the environment; the judge removes it from claude's, so it bills the subscription"})
 	}
 
-	var ai struct{ image, vision bool }
-	if e.Config != nil && e.Config.AI != nil {
-		ai.image = e.Config.AI.Image.BaseURL != "" || e.Config.AI.Image.Model != ""
-		ai.vision = e.Config.AI.Vision.BaseURL != ""
+	var have struct{ image, vision bool }
+	if e.Config != nil && e.Config.Backend != nil {
+		have.image = e.Config.Backend.Image.BaseURL != "" || e.Config.Backend.Image.Model != ""
+		have.vision = e.Config.Backend.Vision.BaseURL != ""
 	}
 	ps = append(ps,
-		prereq{Name: "ai.image", Found: ai.image, Detail: map[bool]string{true: "configured", false: "no [ai.image] in the config; the draw case skips"}[ai.image]},
-		prereq{Name: "ai.vision", Found: ai.vision, Detail: map[bool]string{true: "configured", false: "no [ai.vision] in the config; the look case skips"}[ai.vision]},
+		prereq{Name: "backend.image", Found: have.image, Detail: map[bool]string{true: "configured", false: "no [backend.image] in the config; the draw case skips"}[have.image]},
+		prereq{Name: "backend.vision", Found: have.vision, Detail: map[bool]string{true: "configured", false: "no [backend.vision] in the config; the look case skips"}[have.vision]},
 	)
 	return ps
 }

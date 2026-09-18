@@ -38,7 +38,7 @@ internal/
   hermes             haunt's side of hermes-agent: profile, gateway, session, turns, envelope, skills install
   control            the per-ghost Unix socket: inbound messages, and tool_list/tool_call for mcp-serve
   mcp                a small MCP stdio client: start a server, list its tools, call one
-  ai                 driver-owned backends for drawing and looking, and the hourly budgets
+  backend            the models the driver calls itself, for drawing and looking, and the hourly budgets
   shell              the shell format: layers, variants, poses, clips, transforms, hit regions
   sprite             decoded art: premultiplied buffers and alpha input regions
   artimport          OpenRaster drawing to shell

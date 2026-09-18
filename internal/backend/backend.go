@@ -1,11 +1,11 @@
-// Package ai is the driver-owned backend layer for the verbs the driver
+// Package backend is the driver-owned backend layer for the verbs the driver
 // performs itself: drawing a picture and looking at the screen, plus the
 // hourly ration on tool calls. Brains never hold API keys or talk to
 // backends; the driver calls the user-configured backend within budget.
 // Conversation is hermes's (internal/hermes). Local-first: any
 // OpenAI-compatible endpoint works (Ollama, llama.cpp server, vLLM, cloud
 // providers), and ComfyUI for images.
-package ai
+package backend
 
 import (
 	"context"
@@ -17,7 +17,7 @@ import (
 	"github.com/aaronjauregui/haunt/internal/hlog"
 )
 
-// Config is the [ai] portion of the user config. The *user* chooses
+// Config is the [backend] portion of the user config. The *user* chooses
 // backends; ghosts only declare that they want the capability.
 //
 // Conversation is not here: a ghost talks through hermes, which owns the
@@ -29,19 +29,13 @@ type Config struct {
 	Vision VisionConfig `toml:"vision"`
 	Budget BudgetConfig `toml:"budget"`
 
-	// ExpressionInference chooses how scripted dialogue is mapped to shell
-	// poses: "lexicon" (default) uses the driver's free word table, and
-	// "off" leaves the face alone entirely. A ghost on hermes wears a face
-	// by calling its face tool; the lexicon is the fallback when it did not.
-	ExpressionInference string `toml:"expression_inference"`
-
 	// ToolTimeout is how long one tool call may take, in seconds (default
 	// 120).
 	ToolTimeout int `toml:"tool_timeout"`
 
 	// LogPrompts dumps every request this layer sends — the vision question,
 	// the resolved image parameters — to the driver log. Off by default and
-	// never in session recordings. HAUNT_AI_DEBUG=1 turns it on without
+	// never in session recordings. HAUNT_BACKEND_DEBUG=1 turns it on without
 	// editing the config.
 	LogPrompts bool `toml:"log_prompts"`
 }
@@ -111,7 +105,7 @@ const (
 	defaultToolTimeout = 2 * time.Minute
 )
 
-// WithDefaults returns cfg with the budget defaults filled in. The [ai]
+// WithDefaults returns cfg with the budget defaults filled in. The [backend]
 // section is read for it by internal/config, which owns the file; this is
 // only the part that knows what an absent budget should mean.
 func WithDefaults(cfg Config) *Config {
@@ -208,24 +202,6 @@ func (s *Service) trace(format string, args ...any) {
 	}
 }
 
-// Expression modes.
-const (
-	ExpressionOff     = "off"
-	ExpressionLexicon = "lexicon"
-)
-
-// ExpressionMode is how dialogue should be mapped to faces, defaulting to
-// the word table. Anything else — including the "llm" mode that went with
-// the one-shot loop — reads as the default.
-func (s *Service) ExpressionMode() string {
-	switch s.cfg.ExpressionInference {
-	case ExpressionOff, ExpressionLexicon:
-		return s.cfg.ExpressionInference
-	default:
-		return ExpressionLexicon
-	}
-}
-
 // VisionEnabled reports whether a vision model is configured.
 func (s *Service) VisionEnabled() bool {
 	return s.cfg.Vision.Model != "" && s.cfg.Vision.BaseURL != ""
@@ -266,7 +242,7 @@ func (s *Service) ImageCacheKey() string {
 // GenerateImage produces PNG bytes for a prompt.
 func (s *Service) GenerateImage(ctx context.Context, prompt string) ([]byte, error) {
 	if !s.ImageEnabled() {
-		return nil, fmt.Errorf("no image backend configured (set [ai.image] base_url in the haunt config)")
+		return nil, fmt.Errorf("no image backend configured (set [backend.image] base_url in the haunt config)")
 	}
 	if err := s.budgets.image.spend(); err != nil {
 		return nil, fmt.Errorf("image budget: %w", err)

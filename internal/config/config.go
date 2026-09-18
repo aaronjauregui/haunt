@@ -22,7 +22,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/aaronjauregui/haunt/internal/ai"
+	"github.com/aaronjauregui/haunt/internal/backend"
 	"github.com/aaronjauregui/haunt/internal/hermes"
 	"github.com/aaronjauregui/haunt/internal/quiet"
 	"github.com/aaronjauregui/haunt/internal/session"
@@ -38,7 +38,7 @@ type File struct {
 	Path string
 
 	Quiet     quiet.Config
-	AI        *ai.Config
+	Backend   *backend.Config
 	Animation AnimationConfig
 	Awareness AwarenessConfig
 	Curiosity CuriosityConfig
@@ -50,7 +50,7 @@ type File struct {
 // derived fields without them looking like things a user may set.
 type root struct {
 	Quiet     quiet.Config    `toml:"quiet"`
-	AI        ai.Config       `toml:"ai"`
+	Backend   backend.Config  `toml:"backend"`
 	Animation AnimationConfig `toml:"animation"`
 	Awareness AwarenessConfig `toml:"awareness"`
 	Curiosity CuriosityConfig `toml:"curiosity"`
@@ -95,7 +95,7 @@ func Load() (*File, error) {
 	f := &File{
 		Path:      path,
 		Quiet:     r.Quiet,
-		AI:        ai.WithDefaults(r.AI),
+		Backend:   backend.WithDefaults(r.Backend),
 		Animation: r.Animation,
 		Awareness: r.Awareness,
 		Curiosity: r.Curiosity,
@@ -114,6 +114,28 @@ type AnimationConfig struct {
 	// ghost saying something, and a companion that ignores its own brain is
 	// broken rather than considerate.
 	ReducedMotion bool `toml:"reduced_motion"`
+	// ExpressionInference chooses how scripted dialogue is mapped to shell
+	// poses: "lexicon" (default) uses the driver's free word table, and
+	// "off" leaves the face alone entirely. A ghost on hermes wears a face
+	// by calling its face tool; the lexicon is the fallback when it did not.
+	ExpressionInference string `toml:"expression_inference"`
+}
+
+// Expression modes.
+const (
+	ExpressionOff     = "off"
+	ExpressionLexicon = "lexicon"
+)
+
+// ExpressionMode is ExpressionInference with its default: the word table.
+// Anything unknown reads as the default.
+func (c AnimationConfig) ExpressionMode() string {
+	switch c.ExpressionInference {
+	case ExpressionOff, ExpressionLexicon:
+		return c.ExpressionInference
+	default:
+		return ExpressionLexicon
+	}
 }
 
 // AwarenessConfig is the [awareness] portion of the user config: what the

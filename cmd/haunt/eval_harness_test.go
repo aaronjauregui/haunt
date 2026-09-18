@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aaronjauregui/haunt/internal/ai"
+	"github.com/aaronjauregui/haunt/internal/backend"
 	"github.com/aaronjauregui/haunt/internal/config"
 	"github.com/aaronjauregui/haunt/internal/hermes"
 )
@@ -259,18 +259,18 @@ func TestEvalHarnessPrerequisites(t *testing.T) {
 	if why := ps.unmet([]string{"foot"}); why != "" {
 		t.Errorf("foot unmet: %s", why)
 	}
-	if why := ps.unmet([]string{"ai.image"}); why != "skipped: no ai.image" {
-		t.Errorf("ai.image: %q", why)
+	if why := ps.unmet([]string{"backend.image"}); why != "skipped: no backend.image" {
+		t.Errorf("backend.image: %q", why)
 	}
 	if modelName(cfg) != "openrouter/some/model" {
 		t.Errorf("model %q", modelName(cfg))
 	}
 
-	cfg.AI = &ai.Config{}
-	cfg.AI.Image.BaseURL = "http://localhost:8188"
-	cfg.AI.Vision.BaseURL = "http://localhost:11434/v1"
+	cfg.Backend = &backend.Config{}
+	cfg.Backend.Image.BaseURL = "http://localhost:8188"
+	cfg.Backend.Vision.BaseURL = "http://localhost:11434/v1"
 	ps = checkPrerequisites(fakeMachine(slices.DeleteFunc(slices.Clone(all), func(s string) bool { return s == "foot" }), env, cfg))
-	if ps.unmet([]string{"ai.image", "ai.vision"}) != "" || ps.unmet([]string{"foot"}) != "skipped: no foot" {
+	if ps.unmet([]string{"backend.image", "backend.vision"}) != "" || ps.unmet([]string{"foot"}) != "skipped: no foot" {
 		t.Errorf("optional: %+v", ps)
 	}
 	if len(ps.missing()) > 0 {
@@ -355,7 +355,7 @@ func harnessCases() []evalCase {
 		{Name: "panicky", Drive: func(*evalTrial) (Evidence, error) { panic("boom") }},
 		{Name: "skipper", Drive: func(*evalTrial) (Evidence, error) { return Evidence{}, skipTrial("no %s", "thing") }},
 		{Name: "tskip", Drive: func(tr *evalTrial) (Evidence, error) { tr.Skip("sway unavailable"); return Evidence{}, nil }},
-		{Name: "needy", Needs: []string{"ai.image"}, Drive: canned(good)},
+		{Name: "needy", Needs: []string{"backend.image"}, Drive: canned(good)},
 		{Name: "faulty", Drive: canned(good), Graders: []Grader{{Name: "event arrived", Fault: true,
 			Check: func(Evidence) (bool, string) { return false, "no kind=session turn" }}}},
 		{Name: "crashlog", Drive: canned(Evidence{Log: "panic: nil map\n"})},
@@ -372,7 +372,7 @@ func harnessCases() []evalCase {
 }
 
 func harnessPrereqs() prereqs {
-	return prereqs{{Name: "ai.image", Found: false}, {Name: "foot", Found: true}}
+	return prereqs{{Name: "backend.image", Found: false}, {Name: "foot", Found: true}}
 }
 
 func outcomes(run *evalRun) map[string][]string {
@@ -415,7 +415,7 @@ func TestEvalHarnessRun(t *testing.T) {
 	for _, c := range run.Cases {
 		switch c.Name {
 		case "needy":
-			if c.Skipped != "skipped: no ai.image" {
+			if c.Skipped != "skipped: no backend.image" {
 				t.Errorf("needy skipped %q", c.Skipped)
 			}
 		case "good":
@@ -513,7 +513,7 @@ func TestEvalHarnessReport(t *testing.T) {
 	}
 	report, _ := os.ReadFile(filepath.Join(dir, "report.md"))
 	for _, want := range []string{
-		"Model m1", "## Not run", "- ai.image", "case `needy` skipped: no ai.image",
+		"Model m1", "## Not run", "- backend.image", "case `needy` skipped: no backend.image",
 		"| good | 3 | 0 | 0 | 0 | 100% |", "no baseline",
 		"## Failing trials", "### bad #1: fail", "**acted draw** fail: no draw call",
 		"### broken #1: error", "hermes never came up",
@@ -568,7 +568,7 @@ func TestEvalHarnessReport(t *testing.T) {
 		t.Errorf("deltas missing:\n%s", report2)
 	}
 	strict := strings.Join(run2.strictFailures(), "\n")
-	for _, want := range []string{"flaky: 0% against a baseline of 100%", "needy: skipped: no ai.image", "skipper: 3 of 3 trials skipped"} {
+	for _, want := range []string{"flaky: 0% against a baseline of 100%", "needy: skipped: no backend.image", "skipper: 3 of 3 trials skipped"} {
 		if !strings.Contains(strict, want) {
 			t.Errorf("strict lacks %q:\n%s", want, strict)
 		}

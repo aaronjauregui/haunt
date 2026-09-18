@@ -87,11 +87,11 @@ func TestHermesGhostDraws(t *testing.T) {
 			Reply: "there: {tool}"},
 		{Match: "", Reply: "echo: {input}"},
 	}, `
-[ai.image]
+[backend.image]
 base_url = "`+backend.URL+`/v1"
 model = "fake"
 
-[ai.budget]
+[backend.budget]
 image_requests_per_hour = 2
 `)
 	gDir := filepath.Join(dir, "wisp")

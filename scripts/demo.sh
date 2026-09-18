@@ -53,7 +53,7 @@ EOF
 # the multi-ghost behaviour: neither opens on top of the other, and `haunt
 # say` follows whichever you last poked. Whisper is the scripted example
 # brain, built to WASM; wisp declares no brain at all and so runs on hermes
-# ([hermes] in ~/.config/haunt/config.toml), drawing via [ai.image].
+# ([hermes] in ~/.config/haunt/config.toml), drawing via [backend.image].
 seriko="${SERIKO:-}"
 ghosts="${GHOST:-whisper}"
 ghost_dirs=()

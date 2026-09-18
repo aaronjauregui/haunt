@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aaronjauregui/haunt/internal/ai"
+	"github.com/aaronjauregui/haunt/internal/backend"
 	"github.com/aaronjauregui/haunt/internal/mcp"
 	"github.com/aaronjauregui/haunt/internal/proto"
 )
@@ -60,7 +60,7 @@ func actingGhost(t *testing.T) (*Ghost, *fakeServer, *recorder) {
 	}
 	// A real allowance, so the budget is the driver's own, and a store to
 	// journal into.
-	g.aiSvc = ai.NewService(&ai.Config{}, g.log)
+	g.backend = backend.NewService(&backend.Config{}, g.log)
 	g.store = &memStore{m: map[string]string{}}
 	return g, srv, r
 }
@@ -382,8 +382,8 @@ func TestEmptyArgumentsMeanNone(t *testing.T) {
 // past it however keen the model is.
 func TestToolBudgetRefuses(t *testing.T) {
 	g, srv, _ := actingGhost(t)
-	g.aiSvc = ai.NewService(&ai.Config{
-		Budget: ai.BudgetConfig{ToolRequestsPerHour: 1},
+	g.backend = backend.NewService(&backend.Config{
+		Budget: backend.BudgetConfig{ToolRequestsPerHour: 1},
 	}, g.log)
 	answer(t, g, consentAllow)
 

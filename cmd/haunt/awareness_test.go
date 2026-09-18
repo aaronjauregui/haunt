@@ -204,7 +204,7 @@ func TestLookSendsTheFocusedWindow(t *testing.T) {
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	config := fmt.Sprintf("[ai.vision]\nbase_url = %q\nmodel = \"fake-vision\"\n", vision.URL+"/v1")
+	config := fmt.Sprintf("[backend.vision]\nbase_url = %q\nmodel = \"fake-vision\"\n", vision.URL+"/v1")
 	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(config), 0o644); err != nil {
 		t.Fatal(err)
 	}

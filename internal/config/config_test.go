@@ -33,7 +33,7 @@ away = "45m"
 [curiosity]
 actions_per_day = 3
 
-[ai.vision]
+[backend.vision]
 base_url = "http://localhost:11434/v1"
 model = "qwen2.5vl"
 
@@ -45,7 +45,7 @@ first_token_timeout = 45
 [memory]
 consolidations_per_day = 1
 
-[ai.llm]
+[backend.llm]
 model = "qwen2.5"
 `)
 	f, err := Load()
@@ -64,15 +64,15 @@ model = "qwen2.5"
 	if perGhost, room := f.Allowances(); perGhost != 3 || room != -1 {
 		t.Errorf("allowances = (%d, %d), want (3, -1)", perGhost, room)
 	}
-	if f.AI.Vision.Model != "qwen2.5vl" {
-		t.Errorf("[ai.vision] model = %q", f.AI.Vision.Model)
+	if f.Backend.Vision.Model != "qwen2.5vl" {
+		t.Errorf("[backend.vision] model = %q", f.Backend.Vision.Model)
 	}
 	if got := f.Hermes.FirstTokenTimeout().Seconds(); got != 45 {
 		t.Errorf("[hermes] first_token_timeout = %vs, want 45", got)
 	}
 	// Filled in at load, so nothing downstream re-derives them.
-	if f.AI.Budget.VisionRequestsPerHour == 0 {
-		t.Error("the AI budget defaults were not applied")
+	if f.Backend.Budget.VisionRequestsPerHour == 0 {
+		t.Error("the backend budget defaults were not applied")
 	}
 }
 

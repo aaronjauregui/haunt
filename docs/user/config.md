@@ -13,6 +13,7 @@ hours = []                      # "HH:MM-HH:MM" windows; overnight allowed, "22:
 
 [animation]
 reduced_motion = false          # stop idle animation and the face at rest
+expression_inference = "lexicon"   # "lexicon": a face from the words of a scripted line; "off": leave the face alone
 
 [awareness]                     # what a ghost with `window` may notice
 ignore = ["1password", "bitwarden", "keepass", "gnome-keyring", "seahorse",
@@ -27,12 +28,11 @@ actions_per_day = 12            # unprompted actions per ghost, per rolling 24 h
 # actions_per_day_total = 18    # across every resident ghost; default grows sub-linearly with the room
 obligations_per_day = 24        # things you put on its books (reminders, occasions); a backstop, not a dial
 
-[ai]
-expression_inference = "lexicon"   # "lexicon": a face from the words of a scripted line; "off": leave the face alone
+[backend]                       # the models the driver calls itself; conversation is [hermes]
 tool_timeout = 120              # seconds one tool-server call may take
-log_prompts = false             # dump vision questions and image parameters to the log (HAUNT_AI_DEBUG=1 does the same)
+log_prompts = false             # dump vision questions and image parameters to the log (HAUNT_BACKEND_DEBUG=1 does the same)
 
-[ai.image]                      # optional: lets a ghost with `imagine` draw
+[backend.image]                 # optional: lets a ghost with `imagine` draw
 backend = "openai"              # "openai": any /images/generations endpoint; "comfyui": the workflow API
 base_url = ""
 model = ""                      # model name, or a ComfyUI checkpoint filename
@@ -43,12 +43,12 @@ cfg = 0.0
 sampler = ""
 negative = ""
 
-[ai.vision]                     # optional: lets a ghost with `screen` look
+[backend.vision]                # optional: lets a ghost with `screen` look
 base_url = ""                   # OpenAI-compatible, e.g. "http://localhost:11434/v1"; empty disables looking
 model = ""                      # must be vision-capable
 api_key_env = ""
 
-[ai.budget]                     # per hour, shared across every resident ghost
+[backend.budget]                # per hour, shared across every resident ghost
 image_requests_per_hour = 12
 vision_requests_per_hour = 60
 tool_requests_per_hour = 60
@@ -67,7 +67,7 @@ first_token_timeout = 30        # seconds of silence before a turn is given up o
 
 [log]
 level = "info"                  # "error", "warn", "info" or "debug" (every topic)
-debug = []                      # topics whose debug output is wanted, e.g. ["ai", "wayland"]; "all"
+debug = []                      # topics whose debug output is wanted, e.g. ["backend", "wayland"]; "all"
 ```
 
 Any OpenAI-compatible endpoint works for images and vision: Ollama,
@@ -83,7 +83,7 @@ environment.
 | `HAUNT_RUNTIME_DIR` | where control sockets go (default under `XDG_RUNTIME_DIR`) |
 | `HAUNT_LOG` | log level, overriding the config |
 | `HAUNT_DEBUG` | comma-separated debug topics, overriding the config |
-| `HAUNT_AI_DEBUG` | `1` logs backend requests |
+| `HAUNT_BACKEND_DEBUG` | `1` logs backend requests |
 | `HERMES_HOME` | hermes root when `[hermes] home` is unset |
 | `HERMES_IMAGE` | image tag for `scripts/hermes-docker` |
 | `HAUNT_HERMES_ENV` | keys file for the container wrapper (default `~/.config/haunt/hermes.env`) |

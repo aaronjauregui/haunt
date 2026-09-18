@@ -11,7 +11,7 @@
 // So a line has a level and a topic. Levels answer "does this matter" —
 // errors and warnings always show, info is the short account of a session's
 // life, debug is the running commentary. Topics answer "matter to whom" —
-// debug is enabled per subsystem (`HAUNT_DEBUG=ai,wayland`), because a
+// debug is enabled per subsystem (`HAUNT_DEBUG=backend,wayland`), because a
 // person chasing a rendering bug does not want intentions narrating
 // themselves.
 //
@@ -83,8 +83,8 @@ const (
 	Session Topic = "session"
 	// Brain covers the brain host and the intents it emits.
 	Brain Topic = "brain"
-	// AI is requests to models and what came back — but not their content.
-	AI Topic = "ai"
+	// Backend is requests to models and what came back — but not their content.
+	Backend Topic = "backend"
 	// Prompt is the content: system prompts, conversation, replies. Its
 	// own topic because it is the ghost's private context and the user's
 	// words, and because it is enormous.
@@ -121,7 +121,7 @@ const (
 // Topics is every topic that can be enabled, for `HAUNT_DEBUG=help` and
 // the documentation to stay honest about what exists.
 var Topics = []Topic{
-	Session, Brain, AI, Prompt, Balloon, Anim, Input,
+	Session, Brain, Backend, Prompt, Balloon, Anim, Input,
 	Screen, Memory, Store, Wayland, Place, Curiosity, Control, Tool,
 }
 
@@ -164,7 +164,7 @@ func New(w io.Writer, level Level, debug []Topic) *Logger {
 
 // With returns a logger that also writes the given debug topics, to the
 // same destination. It is for the switches that predate topics and mean
-// one specific kind of debug output — `[ai] log_prompts`, say — so that
+// one specific kind of debug output — `[backend] log_prompts`, say — so that
 // asking for the output and being allowed to write it stay the same
 // decision. Without it a subsystem can be told "trace yourself" and then
 // have every line filtered out from under it.
@@ -300,7 +300,7 @@ func (l *Logger) Describe() string {
 // FromEnv builds a logger from the environment, over the given defaults:
 //
 //	HAUNT_LOG=warn|info|debug   the level floor (default info)
-//	HAUNT_DEBUG=ai,wayland      debug topics, or "all"
+//	HAUNT_DEBUG=backend,wayland      debug topics, or "all"
 //
 // Both are additive to whatever the config file asked for, because the
 // environment is what a person reaches for when something is wrong right
@@ -314,8 +314,8 @@ func FromEnv(w io.Writer, level Level, debug []Topic) *Logger {
 	debug = append(debug, parseTopics(os.Getenv("HAUNT_DEBUG"))...)
 	// Kept working because they are in the documentation and in people's
 	// shell history: the old single-purpose switches are now topics.
-	if os.Getenv("HAUNT_AI_DEBUG") == "1" {
-		debug = append(debug, AI, Prompt)
+	if os.Getenv("HAUNT_BACKEND_DEBUG") == "1" {
+		debug = append(debug, Backend, Prompt)
 	}
 	if os.Getenv("HAUNT_WAYLAND_DEBUG") == "1" {
 		debug = append(debug, Wayland)

@@ -446,10 +446,10 @@ func (g *Ghost) callTool(c toolCall) acted {
 	// The allowance is the driver's, and there is no acting without one:
 	// the same rule the AI executors state, since a ghost with no service
 	// behind it has no budget to spend and no business spending one.
-	if g.aiSvc == nil {
+	if g.backend == nil {
 		return acted{Text: "no AI service, so no allowance to act against", Refused: true}
 	}
-	if err := g.aiSvc.SpendToolCall(); err != nil {
+	if err := g.backend.SpendToolCall(); err != nil {
 		g.log.Info(hlog.Tool, "%s: %v", ref, err)
 		return acted{Text: err.Error(), Refused: true}
 	}
@@ -473,7 +473,7 @@ func (g *Ghost) callTool(c toolCall) acted {
 		indicator = g.startWaiting(wait)
 	}
 
-	ctx, cancel := context.WithTimeout(g.sessionContext(), g.aiSvc.ToolTimeout())
+	ctx, cancel := context.WithTimeout(g.sessionContext(), g.backend.ToolTimeout())
 	defer cancel()
 	g.log.Info(hlog.Tool, "running %s", ref)
 	res, err := e.server.Call(ctx, e.tool.Name, args)

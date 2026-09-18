@@ -28,7 +28,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aaronjauregui/haunt/internal/ai"
+	"github.com/aaronjauregui/haunt/internal/backend"
 	"github.com/aaronjauregui/haunt/internal/config"
 	"github.com/aaronjauregui/haunt/internal/ghost"
 	"github.com/aaronjauregui/haunt/internal/hlog"
@@ -91,7 +91,7 @@ func Run(ctx context.Context, members []Member, opts Options) error {
 	var room *Room
 	var stage *Stage
 	var budget *Budget
-	var rations *ai.Budgets
+	var rations *backend.Budgets
 	if !solo {
 		room = NewRoom()
 		// Ghosts can see each other. Only ghosts this supervisor is
@@ -108,7 +108,7 @@ func Run(ctx context.Context, members []Member, opts Options) error {
 		if err != nil {
 			return err
 		}
-		rations = ai.NewBudgets(cfg.AI.Budget)
+		rations = backend.NewBudgets(cfg.Backend.Budget)
 		perGhost, configured := cfg.Allowances()
 		limit := Ceiling(perGhost, configured, len(members))
 		budget = NewBudget(opts.StateRoot, limit, log)
@@ -146,7 +146,7 @@ func Run(ctx context.Context, members []Member, opts Options) error {
 			// and tend takes a fresh seat for each life — see there.
 			o.Spots = room.For(m.Name)
 			o.Initiative = func(what string) bool { return budget.Spend(m.Name, what) }
-			o.AIBudgets = rations
+			o.Budgets = rations
 		}
 		// Every ghost reports its own arrival; the caller hears about it
 		// once, when the last of them has landed. A ghost that comes back

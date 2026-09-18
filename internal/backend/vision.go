@@ -1,4 +1,4 @@
-package ai
+package backend
 
 import (
 	"bytes"
@@ -23,7 +23,7 @@ import (
 // here.
 func (s *Service) Look(ctx context.Context, question string, png []byte) (string, error) {
 	if !s.VisionEnabled() {
-		return "", fmt.Errorf("no vision model configured (set [ai.vision] base_url and model in the haunt config)")
+		return "", fmt.Errorf("no vision model configured (set [backend.vision] base_url and model in the haunt config)")
 	}
 	if err := s.budgets.vision.spend(); err != nil {
 		return "", fmt.Errorf("vision budget: %w", err)

@@ -50,7 +50,7 @@ func (g *Ghost) execImagine(in proto.Intent, userDriven bool) {
 func (g *Ghost) imagine(prompt string, fresh bool, waitText string, lingerMS int) (string, error) {
 	// The capability was settled before this was called (execIntent's
 	// startAI, or the draw tool).
-	if g.aiSvc == nil || !g.aiSvc.ImageEnabled() {
+	if g.backend == nil || !g.backend.ImageEnabled() {
 		return "", fmt.Errorf("no image backend configured in the haunt config")
 	}
 	// A local diffusion run takes the whole GPU for seconds at a time,
@@ -58,7 +58,7 @@ func (g *Ghost) imagine(prompt string, fresh bool, waitText string, lingerMS int
 	// reported rather than silent: the user asked for a picture, so they
 	// should hear why there isn't one.
 	if g.desktop != nil && g.desktop.Fullscreen() {
-		g.log.Info(hlog.AI, "imagine refused: something is fullscreen")
+		g.log.Info(hlog.Backend, "imagine refused: something is fullscreen")
 		return "", fmt.Errorf("not while something is fullscreen — it would stutter")
 	}
 
@@ -71,7 +71,7 @@ func (g *Ghost) imagine(prompt string, fresh bool, waitText string, lingerMS int
 		}
 		salt = "\x00" + hex.EncodeToString(nonce[:])
 	}
-	key := sha256.Sum256([]byte(g.aiSvc.ImageCacheKey() + "\x00" + prompt + salt))
+	key := sha256.Sum256([]byte(g.backend.ImageCacheKey() + "\x00" + prompt + salt))
 	cachePath := filepath.Join(g.cacheDir, hex.EncodeToString(key[:8])+".png")
 	data, err := os.ReadFile(cachePath)
 	if err != nil {
@@ -81,10 +81,10 @@ func (g *Ghost) imagine(prompt string, fresh bool, waitText string, lingerMS int
 		// about it still shows one; a cache hit skips it, because there is
 		// nothing to wait for.
 		wait := g.startWaiting(waitText)
-		data, err = g.aiSvc.GenerateImage(g.sessionContext(), prompt)
+		data, err = g.backend.GenerateImage(g.sessionContext(), prompt)
 		wait.Stop()
 		if err != nil {
-			g.log.Warn(hlog.AI, "imagine: %v", err)
+			g.log.Warn(hlog.Backend, "imagine: %v", err)
 			return "", err
 		}
 		if err := os.MkdirAll(g.cacheDir, 0o755); err == nil {

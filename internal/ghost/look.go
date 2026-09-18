@@ -51,7 +51,7 @@ func (g *Ghost) execLook(in proto.Intent) {
 // and which application it was shown, or why it was not shown anything.
 func (g *Ghost) look(asked string) (answer, app string, err error) {
 	// The capability was settled before the lock (see consent.go).
-	if g.aiSvc == nil || !g.aiSvc.VisionEnabled() {
+	if g.backend == nil || !g.backend.VisionEnabled() {
 		return "", "", fmt.Errorf("no vision model configured in the haunt config")
 	}
 	if g.desktop == nil || g.desktop.Mechanism() == "none" {
@@ -89,7 +89,7 @@ func (g *Ghost) look(asked string) (answer, app string, err error) {
 	if strings.TrimSpace(asked) != "" {
 		question = asked
 	}
-	answer, err = g.aiSvc.Look(g.sessionContext(), question, png)
+	answer, err = g.backend.Look(g.sessionContext(), question, png)
 	if err != nil {
 		g.log.Warn(hlog.Screen, "look: %v", err)
 		return "", "", err

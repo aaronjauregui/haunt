@@ -18,7 +18,7 @@ import (
 
 	"github.com/robfig/cron/v3"
 
-	"github.com/aaronjauregui/haunt/internal/ai"
+	"github.com/aaronjauregui/haunt/internal/backend"
 	"github.com/aaronjauregui/haunt/internal/balloon"
 	"github.com/aaronjauregui/haunt/internal/brain"
 	"github.com/aaronjauregui/haunt/internal/bus"
@@ -138,10 +138,10 @@ type Options struct {
 	// Spots, when set, keeps this ghost from opening on top of another
 	// one. Nil means nothing else is on screen to avoid.
 	Spots Spots
-	// AIBudgets, when set, is the hourly ration of backend calls this
+	// Budgets, when set, is the hourly ration of backend calls this
 	// ghost spends against, shared with the other resident ghosts. Nil
 	// gives the ghost one of its own, which is right when it is alone.
-	AIBudgets *ai.Budgets
+	Budgets *backend.Budgets
 	// Stage, when set, is the other resident ghosts: what this one does in
 	// public reaches them, and what they do reaches it as `observed`
 	// events. Nil means it is alone in the room.
@@ -261,9 +261,11 @@ type Ghost struct {
 	// (hermestools.go), so a gateway restart does not repeat them.
 	skillsWarned map[string]bool
 
-	aiSvc    *ai.Service
-	cacheDir string
-	aiMu     sync.Mutex // one AI request at a time per ghost
+	backend *backend.Service
+	// expressionMode is [animation] expression_inference (expression.go).
+	expressionMode string
+	cacheDir       string
+	aiMu           sync.Mutex // one AI request at a time per ghost
 
 	// Typed input (see input.go).
 	inputMu sync.Mutex
@@ -667,6 +669,7 @@ func (g *Ghost) applySettings(cfg *config.File) error {
 	g.desktop = desktop.New(g.log)
 
 	g.reducedMotion = cfg.Animation.ReducedMotion
+	g.expressionMode = cfg.Animation.ExpressionMode()
 	g.awareness = cfg.Awareness
 
 	// Initiative allowance. Persisted, so restarting the ghost is not a way
@@ -681,7 +684,7 @@ func (g *Ghost) applySettings(cfg *config.File) error {
 	// AI services: images, vision and the tool budget. Conversation is
 	// hermes's (backends are user-configured; absent config just means the
 	// capabilities error out when used).
-	g.aiSvc = ai.NewServiceWith(cfg.AI, g.log, g.opts.AIBudgets)
+	g.backend = backend.NewServiceWith(cfg.Backend, g.log, g.opts.Budgets)
 	g.hermesCfg = cfg.Hermes
 	return nil
 }
@@ -1134,7 +1137,7 @@ func (g *Ghost) execIntent(in proto.Intent) {
 		g.log.Line("ghost: " + in.Text)
 	case proto.IntentImagine:
 		g.startAI(in, aiWork{
-			name: "imagine", capability: "imagine", topic: hlog.AI, charged: true,
+			name: "imagine", capability: "imagine", topic: hlog.Backend, charged: true,
 			run: g.execImagine,
 		})
 	case proto.IntentSetExpression:
@@ -1153,7 +1156,7 @@ func (g *Ghost) execIntent(in proto.Intent) {
 		// Not charged against the daily allowance, unlike its two
 		// neighbours here, and the omission is deliberate rather than
 		// missed. Looking is rationed by the hourly vision budget it spends
-		// from (ai/vision.go) and hedged six further ways in look.go —
+		// from (backend/vision.go) and hedged six further ways in look.go —
 		// declared capability, granted capability, a configured vision
 		// model, the ignore list, nothing fullscreen, and the ghost
 		// visibly showing that it is looking. What the daily allowance

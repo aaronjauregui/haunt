@@ -3,7 +3,7 @@ package ghost
 import (
 	"strings"
 
-	"github.com/aaronjauregui/haunt/internal/ai"
+	"github.com/aaronjauregui/haunt/internal/config"
 )
 
 // Expression inference: dialogue arrives, the face follows. Hand-tagged
@@ -88,7 +88,7 @@ func (g *Ghost) inferExpression(text string) {
 	if len(poses) == 0 {
 		return // a single-image shell has no face to arrange
 	}
-	if g.aiSvc != nil && g.aiSvc.ExpressionMode() == ai.ExpressionOff {
+	if g.expressionMode == config.ExpressionOff {
 		return
 	}
 	pose := lexiconPose(text, poses)

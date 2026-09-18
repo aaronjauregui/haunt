@@ -3,7 +3,7 @@ package ghost
 import (
 	"testing"
 
-	"github.com/aaronjauregui/haunt/internal/ai"
+	"github.com/aaronjauregui/haunt/internal/config"
 	"github.com/aaronjauregui/haunt/internal/desktop"
 	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/shell"
@@ -59,11 +59,11 @@ func TestLexiconIsDeterministic(t *testing.T) {
 // expression mode.
 func expressionGhost(mode string) *Ghost {
 	return &Ghost{
-		opts:     Options{},
-		log:      hlog.Discard(),
-		manifest: &Manifest{Ghost: GhostSection{Capabilities: []string{"llm"}}},
-		shell:    shell.Builtin(64),
-		aiSvc:    ai.NewService(&ai.Config{ExpressionInference: mode}, hlog.Discard()),
+		opts:           Options{},
+		log:            hlog.Discard(),
+		manifest:       &Manifest{Ghost: GhostSection{Capabilities: []string{"llm"}}},
+		shell:          shell.Builtin(64),
+		expressionMode: mode,
 	}
 }
 
@@ -77,9 +77,9 @@ func TestExpressionModes(t *testing.T) {
 		line     string
 		wantPose string
 	}{
-		{"lexicon reads what it can", ai.ExpressionLexicon, "I'm sorry about that.", "sad"},
-		{"lexicon shrugs", ai.ExpressionLexicon, "The build is done.", "neutral"},
-		{"off is off", ai.ExpressionOff, "I'm sorry about that.", "neutral"},
+		{"lexicon reads what it can", config.ExpressionLexicon, "I'm sorry about that.", "sad"},
+		{"lexicon shrugs", config.ExpressionLexicon, "The build is done.", "neutral"},
+		{"off is off", config.ExpressionOff, "I'm sorry about that.", "neutral"},
 		{"the old llm mode reads as the lexicon", "llm", "Goodnight.", "asleep"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -94,7 +94,7 @@ func TestExpressionModes(t *testing.T) {
 
 // TestInferenceLeavesSingleImageShellsAlone: nothing to arrange.
 func TestInferenceLeavesSingleImageShellsAlone(t *testing.T) {
-	g := expressionGhost(ai.ExpressionLexicon)
+	g := expressionGhost(config.ExpressionLexicon)
 	g.shell = nil
 	g.inferExpression("Thanks!") // must not panic
 }

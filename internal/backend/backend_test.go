@@ -1,4 +1,4 @@
-package ai
+package backend
 
 import (
 	"github.com/aaronjauregui/haunt/internal/hlog"
@@ -145,7 +145,7 @@ func TestPromptTracing(t *testing.T) {
 	}
 
 	// Asking for the prompt topic turns tracing on without touching the
-	// config. (That HAUNT_AI_DEBUG=1 still selects that topic is
+	// config. (That HAUNT_BACKEND_DEBUG=1 still selects that topic is
 	// internal/hlog's business, and tested there.)
 	byTopic, viaTopic := hlog.RecorderAt(hlog.LevelInfo, hlog.Prompt)
 	s = NewService(&Config{Vision: VisionConfig{BaseURL: srv.URL + "/v1", Model: "fake"}}, byTopic)

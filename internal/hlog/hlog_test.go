@@ -14,7 +14,7 @@ func TestDefaultsAreQuiet(t *testing.T) {
 	var buf bytes.Buffer
 	l := New(&buf, LevelInfo, nil)
 	l.Error(Session, "broke")
-	l.Warn(AI, "degraded")
+	l.Warn(Backend, "degraded")
 	l.Info(Place, "placed")
 	l.Debug(Wayland, "motion 1,2")
 	l.Debug(Curiosity, "spent one")
@@ -67,7 +67,7 @@ func TestAllTopicsAndLevelDebug(t *testing.T) {
 func TestLevelFloor(t *testing.T) {
 	var buf bytes.Buffer
 	l := New(&buf, LevelError, nil)
-	l.Warn(AI, "degraded")
+	l.Warn(Backend, "degraded")
 	l.Info(Session, "placed")
 	l.Error(Session, "broke")
 	if got := buf.String(); strings.Contains(got, "degraded") || strings.Contains(got, "placed") {
@@ -85,9 +85,9 @@ func TestFromEnv(t *testing.T) {
 	}
 
 	t.Setenv("HAUNT_LOG", "")
-	t.Setenv("HAUNT_DEBUG", "ai, wayland")
+	t.Setenv("HAUNT_DEBUG", "backend, wayland")
 	l := FromEnv(&bytes.Buffer{}, LevelInfo, nil)
-	if !l.Enabled(AI, LevelDebug) || !l.Enabled(Wayland, LevelDebug) {
+	if !l.Enabled(Backend, LevelDebug) || !l.Enabled(Wayland, LevelDebug) {
 		t.Error("HAUNT_DEBUG list was not honoured")
 	}
 	if l.Enabled(Memory, LevelDebug) {
@@ -105,16 +105,16 @@ func TestFromEnv(t *testing.T) {
 // people's shell history.
 func TestLegacyDebugSwitches(t *testing.T) {
 	t.Setenv("HAUNT_DEBUG", "")
-	t.Setenv("HAUNT_AI_DEBUG", "1")
+	t.Setenv("HAUNT_BACKEND_DEBUG", "1")
 	l := FromEnv(&bytes.Buffer{}, LevelInfo, nil)
-	if !l.Enabled(Prompt, LevelDebug) || !l.Enabled(AI, LevelDebug) {
-		t.Error("HAUNT_AI_DEBUG=1 no longer traces prompts")
+	if !l.Enabled(Prompt, LevelDebug) || !l.Enabled(Backend, LevelDebug) {
+		t.Error("HAUNT_BACKEND_DEBUG=1 no longer traces prompts")
 	}
 	if l.Enabled(Wayland, LevelDebug) {
-		t.Error("HAUNT_AI_DEBUG turned on the compositor firehose too")
+		t.Error("HAUNT_BACKEND_DEBUG turned on the compositor firehose too")
 	}
 
-	t.Setenv("HAUNT_AI_DEBUG", "")
+	t.Setenv("HAUNT_BACKEND_DEBUG", "")
 	t.Setenv("HAUNT_WAYLAND_DEBUG", "1")
 	if l := FromEnv(&bytes.Buffer{}, LevelInfo, nil); !l.Enabled(Wayland, LevelDebug) {
 		t.Error("HAUNT_WAYLAND_DEBUG=1 no longer traces the compositor")
@@ -132,7 +132,7 @@ func TestUnknownTopicIsReported(t *testing.T) {
 	t.Setenv("HAUNT_CONFIG_DIR", dir)
 	t.Setenv("HAUNT_DEBUG", "")
 	t.Setenv("HAUNT_LOG", "")
-	t.Setenv("HAUNT_AI_DEBUG", "")
+	t.Setenv("HAUNT_BACKEND_DEBUG", "")
 	t.Setenv("HAUNT_WAYLAND_DEBUG", "")
 
 	var buf bytes.Buffer
@@ -159,7 +159,7 @@ func TestEnvironmentOverridesConfig(t *testing.T) {
 	t.Setenv("HAUNT_CONFIG_DIR", dir)
 	t.Setenv("HAUNT_LOG", "info")
 	t.Setenv("HAUNT_DEBUG", "")
-	t.Setenv("HAUNT_AI_DEBUG", "")
+	t.Setenv("HAUNT_BACKEND_DEBUG", "")
 	t.Setenv("HAUNT_WAYLAND_DEBUG", "")
 
 	if l := Open(&bytes.Buffer{}); !l.Enabled(Session, LevelInfo) {

@@ -51,7 +51,7 @@ demo:
 # (docs/user/hermes.md: hermes in its container
 # via scripts/hermes-docker, a model in [hermes.model]). Its hermes profile
 # lives in the demo's workdir and goes with it. Draws via your image backend
-# ([ai.image] in ~/.config/haunt/config.toml).
+# ([backend.image] in ~/.config/haunt/config.toml).
 # IDLE_MS=10000 shortens the wait before it speaks unprompted.
 demo-ai:
 	GHOST=wisp ./scripts/demo.sh

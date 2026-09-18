@@ -99,4 +99,4 @@ The driver holds the brakes, and a ghost cannot raise them.
   something you put on its books.
 - **Backend calls** are rationed per hour, shared across all resident
   ghosts: images (12), looks (60) and tool calls (60), under
-  `[ai.budget]`.
+  `[backend.budget]`.
