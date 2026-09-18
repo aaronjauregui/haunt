@@ -55,15 +55,19 @@ type Message struct {
 	Time time.Time
 	// Looked is what hermes itself did on the way to a reply, for `haunt
 	// history -why`: its memory, session search and skill calls, with
-	// what they returned. The ghost's own tools are left out; the driver
-	// records those.
+	// what they returned. The ghost's own tools are in Acted.
 	Looked []Lookup
+	// Acted is the ghost's own tools called on the way to the same reply,
+	// with the mcp__haunt__ prefix taken off: what the ghost did, as
+	// hermes recorded it, arguments and results included.
+	Acted []Lookup
 	// Interim is a reply written alongside tool calls, before the turn's
 	// last word.
 	Interim bool
 }
 
-// Lookup is one of hermes's own tool calls, and its result, both cut short.
+// Lookup is one tool call and its result, cut short unless read through
+// Client.Transcript.
 type Lookup struct {
 	Tool   string
 	Args   string

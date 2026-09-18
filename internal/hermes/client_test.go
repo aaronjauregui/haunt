@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -25,6 +26,10 @@ type fakeHermes struct {
 	bodies   []map[string]any
 	// stream answers a chat turn with a fixture's contents.
 	stream func(session, input string) string
+	// history, if set, is the session's stored messages as the API gives
+	// them; unset, a two-turn session with one lookup and one of the
+	// ghost's calls.
+	history string
 }
 
 func newFakeHermes(t *testing.T) (*fakeHermes, *httptest.Server) {
@@ -79,6 +84,10 @@ func newFakeHermes(t *testing.T) (*fakeHermes, *httptest.Server) {
 	mux.HandleFunc("GET /api/sessions/{id}/messages", auth(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("order") != "latest" || r.URL.Query().Get("limit") != "10" {
 			t.Errorf("history asked with %s", r.URL.RawQuery)
+		}
+		if f.history != "" {
+			w.Write([]byte(f.history))
+			return
 		}
 		w.Write([]byte(`{"object":"list","data":[
 			{"role":"user","content":"hello","timestamp":1789614336.5},
@@ -238,6 +247,44 @@ func TestMessages(t *testing.T) {
 	want := []Lookup{{Tool: "session_search", Args: `{"query": "oven"}`, Result: `{"results": ["they burned the bread"]}`}}
 	if !slices.Equal(msgs[2].Looked, want) || msgs[1].Looked != nil || msgs[4].Looked != nil {
 		t.Errorf("lookups %+v, want %+v on the first turn's last reply only", msgs[2].Looked, want)
+	}
+	acted := []Lookup{{Tool: "face", Args: "{}", Result: `{"result":"ok"}`}}
+	if !slices.Equal(msgs[2].Acted, acted) || msgs[4].Acted != nil {
+		t.Errorf("the ghost's calls %+v, want %+v on the first turn's last reply only", msgs[2].Acted, acted)
+	}
+}
+
+// Messages cuts a call to a line for a person; Transcript keeps it whole
+// for a reader that matches on it.
+func TestTranscriptKeepsCallsWhole(t *testing.T) {
+	long := strings.Repeat("a line of notes\n", 20)
+	if got := clip(long, lookupResult); got == long || len([]rune(got)) > lookupResult {
+		t.Fatalf("clip left %q", got)
+	}
+	f, srv := newFakeHermes(t)
+	f.sessions["haunt-moth"] = true
+	f.history = `{"object":"list","data":[
+		{"role":"user","content":"what's in my notes?"},
+		{"role":"assistant","content":"","tool_calls":[
+			{"id":"c1","type":"function","function":{"name":"mcp__haunt__notes_read","arguments":"{\"file\": \"todo\"}"}}]},
+		{"role":"tool","tool_call_id":"c1","content":` + strconv.Quote(long) + `},
+		{"role":"assistant","content":"Mostly lines."}]}`
+	saved := "haunt-moth"
+	c := testClient(srv, &saved)
+	whole, err := c.Transcript(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Lookup{{Tool: "notes_read", Args: `{"file": "todo"}`, Result: long}}
+	if len(whole) != 2 || !slices.Equal(whole[1].Acted, want) {
+		t.Fatalf("transcript %+v", whole)
+	}
+	short, err := c.Messages(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := short[1].Acted[0].Result; r == long || strings.Contains(r, "\n") {
+		t.Errorf("history result not cut to a line: %q", r)
 	}
 }
 

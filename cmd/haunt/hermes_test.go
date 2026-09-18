@@ -189,13 +189,44 @@ bundled_skills = ["humanizer"]
 		t.Fatalf("haunt history: %v: %s", err, out)
 	}
 	for _, want := range []string{"event: kind=boot", "ghost: (said nothing)", "woke, and chose not to speak",
-		"you:   remind me in ten minutes", "ghost: Done: hermes/", "did something first: mcp__haunt__intend"} {
+		"you:   remind me in ten minutes", "ghost: Done: hermes/", "did something first: session_search, mcp__haunt__intend"} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("history lacks %q:\n%s", want, out)
 		}
 	}
 	if strings.Contains(string(out), "NO_REPLY") {
 		t.Errorf("history shows the silence token:\n%s", out)
+	}
+	if !strings.Contains(string(out), "hermes used session_search") {
+		t.Errorf("history -why lacks hermes's own lookup:\n%s", out)
+	}
+
+	// `haunt history -json` is the same turns for a program: the ghost's
+	// call with its arguments and result, hermes's lookup, and the silent
+	// turn marked silent rather than carrying the token.
+	turns := historyJSON(t, rig, stateDir)
+	bi := slices.IndexFunc(turns, func(t traceRecord) bool { return strings.HasPrefix(t.Input, "kind=boot") })
+	ri := slices.IndexFunc(turns, func(t traceRecord) bool { return strings.HasPrefix(t.Input, "remind me") })
+	if bi < 0 || ri < bi {
+		t.Fatalf("history -json lacks the boot turn or the reminder after it: %+v", turns)
+	}
+	if b := turns[bi]; b.ProvokedBy != "event" || !strings.HasPrefix(b.Input, "kind=boot") || !b.Silent ||
+		b.Reply != "" || !b.SelfPrompt || len(b.Acted) != 0 {
+		t.Errorf("boot turn %+v", b)
+	}
+	r := turns[ri]
+	if r.ProvokedBy != "person" || r.Input != "remind me in ten minutes to check the oven" || r.Silent ||
+		r.Reply != remind.Reply || r.SelfPrompt || r.Window != nil || r.Time.IsZero() {
+		t.Errorf("reminder turn %+v", r)
+	}
+	var args map[string]any
+	if len(r.Acted) != 1 || r.Acted[0].Tool != "intend" || json.Unmarshal([]byte(r.Acted[0].Args), &args) != nil ||
+		args["text"] != "check the oven" || r.Acted[0].Result != call.Text {
+		t.Errorf("reminder turn acted %+v, want intend with its args and result", r.Acted)
+	}
+	if len(r.Looked) != 1 || r.Looked[0].Tool != "session_search" || r.Looked[0].Args != `{"query":"oven"}` ||
+		r.Looked[0].Result != `{"results": []}` {
+		t.Errorf("reminder turn looked %+v", r.Looked)
 	}
 
 	// 3. The profile is the ghost's.
@@ -343,17 +374,44 @@ type hermesRig struct {
 // fakeRule is one scripted answer for the fake (see rule in
 // testdata/fakehermes): the first whose Match is in the input answers.
 type fakeRule struct {
-	Match   string         `json:"match"`
-	DelayMS int            `json:"delay_ms,omitempty"`
-	Tool    string         `json:"tool,omitempty"`
-	Args    map[string]any `json:"args,omitempty"`
-	Reply   string         `json:"reply"`
+	Match      string         `json:"match"`
+	DelayMS    int            `json:"delay_ms,omitempty"`
+	Look       string         `json:"look,omitempty"`
+	LookArgs   map[string]any `json:"look_args,omitempty"`
+	LookResult string         `json:"look_result,omitempty"`
+	Tool       string         `json:"tool,omitempty"`
+	Args       map[string]any `json:"args,omitempty"`
+	Reply      string         `json:"reply"`
+}
+
+// historyJSON is `haunt history -json` for the ghost in stateDir, every
+// turn hermes keeps, each record decoded strictly so a field the command
+// grows or renames shows up here.
+func historyJSON(t *testing.T, r hermesRig, stateDir string) []traceRecord {
+	t.Helper()
+	hc := exec.Command(r.Bin, "history", "-json", "-n", "0", "-state", stateDir, "wisp")
+	hc.Env = append(os.Environ(), r.env()...)
+	out, err := hc.Output()
+	if err != nil {
+		t.Fatalf("haunt history -json: %v: %s", err, out)
+	}
+	var turns []traceRecord
+	dec := json.NewDecoder(strings.NewReader(string(out)))
+	dec.DisallowUnknownFields()
+	for dec.More() {
+		var tr traceRecord
+		if err := dec.Decode(&tr); err != nil {
+			t.Fatalf("history -json: %v:\n%s", err, out)
+		}
+		turns = append(turns, tr)
+	}
+	return turns
 }
 
 // newHermesRig builds into dir. rules nil keeps the fake's defaults (events
-// are NO_REPLY, "remind me" calls intend, anything else is echoed). extra
-// is appended to the config file, so its first lines are still [hermes]
-// keys until it opens a table of its own.
+// are NO_REPLY, "remind me" searches hermes's sessions and calls intend,
+// anything else is echoed). extra is appended to the config file, so its
+// first lines are still [hermes] keys until it opens a table of its own.
 func newHermesRig(t *testing.T, dir string, rules []fakeRule, extra string) hermesRig {
 	t.Helper()
 	r := hermesRig{
@@ -497,3 +555,4 @@ func waitHermesIntentions(t *testing.T, bin, state, rt, want string) string {
 		time.Sleep(200 * time.Millisecond)
 	}
 }
+

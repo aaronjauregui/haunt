@@ -73,6 +73,12 @@ type rule struct {
 	// Tool, if set, is a haunt tool called before replying, with Args.
 	Tool string         `json:"tool"`
 	Args map[string]any `json:"args"`
+	// Look, if set, is one of hermes's own tools (skill_view, memory, …)
+	// called first, with LookArgs. Nothing runs: the call and LookResult
+	// are only stored in the session, as hermes stores its own calls.
+	Look       string         `json:"look"`
+	LookArgs   map[string]any `json:"look_args"`
+	LookResult string         `json:"look_result"`
 	// Reply is what the model says. {tool} is replaced by the tool's
 	// result and {input} by the input.
 	Reply string `json:"reply"`
@@ -80,7 +86,8 @@ type rule struct {
 
 var defaultRules = []rule{
 	{Match: "[haunt event]", Reply: "NO_REPLY"},
-	{Match: "remind me", Tool: "intend",
+	{Match: "remind me", Look: "session_search", LookArgs: map[string]any{"query": "oven"},
+		LookResult: `{"results": []}`, Tool: "intend",
 		Args:  map[string]any{"text": "check the oven", "delay_ms": 600000},
 		Reply: "Done: {tool}"},
 	{Match: "", Reply: "echo: {input}"},
@@ -576,6 +583,23 @@ func (s *server) chat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	reply := strings.ReplaceAll(rl.Reply, "{input}", body.Input)
+	// The session keeps the turn as hermes does: the input, then the calls
+	// the model made with their results, then the reply.
+	now := float64(time.Now().UnixNano()) / 1e9
+	stored := []map[string]any{{"role": "user", "content": body.Input, "timestamp": now}}
+	var calls, results []map[string]any
+	record := func(name string, args map[string]any, result string) {
+		callID := fmt.Sprintf("call_fake%d_%d", n, len(calls))
+		argText, _ := json.Marshal(args)
+		calls = append(calls, map[string]any{"id": callID, "type": "function",
+			"function": map[string]any{"name": name, "arguments": string(argText)}})
+		results = append(results, map[string]any{"role": "tool", "tool_call_id": callID, "content": result, "timestamp": now})
+	}
+	if rl.Look != "" {
+		e.send("tool.started", map[string]any{"message_id": msgID, "tool_name": rl.Look, "preview": "", "args": rl.LookArgs})
+		e.send("tool.completed", map[string]any{"message_id": msgID, "tool_name": rl.Look, "preview": nil, "args": nil})
+		record(rl.Look, rl.LookArgs, rl.LookResult)
+	}
 	if rl.Tool != "" {
 		tool := "mcp__haunt__" + rl.Tool
 		e.send("tool.started", map[string]any{"message_id": msgID, "tool_name": tool, "preview": "", "args": rl.Args})
@@ -587,17 +611,20 @@ func (s *server) chat(w http.ResponseWriter, r *http.Request) {
 			e.send("tool.completed", map[string]any{"message_id": msgID, "tool_name": tool, "preview": nil, "args": nil})
 		}
 		reply = strings.ReplaceAll(reply, "{tool}", text)
+		record(tool, rl.Args, text)
+	}
+	if len(calls) > 0 {
+		stored = append(stored, map[string]any{"role": "assistant", "content": "", "tool_calls": calls, "timestamp": now})
+		stored = append(stored, results...)
 	}
 
 	for i := 0; i < len(reply); i += 4 {
 		e.send("assistant.delta", map[string]any{"message_id": msgID, "delta": reply[i:min(i+4, len(reply))]})
 	}
 	logEntry(map[string]any{"kind": "reply", "session": id, "input": body.Input, "reply": reply})
-	now := float64(time.Now().UnixNano()) / 1e9
+	stored = append(stored, map[string]any{"role": "assistant", "content": reply, "timestamp": now})
 	s.mu.Lock()
-	s.transcript = append(s.transcript,
-		map[string]any{"role": "user", "content": body.Input, "timestamp": now},
-		map[string]any{"role": "assistant", "content": reply, "timestamp": now})
+	s.transcript = append(s.transcript, stored...)
 	s.mu.Unlock()
 	e.send("assistant.completed", map[string]any{
 		"message_id": msgID, "content": reply, "completed": true, "partial": false, "interrupted": false,

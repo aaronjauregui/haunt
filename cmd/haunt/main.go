@@ -106,7 +106,7 @@ func usage() {
   haunt perms [name] | perms grant|revoke <capability> [name]
   haunt shush [duration] | unshush
   haunt journal [-intentions] [name | -state DIR]
-  haunt history [-n N] [-why] [name | -state DIR]
+  haunt history [-n N] [-why | -json] [name | -state DIR]
   haunt mcp-serve -ghost NAME`)
 }
 

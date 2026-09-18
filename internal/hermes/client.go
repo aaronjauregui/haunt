@@ -392,8 +392,23 @@ func readSSE(r io.Reader, fn func(event string, data []byte) bool) error {
 // Messages reads back the last n entries of the ghost's session, oldest
 // first, for `haunt history`. Tool traffic is not an entry of its own: it
 // is the record of how an answer was reached, and the history is what was
-// said. Hermes's own calls ride on the reply they led to (Message.Looked).
+// said. The calls ride on the reply they led to: hermes's own in
+// Message.Looked, the ghost's in Message.Acted. Their arguments and results
+// are cut to a line each, which is what a person reading the history wants.
 func (c *Client) Messages(ctx context.Context, n int) ([]Message, error) {
+	return c.messages(ctx, n, lookupArgs, lookupResult)
+}
+
+// Transcript is Messages with every call's arguments and result whole, for
+// a reader that matches on them (`haunt history -json`) rather than a
+// person skimming.
+func (c *Client) Transcript(ctx context.Context, n int) ([]Message, error) {
+	return c.messages(ctx, n, 0, 0)
+}
+
+// messages reads the session, cutting calls' arguments and results to
+// argsMax and resultMax runes; 0 leaves them as hermes stored them.
+func (c *Client) messages(ctx context.Context, n, argsMax, resultMax int) ([]Message, error) {
 	id, err := c.Session(ctx)
 	if err != nil {
 		return nil, err
@@ -425,36 +440,57 @@ func (c *Client) Messages(ctx context.Context, n int) ([]Message, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, fmt.Errorf("hermes: reading the history: %w", err)
 	}
+	cut := func(s string, n int) string {
+		if n == 0 {
+			return s
+		}
+		return clip(s, n)
+	}
+	// A call's result is a message of its own, after the call; byCall
+	// finds the call it answers, in whichever list that call went on.
+	type callAt struct {
+		acted bool
+		i     int
+	}
 	msgs := make([]Message, 0, len(out.Data))
-	var looked []Lookup
-	byCall := map[string]int{}
-	last := -1 // the turn's latest reply, which its lookups go on
+	var looked, acted []Lookup
+	byCall := map[string]callAt{}
+	last := -1 // the turn's latest reply, which its calls go on
 	endTurn := func() {
 		if last >= 0 {
-			msgs[last].Looked = looked
+			msgs[last].Looked, msgs[last].Acted = looked, acted
 		}
-		looked, byCall, last = nil, map[string]int{}, -1
+		looked, acted, byCall, last = nil, nil, map[string]callAt{}, -1
 	}
 	for _, m := range out.Data {
 		text := rawText(m.Content)
 		switch m.Role {
 		case "tool":
-			if i, ok := byCall[m.ToolCallID]; ok {
-				looked[i].Result = clip(text, lookupResult)
+			if at, ok := byCall[m.ToolCallID]; ok {
+				if at.acted {
+					acted[at.i].Result = cut(text, resultMax)
+				} else {
+					looked[at.i].Result = cut(text, resultMax)
+				}
 			}
 			continue
 		case "user":
 			endTurn()
 		case "assistant":
 			for _, tc := range m.ToolCalls {
-				if tc.Function.Name == "" || strings.HasPrefix(tc.Function.Name, "mcp__haunt__") {
+				name := tc.Function.Name
+				if name == "" {
 					continue
 				}
-				byCall[tc.ID] = len(looked)
-				looked = append(looked, Lookup{
-					Tool: tc.Function.Name,
-					Args: clip(rawText(tc.Function.Arguments), lookupArgs),
-				})
+				call := Lookup{Tool: name, Args: cut(rawText(tc.Function.Arguments), argsMax)}
+				if own, ok := strings.CutPrefix(name, HauntToolPrefix); ok {
+					call.Tool = own
+					byCall[tc.ID] = callAt{acted: true, i: len(acted)}
+					acted = append(acted, call)
+					continue
+				}
+				byCall[tc.ID] = callAt{i: len(looked)}
+				looked = append(looked, call)
 			}
 		default:
 			continue
@@ -479,7 +515,12 @@ func (c *Client) Messages(ctx context.Context, n int) ([]Message, error) {
 	return msgs, nil
 }
 
-// How much of a lookup the history shows.
+// HauntToolPrefix is how hermes names the tools haunt's MCP server offers
+// it: the server is registered as "haunt", and hermes puts mcp__<server>__
+// before each of its tools.
+const HauntToolPrefix = "mcp__haunt__"
+
+// How much of a call the history shows.
 const (
 	lookupArgs   = 120
 	lookupResult = 160

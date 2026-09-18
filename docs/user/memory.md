@@ -61,6 +61,7 @@ on a `weekly` occasion or on request.
 
     haunt history                  # the conversation, read back from hermes
     haunt history -why             # per reply: what woke it, what it saw, what it did
+    haunt history -json            # the same turns as JSON, one object per line
     haunt journal                  # what it did: tools run, pictures drawn
 
 `-why` shows whether a line answered you or an event, what window was in
@@ -69,6 +70,34 @@ included), and the turns where it chose to say nothing. The reasons live
 in the ghost's own store and only the last dozen turns keep them. The
 conversation itself is hermes's, so `haunt history` needs the ghost's
 gateway running.
+
+`-json` is for a program reading the conversation back (the eval harness
+does). Each line is one turn, oldest first, and `-n` counts turns
+(`-n 0` is all of them):
+
+```json
+{"time":"2026-09-18T09:14:02+10:00","provoked_by":"person","input":"remind me to check the oven",
+ "reply":"Done — in ten minutes.","silent":false,"self_prompt":false,
+ "acted":[{"tool":"intend","args":"{\"text\":\"check the oven\",\"delay_ms\":600000}","result":"hermes/…"}],
+ "looked":[{"tool":"session_search","args":"{\"query\":\"oven\"}","result":"…"}],
+ "window":{"app":"foot","title":"~"}}
+```
+
+| Field | |
+|---|---|
+| `provoked_by` | `person` for your words, `event` for an event from the desktop |
+| `input` | what provoked the turn; an event is given without its envelope prefix |
+| `reply` | every line the ghost wrote in the turn, one per line; empty when it said nothing |
+| `silent` | the ghost said nothing |
+| `self_prompt` | the ghost was woken rather than spoken to |
+| `acted` | the ghost's own tools, as hermes called them, with their arguments and results whole |
+| `looked` | hermes's own tools: memory, session search, skills |
+| `window` | what was in front of the ghost, when it could see; left out otherwise |
+
+The words and the calls come from hermes's session, which keeps every
+turn. `window` comes from the reasons, so it is missing on a turn older
+than the last dozen, and `self_prompt` there is read from the input being
+an event.
 
 Most things that happen on the desktop reach the model as a one-line
 event, and most deserve no reply; the model answers those with silence

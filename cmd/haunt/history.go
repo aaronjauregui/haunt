@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -24,6 +26,7 @@ func cmdHistory(args []string) error {
 	state := fs.String("state", "", "override state directory")
 	n := fs.Int("n", 10, "how many turns to show, most recent last")
 	why := fs.Bool("why", false, "show what went into each reply: what woke the ghost, what was on screen, what it did")
+	asJSON := fs.Bool("json", false, "print one JSON object per turn, with every tool call's arguments and result, for a program to read")
 	fs.Parse(args)
 
 	stateDir, err := resolveStateDir(*state, fs.Args())
@@ -40,7 +43,7 @@ func cmdHistory(args []string) error {
 	// The conversation is kept by hermes, and the store holds only which
 	// session it is. No session means the ghost has never spoken (or is
 	// scripted, and keeps no conversation).
-	var turns []hermes.Message
+	var msgs []hermes.Message
 	if session, onHermes, err := s.Get(ghost.HermesSessionStoreKey); err != nil {
 		return err
 	} else if onHermes {
@@ -48,22 +51,24 @@ func cmdHistory(args []string) error {
 		if len(fs.Args()) == 1 {
 			name = fs.Args()[0]
 		}
-		if turns, err = hermesHistory(name, session, *n); err != nil {
+		if msgs, err = hermesHistory(name, session, *n, *asJSON); err != nil {
 			return fmt.Errorf("history: %w", err)
 		}
 	}
-	if len(turns) == 0 {
-		fmt.Println("(nothing has been said yet)")
+	if len(msgs) == 0 {
+		if !*asJSON {
+			fmt.Println("(nothing has been said yet)")
+		}
 		return nil
 	}
-	if *n > 0 && len(turns) > *n {
-		turns = turns[len(turns)-*n:]
+	if !*asJSON && *n > 0 && len(msgs) > *n {
+		msgs = msgs[len(msgs)-*n:]
 	}
 	// The reasons, if they were asked for. Loaded once and matched to the
-	// turns below rather than looked up per line: they are a short ring of
-	// their own and may not cover the whole window.
+	// turns rather than looked up per line: they are a short ring of their
+	// own and may not cover the whole window.
 	var traces []ghost.Why
-	if *why {
+	if *why || *asJSON {
 		if raw, ok, err := s.Get(ghost.WhyStoreKey); err != nil {
 			return err
 		} else if ok {
@@ -72,44 +77,232 @@ func cmdHistory(args []string) error {
 			}
 		}
 	}
+	turns := mergeTurns(msgs, traces)
+
+	if *asJSON {
+		// The window was read generously, so its first turn may be the tail
+		// of one that began before it; that one is left out rather than
+		// shown without what provoked it.
+		if *n > 0 && len(turns) > 0 && turns[0].input == nil {
+			turns = turns[1:]
+		}
+		if *n > 0 && len(turns) > *n {
+			turns = turns[len(turns)-*n:]
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetEscapeHTML(false)
+		for _, t := range turns {
+			if err := enc.Encode(t.record()); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 
 	for _, t := range turns {
-		who := "you"
-		switch {
-		case t.Role == "assistant":
-			who = "ghost"
-		case hermes.IsEnvelope(t.Text):
-			// The desktop, not the person: what woke the ghost.
-			who = "event"
-			t.Text = strings.TrimSpace(strings.TrimPrefix(t.Text, hermes.EnvelopePrefix))
+		if t.input != nil {
+			printLine(*t.input)
 		}
-		// Indent continuations so a multi-paragraph reply stays legible.
-		text := strings.ReplaceAll(strings.TrimSpace(t.Text), "\n", "\n       ")
-		if who == "ghost" && hermes.Silent(t.Text) {
-			// Hermes keeps the token as the reply; nothing was shown.
-			text = "(said nothing)"
+		for _, r := range t.replies {
+			printLine(r)
 		}
-		fmt.Printf("%-6s %s\n", who+":", text)
-		if !*why || t.Role != "assistant" || t.Interim {
+		if !*why || t.final() == nil {
 			// An interim line is part of the turn whose last reply
 			// carries the reasons.
 			continue
 		}
-		w, ok := traceFor(traces, t.Text)
-		if ok {
-			printWhy(w)
+		if t.whyKept {
+			printWhy(t.why)
 		} else {
 			fmt.Println("       (no reasons kept for this one — it is older than the trace)")
 		}
-		printLooked(t.Looked)
+		printLooked(t.final().Looked)
 	}
 	return nil
 }
 
+// historyTurn is one exchange of the conversation: what provoked it, the
+// ghost's lines in answer, and the driver's reasons for the last of them.
+// Both `-why` and `-json` are drawn from it, so the two never disagree
+// about which reasons and which calls belong to which reply.
+type historyTurn struct {
+	// input is the person's words or the event envelope; nil when the
+	// window opens partway through a turn.
+	input *hermes.Message
+	// replies is the ghost's lines, oldest first. Every one but the last
+	// is interim; the last is interim too when the turn ended on a tool
+	// call, and then the turn has no final reply.
+	replies []hermes.Message
+	// why is the driver's record of the final reply, when the ring still
+	// holds it (whyKept).
+	why     ghost.Why
+	whyKept bool
+}
+
+// final is the turn's last word, or nil when it has none.
+func (t *historyTurn) final() *hermes.Message {
+	if len(t.replies) == 0 || t.replies[len(t.replies)-1].Interim {
+		return nil
+	}
+	return &t.replies[len(t.replies)-1]
+}
+
+// mergeTurns groups the session's messages into turns and matches each
+// final reply to its reasons. A turn ends at a reply that is not interim,
+// or where the next input begins.
+func mergeTurns(msgs []hermes.Message, traces []ghost.Why) []historyTurn {
+	var turns []historyTurn
+	open := false // whether the last turn can still take replies
+	for _, m := range msgs {
+		if m.Role != "assistant" {
+			turns = append(turns, historyTurn{input: &m})
+			open = true
+			continue
+		}
+		if !open {
+			turns = append(turns, historyTurn{})
+			open = true
+		}
+		t := &turns[len(turns)-1]
+		t.replies = append(t.replies, m)
+		if !m.Interim {
+			t.why, t.whyKept = traceFor(traces, m.Text)
+			open = false
+		}
+	}
+	return turns
+}
+
+// traceRecord is one turn of `haunt history -json`, for a program reading
+// the conversation back (the eval harness's graders): what provoked the
+// turn, what the ghost said, and every tool call with its arguments and
+// result.
+//
+// The calls and the words come from the hermes session, which keeps every
+// turn. The driver's reasons (ghost.Why) keep only the last dozen, and a
+// long session outlives them; rather than fail or go quiet past the ring,
+// an older turn is recorded from the session alone. What is lost there is
+// only what the session never had: Window is left out, and SelfPrompt is
+// read from the input being an event envelope, which is what the driver
+// decides it by for every turn it starts from one.
+type traceRecord struct {
+	Time       time.Time    `json:"time"`
+	ProvokedBy string       `json:"provoked_by"` // "person" or "event"
+	Input      string       `json:"input"`       // an event without its envelope prefix
+	Reply      string       `json:"reply"`       // "" when nothing was said
+	Silent     bool         `json:"silent"`
+	SelfPrompt bool         `json:"self_prompt"`
+	Acted      []traceCall  `json:"acted"`  // the ghost's own tools, mcp__haunt__ taken off
+	Looked     []traceCall  `json:"looked"` // hermes's own: memory, session_search, skill_view, …
+	Window     *traceWindow `json:"window,omitempty"`
+}
+
+// traceCall is one tool call in a traceRecord.
+type traceCall struct {
+	Tool   string `json:"tool"`
+	Args   string `json:"args"`
+	Result string `json:"result"`
+}
+
+// traceWindow is what was on screen when the ghost answered.
+type traceWindow struct {
+	App   string `json:"app"`
+	Title string `json:"title"`
+}
+
+// record is the turn as `-json` prints it.
+func (t historyTurn) record() traceRecord {
+	raw := ""
+	if t.input != nil {
+		raw = t.input.Text
+	} else if t.whyKept {
+		raw = t.why.User
+	}
+	event := hermes.IsEnvelope(raw)
+	r := traceRecord{
+		ProvokedBy: "person",
+		Input:      strings.TrimSpace(raw),
+		SelfPrompt: event,
+		Acted:      []traceCall{},
+		Looked:     []traceCall{},
+	}
+	if event {
+		r.ProvokedBy = "event"
+		r.Input = strings.TrimSpace(strings.TrimPrefix(raw, hermes.EnvelopePrefix))
+	}
+	// Every line the ghost wrote that was not silence reached the balloon,
+	// interim ones included; the calls ride on whichever carries them.
+	var said []string
+	for _, m := range t.replies {
+		if !hermes.Silent(m.Text) {
+			said = append(said, strings.TrimSpace(m.Text))
+		}
+		for _, c := range m.Acted {
+			r.Acted = append(r.Acted, traceCall(c))
+		}
+		for _, c := range m.Looked {
+			r.Looked = append(r.Looked, traceCall(c))
+		}
+	}
+	r.Reply = strings.Join(said, "\n")
+	r.Silent = r.Reply == ""
+	// The time of the last thing known about the turn: hermes does not
+	// always stamp a reply, and an unstamped one reads as the epoch.
+	for _, at := range []time.Time{t.lastReplyTime(), t.why.Time, t.inputTime()} {
+		if !at.IsZero() && at.Unix() != 0 {
+			r.Time = at
+			break
+		}
+	}
+	if t.whyKept {
+		r.SelfPrompt = t.why.SelfPrompt
+		if !t.why.Window.Empty() {
+			r.Window = &traceWindow{App: t.why.Window.App, Title: t.why.Window.Title}
+		}
+	}
+	return r
+}
+
+func (t historyTurn) lastReplyTime() time.Time {
+	if len(t.replies) == 0 {
+		return time.Time{}
+	}
+	return t.replies[len(t.replies)-1].Time
+}
+
+func (t historyTurn) inputTime() time.Time {
+	if t.input == nil {
+		return time.Time{}
+	}
+	return t.input.Time
+}
+
+// printLine prints one line of the conversation under who said it.
+func printLine(m hermes.Message) {
+	who := "you"
+	switch {
+	case m.Role == "assistant":
+		who = "ghost"
+	case hermes.IsEnvelope(m.Text):
+		// The desktop, not the person: what woke the ghost.
+		who = "event"
+		m.Text = strings.TrimSpace(strings.TrimPrefix(m.Text, hermes.EnvelopePrefix))
+	}
+	// Indent continuations so a multi-paragraph reply stays legible.
+	text := strings.ReplaceAll(strings.TrimSpace(m.Text), "\n", "\n       ")
+	if who == "ghost" && hermes.Silent(m.Text) {
+		// Hermes keeps the token as the reply; nothing was shown.
+		text = "(said nothing)"
+	}
+	fmt.Printf("%-6s %s\n", who+":", text)
+}
+
 // hermesHistory reads a ghost's conversation from its hermes gateway, which
 // has to be running: the session lives in hermes's own database, and haunt
-// reads it only through hermes.
-func hermesHistory(name, session string, n int) ([]hermes.Message, error) {
+// reads it only through hermes. whole asks for every call's arguments and
+// result uncut, and for a wider window, since the caller counts turns
+// rather than lines.
+func hermesHistory(name, session string, n int, whole bool) ([]hermes.Message, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, err
@@ -124,6 +317,11 @@ func hermesHistory(name, session string, n int) ([]hermes.Message, error) {
 	defer cancel()
 	if err := c.Health(ctx); err != nil {
 		return nil, fmt.Errorf("%s's hermes gateway is not running, and the conversation is kept there (%v)", name, err)
+	}
+	if whole {
+		// A turn is an input, a reply, and two entries for every call; a
+		// busy turn makes several calls.
+		return c.Transcript(ctx, 20*n)
 	}
 	// A turn is a line each way, and a tool call and its result are two
 	// more; the caller keeps the last n.
