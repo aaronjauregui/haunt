@@ -34,7 +34,8 @@ import (
 // One thing has to change, and it is one conditional at one seam: an errand
 // rides into every prompt, which is right for something due in an hour and
 // wrong for a goal that would pay rent on six months of requests to be
-// relevant on one of them. See inContext in intention.go.
+// relevant on one of them. See turnContext in hermesbrain.go, which
+// carries only what has come due.
 //
 // # The goal is the query, not the result
 //
@@ -85,7 +86,7 @@ const (
 	// in; a shorter one turns a quiet Thursday into an accusation.
 	driftAfter = 7 * 24 * time.Hour
 	// driftQuiet is how long a goal stays quiet after it has produced a
-	// remark. Long, for the reason reactCooldown in company.go is long: the
+	// remark. Long, for the reason reactCooldown in hermesbrain.go is long: the
 	// failure mode this direction can most easily have is becoming the
 	// thing you close.
 	driftQuiet = 14 * 24 * time.Hour

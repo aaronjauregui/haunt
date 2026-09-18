@@ -89,28 +89,3 @@ func (d *Dir) ShellDir() string {
 	}
 	return d.root
 }
-
-// Sub restricts a Source to one directory, for a tree with several shells
-// in it.
-type Sub struct {
-	Parent *Dir
-	// Dir is the directory whose files win. Files not in it fall through to
-	// the parent, which is what lets a sub-shell use the ghost's readme.
-	Dir string
-}
-
-// Read prefers the sub-directory, falling back to the whole tree.
-func (s *Sub) Read(name string) ([]byte, bool) {
-	base := filepath.Base(strings.ReplaceAll(name, `\`, "/"))
-	entries, err := os.ReadDir(s.Dir)
-	if err == nil {
-		for _, e := range entries {
-			if strings.EqualFold(e.Name(), base) {
-				if b, err := os.ReadFile(filepath.Join(s.Dir, e.Name())); err == nil {
-					return b, true
-				}
-			}
-		}
-	}
-	return s.Parent.Read(name)
-}

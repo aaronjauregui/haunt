@@ -6,7 +6,7 @@
     make vet
     make fmt
 
-Go 1.24 or later, no cgo. The Wayland bindings under `internal/wayland`
+Go 1.25 or later, no cgo. The Wayland bindings under `internal/wayland`
 are generated from the XML in `protocol/` against the patched
 `third_party/go-wayland`.
 

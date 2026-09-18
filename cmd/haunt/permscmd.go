@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -56,10 +57,11 @@ func permsList(name string) error {
 	if err != nil {
 		return err
 	}
-	declared, err := declaredCaps(name)
+	m, err := loadInstalled(name)
 	if err != nil {
 		return err
 	}
+	declared := slices.Sorted(slices.Values(m.Ghost.Capabilities))
 	grants, err := library.LoadGrants(name)
 	if err != nil {
 		return err
@@ -98,13 +100,13 @@ func permsList(name string) error {
 		// drop a tool server, and a yes left behind for one is a yes with
 		// nowhere to appear.
 		if server, isTool := ghost.ToolGrantServer(c); isTool {
-			if contains(servers, server) {
+			if slices.Contains(servers, server) {
 				continue
 			}
 			stale = append(stale, c)
 			continue
 		}
-		if !contains(declared, c) {
+		if !slices.Contains(declared, c) {
 			stale = append(stale, c)
 		}
 	}
@@ -147,14 +149,14 @@ func permsSet(args []string, grant bool) error {
 			return fmt.Errorf("perms %s: %q is not a capability (%s), nor a tool (tool:<server>.<tool>)",
 				verb, cap, capabilityList())
 		}
-		declared, err := declaredCaps(name)
+		m, err := loadInstalled(name)
 		if err != nil {
 			return err
 		}
 		// Granting something the ghost never asked for would be theatre: the
 		// driver requires both a declaration and a grant, so it would stay
 		// inactive and the listing would say so forever.
-		if grant && !contains(declared, cap) {
+		if grant && !slices.Contains(m.Ghost.Capabilities, cap) {
 			return fmt.Errorf("perms grant: %s does not ask for %q, so granting it would do nothing", name, cap)
 		}
 	}
@@ -212,7 +214,7 @@ func checkToolGrant(name, key, server string, grant bool) error {
 	if err != nil {
 		return err
 	}
-	if !contains(m.Ghost.Capabilities, "tools") {
+	if !slices.Contains(m.Ghost.Capabilities, "tools") {
 		return fmt.Errorf("perms grant: %s does not ask for the tools capability, so %q would do nothing", name, key)
 	}
 	for _, t := range m.Tools {
@@ -232,21 +234,6 @@ func loadInstalled(name string) (*ghost.Manifest, error) {
 	return ghost.LoadManifest(dir)
 }
 
-// declaredCaps reads what the installed ghost's manifest asks for.
-func declaredCaps(name string) ([]string, error) {
-	dir, err := library.PkgDir(name)
-	if err != nil {
-		return nil, err
-	}
-	m, err := ghost.LoadManifest(dir)
-	if err != nil {
-		return nil, err
-	}
-	caps := append([]string(nil), m.Ghost.Capabilities...)
-	sort.Strings(caps)
-	return caps, nil
-}
-
 func capabilityList() string {
 	names := make([]string, 0, len(ghost.KnownCapabilities))
 	for c := range ghost.KnownCapabilities {
@@ -254,15 +241,6 @@ func capabilityList() string {
 	}
 	sort.Strings(names)
 	return strings.Join(names, ", ")
-}
-
-func contains(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }
 
 // permsListTools prints the tool servers the ghost declares and which of

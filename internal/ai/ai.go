@@ -57,7 +57,6 @@ type ImageConfig struct {
 	APIKeyEnv string `toml:"api_key_env"`
 	// Size like "512x512"; backend-defined default when empty.
 	Size string `toml:"size"`
-
 	// ComfyUI tuning; sensible defaults when zero.
 	Steps    int     `toml:"steps"`
 	CFG      float64 `toml:"cfg"`
@@ -170,7 +169,7 @@ type Service struct {
 // logger receives prompt traces on the prompt topic when they are enabled;
 // nil discards them.
 func NewService(cfg *Config, log *hlog.Logger) *Service {
-	return NewServiceWith(cfg, log, NewBudgets(cfg.Budget))
+	return NewServiceWith(cfg, log, nil)
 }
 
 // NewServiceWith is NewService against a ration that may be shared with

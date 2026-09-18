@@ -3,7 +3,6 @@ package main
 import (
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -107,16 +106,4 @@ system = "You are Wisp."
 	if err := cmd2.Wait(); err != nil {
 		t.Errorf("ghost exited uncleanly: %v", err)
 	}
-}
-
-// waitLog polls the daemon's stderr for a line.
-func waitLog(t *testing.T, buf *syncBuffer, want string) {
-	t.Helper()
-	for i := 0; i < 100; i++ {
-		if strings.Contains(buf.String(), want) {
-			return
-		}
-		wait100ms()
-	}
-	t.Fatalf("log never contained %q; have:\n%s", want, buf.String())
 }

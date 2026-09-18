@@ -7,12 +7,12 @@ import (
 	"github.com/aaronjauregui/haunt/internal/hlog"
 )
 
-// notesKey holds the ghost's journal: the action log. Each entry is a line
+// NotesStoreKey holds the ghost's journal: the action log. Each entry is a line
 // the driver or a scripted brain wrote about something the ghost did — a
 // tool it used, a goal it took on — so `haunt journal` can show the person
 // what happened. It is not a prompt block: a ghost on hermes keeps its own
-// notebook in hermes memory.
-const notesKey = internalKeyPrefix + "notes"
+// notebook in hermes memory. Exported for `haunt journal`.
+const NotesStoreKey = internalKeyPrefix + "notes"
 
 // Note is one journal entry.
 type Note struct {
@@ -25,8 +25,8 @@ const (
 	maxNoteLength = 500
 )
 
-// appendNote adds one entry to the journal, reporting whether it was kept.
-func (g *Ghost) appendNote(text string) bool {
+// execNote appends one entry to the journal.
+func (g *Ghost) execNote(text string) {
 	if len(text) > maxNoteLength {
 		text = text[:maxNoteLength]
 	}
@@ -37,22 +37,15 @@ func (g *Ghost) appendNote(text string) bool {
 	}
 	b, err := json.Marshal(notes)
 	if err != nil {
-		return false
+		return
 	}
-	if err := g.store.Set(notesKey, string(b)); err != nil {
+	if err := g.store.Set(NotesStoreKey, string(b)); err != nil {
 		g.log.Warn(hlog.Memory, "saving note: %v", err)
-		return false
 	}
-	return true
-}
-
-// execNote appends an entry to the journal.
-func (g *Ghost) execNote(text string) {
-	g.appendNote(text)
 }
 
 func (g *Ghost) loadNotes() []Note {
-	raw, ok, err := storeGet(g.store, notesKey)
+	raw, ok, err := g.store.Get(NotesStoreKey)
 	if err != nil || !ok {
 		return nil
 	}
@@ -71,6 +64,3 @@ func DecodeNotes(raw string) ([]Note, error) {
 	}
 	return n, nil
 }
-
-// NotesStoreKey exposes the journal's store key to the CLI.
-const NotesStoreKey = notesKey

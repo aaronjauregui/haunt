@@ -20,7 +20,7 @@ func TestSeedGoal(t *testing.T) {
 	if err := SeedGoal(s, "finish the thesis", nil, 9*24*time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	list, err := DecodeIntentions(s.m[intentionsKey])
+	list, err := DecodeIntentions(s.m[IntentionsStoreKey])
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -90,5 +90,5 @@ install-user: build
 	@echo "installed. start it with:  systemctl --user enable --now haunt"
 
 clean:
-	rm -f haunt haunt-poc haunt-seriko
+	rm -f haunt haunt-seriko
 	$(GO) clean

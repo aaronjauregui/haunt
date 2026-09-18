@@ -280,20 +280,6 @@ type Intent struct {
 	Wait string `json:"wait,omitempty"`
 }
 
-// EncodeEvents marshals events one-per-line (JSONL) for recordings.
-func EncodeEvents(events []Event) ([]byte, error) {
-	var out []byte
-	for _, e := range events {
-		b, err := json.Marshal(e)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, b...)
-		out = append(out, '\n')
-	}
-	return out, nil
-}
-
 // maxChoices is how many options a balloon will offer. Nine, because the
 // keyboard path picks by digit and there is no tenth digit.
 const maxChoices = 9

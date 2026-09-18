@@ -213,7 +213,7 @@ func (g *Ghost) ignoredApp(appID string) bool {
 // value is simply a fresh model: this is an enhancement to awareness, and
 // nothing about it is worth failing a boot over.
 func (g *Ghost) loadSessionState() session.State {
-	raw, ok, err := storeGet(g.store, sessionStateKey)
+	raw, ok, err := g.store.Get(sessionStateKey)
 	if err != nil || !ok {
 		return session.State{}
 	}

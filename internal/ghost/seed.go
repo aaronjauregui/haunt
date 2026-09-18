@@ -20,7 +20,7 @@ import (
 // twice is seeding once; anything else held is kept.
 func SeedGoal(s Store, text string, watch []string, age time.Duration) error {
 	var list []Intention
-	raw, ok, err := s.Get(intentionsKey)
+	raw, ok, err := s.Get(IntentionsStoreKey)
 	if err != nil {
 		return err
 	}
@@ -53,7 +53,7 @@ func SeedGoal(s Store, text string, watch []string, age time.Duration) error {
 	if err != nil {
 		return err
 	}
-	return s.Set(intentionsKey, string(b))
+	return s.Set(IntentionsStoreKey, string(b))
 }
 
 // seedName is a name no intention in list has.

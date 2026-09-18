@@ -41,8 +41,10 @@ func cmdPack(args []string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := os.Stat(filepath.Join(dir, m.Brain.Wasm)); err != nil {
-		return fmt.Errorf("brain module %s missing; build it first", m.Brain.Wasm)
+	if m.Brain.Wasm != "" {
+		if _, err := os.Stat(filepath.Join(dir, m.Brain.Wasm)); err != nil {
+			return fmt.Errorf("brain module %s missing; build it first", m.Brain.Wasm)
+		}
 	}
 	key, err := pack.LoadKey()
 	if err != nil {

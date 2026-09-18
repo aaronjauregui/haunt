@@ -34,7 +34,7 @@ func TestSavedPlaceIsRestored(t *testing.T) {
 
 	// It is stored per output, because layer-shell coordinates mean
 	// different places on different screens.
-	raw, _, _ := storeGet(g.store, placeKey)
+	raw, _, _ := g.store.Get(placeKey)
 	var p place
 	if json.Unmarshal([]byte(raw), &p) != nil || p.Output == "" {
 		t.Errorf("the stored place does not name its screen: %s", raw)

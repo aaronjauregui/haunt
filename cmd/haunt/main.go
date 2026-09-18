@@ -1,9 +1,6 @@
 // Command haunt is the ghost driver CLI.
 //
-//	haunt run               run the resident ghosts (needs a layer-shell compositor)
-//	haunt add <name>        have a ghost join them
-//	haunt new <name>        scaffold a new ghost project (art + persona)
-//	haunt shell init <ora>  build a shell from a layered drawing
+// docs/user/cli.md is the reference; usage() below is the short form.
 package main
 
 import (
@@ -93,11 +90,11 @@ func isSet(fs *flag.FlagSet, name string) bool {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage:
-  haunt run [-x N] [-y N] [-output NAME] [-record FILE] [-state DIR] [-idle-ms N] [ghost-dir|name ...]
+  haunt run [-x N] [-y N] [-output NAME] [-record FILE] [-state DIR] [-idle-ms N] [-goal-check-delay D] [ghost-dir|name ...]
   haunt dev [-x N] [-y N] [-state DIR] <ghost-dir>
   haunt say [-ghost NAME] <text>
   haunt new [-brain] <name>
-  haunt shell init [-C dir] [-write] <art.ora>
+  haunt shell init [-C dir] [-art subdir] [-write] <art.ora>
   haunt keygen
   haunt pack [-o FILE] <ghost-dir>
   haunt install [-yes] <file.haunt>
@@ -105,7 +102,7 @@ func usage() {
   haunt switch <name> | add <name> | drop <name>
   haunt perms [name] | perms grant|revoke <capability> [name]
   haunt shush [duration] | unshush
-  haunt journal [-intentions] [name | -state DIR]
+  haunt journal [-intentions] [-skills] [name | -state DIR]
   haunt history [-n N] [-why | -json] [name | -state DIR]
   haunt mcp-serve -ghost NAME`)
 }

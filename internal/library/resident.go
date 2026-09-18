@@ -134,20 +134,6 @@ func DropResident(name string) (dropped bool, err error) {
 	return true, SetResident(out)
 }
 
-// IsResident reports whether a ghost is in the resident set.
-func IsResident(name string) (bool, error) {
-	names, err := Resident()
-	if err != nil {
-		return false, err
-	}
-	for _, n := range names {
-		if n == name {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
 // writeResident replaces the set without checking the names are installed.
 // Only removal wants this: everything else should fail on a name that is
 // not there.

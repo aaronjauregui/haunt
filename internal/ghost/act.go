@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -233,15 +234,7 @@ func (g *Ghost) toolEnv(sec ToolSection) []string {
 
 // toolAllowed applies the manifest's own upper bound on a server's tools.
 func toolAllowed(sec ToolSection, tool string) bool {
-	if len(sec.Allow) == 0 {
-		return true
-	}
-	for _, a := range sec.Allow {
-		if a == tool {
-			return true
-		}
-	}
-	return false
+	return len(sec.Allow) == 0 || slices.Contains(sec.Allow, tool)
 }
 
 // toolNames is every tool the ghost may act through, sorted, in the form
@@ -653,8 +646,8 @@ func clip(s string, n int) string {
 
 // execAct is a brain asking for one specific thing to be done. The model's
 // own tool calls do not come through here — they are inside an exchange
-// that has already been gated and charged (see execChat) — but everything
-// past the gate is the same code.
+// that has already been gated and charged (see serverTool in
+// hermestools.go) — but everything past the gate is the same code.
 // It runs with the AI lock held and the standing capability already
 // settled; see the act case in execIntent for both.
 func (g *Ghost) execAct(in proto.Intent) {

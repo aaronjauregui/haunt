@@ -732,7 +732,6 @@ func minutes(d time.Duration) string {
 	}
 }
 
-// intentionNamed finds one standing intention.
 // quietGoal is the goal a drift finding (goal.go) is about, if it is one
 // and the goal is still held.
 func (g *Ghost) quietGoal(it Intention) (Intention, bool) {
@@ -761,6 +760,7 @@ func goalQuietEnvelope(finding, goal Intention, now time.Time) string {
 		hermes.F("last_seen", seen))
 }
 
+// intentionNamed finds one standing intention.
 func (g *Ghost) intentionNamed(name string) (Intention, bool) {
 	for _, it := range g.loadIntentions() {
 		if it.Name == name {
@@ -778,12 +778,10 @@ func nonZero(n int) string {
 	return fmt.Sprint(n)
 }
 
-// hermesSessionKey keeps the ghost's hermes session id across restarts.
-const hermesSessionKey = internalKeyPrefix + "hermes_session"
-
-// HermesSessionStoreKey exposes it to the CLI, which reads the
-// conversation from hermes when a ghost has one.
-const HermesSessionStoreKey = hermesSessionKey
+// HermesSessionStoreKey keeps the ghost's hermes session id across
+// restarts. Exported for `haunt history`, which reads the conversation from
+// hermes when a ghost has one.
+const HermesSessionStoreKey = internalKeyPrefix + "hermes_session"
 
 // hermesReadyWait is how long a turn waits for a gateway still starting.
 // Hermes takes a few seconds to come up, and the boot greeting is sent
@@ -897,11 +895,11 @@ func (g *Ghost) openHermes() (*hermes.Gateway, *hermes.Client, error) {
 		return nil, nil, err
 	}
 	client.LoadSession = func() string {
-		id, _, _ := g.store.Get(hermesSessionKey)
+		id, _, _ := g.store.Get(HermesSessionStoreKey)
 		return id
 	}
 	client.SaveSession = func(id string) {
-		if err := g.store.Set(hermesSessionKey, id); err != nil {
+		if err := g.store.Set(HermesSessionStoreKey, id); err != nil {
 			g.log.Warn(hlog.Store, "saving the hermes session: %v", err)
 		}
 	}

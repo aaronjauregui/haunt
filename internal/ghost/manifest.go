@@ -200,10 +200,10 @@ func LoadManifest(dir string) (*Manifest, error) {
 	// would work only in the sense that clicking it produces a quip —
 	// better to say so at load than to have every sentence come back as a
 	// capability error in the balloon.
-	if !hasWasm && !hasCmd && !hasCapability(&m, "llm") {
+	if !hasWasm && !hasCmd && !slices.Contains(m.Ghost.Capabilities, "llm") {
 		return nil, fmt.Errorf("%s: a ghost with no [brain] section runs on hermes, which needs the llm capability", path)
 	}
-	if hasCmd && !hasCapability(&m, "native-brain") {
+	if hasCmd && !slices.Contains(m.Ghost.Capabilities, "native-brain") {
 		return nil, fmt.Errorf("%s: brain.command requires the native-brain capability", path)
 	}
 	for _, c := range m.Ghost.Capabilities {
@@ -236,7 +236,7 @@ func LoadManifest(dir string) (*Manifest, error) {
 	}
 	// Declaring servers without asking for the capability is a manifest
 	// that can never act, which is more likely a mistake than an intention.
-	if len(m.Tools) > 0 && !hasCapability(&m, "tools") {
+	if len(m.Tools) > 0 && !slices.Contains(m.Ghost.Capabilities, "tools") {
 		return nil, fmt.Errorf("%s: [[tool]] servers are declared but the tools capability is not requested", path)
 	}
 
@@ -279,13 +279,4 @@ func LoadManifest(dir string) (*Manifest, error) {
 		}
 	}
 	return &m, nil
-}
-
-func hasCapability(m *Manifest, cap string) bool {
-	for _, c := range m.Ghost.Capabilities {
-		if c == cap {
-			return true
-		}
-	}
-	return false
 }

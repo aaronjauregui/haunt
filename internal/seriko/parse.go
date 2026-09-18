@@ -21,7 +21,6 @@ package seriko
 
 import (
 	"bufio"
-	"bytes"
 	"fmt"
 	"strconv"
 	"strings"
@@ -499,9 +498,4 @@ func parseRange(part string) (int, int, error) {
 		return 0, 0, fmt.Errorf("bad surface id %q", part)
 	}
 	return n, n, nil
-}
-
-// looksLikeSurfaces is a cheap check that a file is what it claims.
-func looksLikeSurfaces(b []byte) bool {
-	return bytes.Contains(b, []byte("surface")) || bytes.Contains(b, []byte("descript"))
 }

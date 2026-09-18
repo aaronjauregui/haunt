@@ -38,7 +38,7 @@ func newFakeHermes(t *testing.T) (*fakeHermes, *httptest.Server) {
 	auth := func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			if r.Header.Get("Authorization") != "Bearer sekrit" {
-				http.Error(w, `{"error":{"message":"no","code":"gateway_auth_failed"}}`, 401)
+				http.Error(w, `{"error":{"message":"no","code":"gateway_auth_failed"}}`, http.StatusUnauthorized)
 				return
 			}
 			if r.Header.Get("X-Hermes-Session-Key") != "moth" {

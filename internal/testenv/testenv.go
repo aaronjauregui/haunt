@@ -59,12 +59,6 @@ func (c *Compositor) AddOutput() (string, error) {
 	return "", fmt.Errorf("the new output never appeared")
 }
 
-// RemoveOutput unplugs a screen.
-func (c *Compositor) RemoveOutput(name string) error {
-	_, err := c.Swaymsg("output", name, "unplug")
-	return err
-}
-
 // outputNames is the set of connectors sway currently has.
 func (c *Compositor) outputNames() (map[string]bool, error) {
 	out, err := c.Swaymsg("-t", "get_outputs")

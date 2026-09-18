@@ -25,7 +25,7 @@ func TestWhyRoundTrip(t *testing.T) {
 		Window: WhyWindow{App: "firefox", Title: "tea shop"},
 	})
 
-	raw, ok, err := storeGet(g.store, whyKey)
+	raw, ok, err := g.store.Get(WhyStoreKey)
 	if err != nil || !ok {
 		t.Fatalf("nothing was stored (%v)", err)
 	}
@@ -54,7 +54,7 @@ func TestWhyIsBounded(t *testing.T) {
 	for i := 0; i < whyKept+5; i++ {
 		g.noteWhy(Why{Reply: "reply " + string(rune('a'+i))})
 	}
-	raw, _, _ := storeGet(g.store, whyKey)
+	raw, _, _ := g.store.Get(WhyStoreKey)
 	got, err := DecodeWhy(raw)
 	if err != nil {
 		t.Fatal(err)
@@ -74,11 +74,11 @@ func TestWhyIsBounded(t *testing.T) {
 // A corrupt trace must cost the trace, not the conversation that produced it.
 func TestWhySurvivesACorruptTrace(t *testing.T) {
 	g := whyGhost()
-	if err := g.store.Set(whyKey, "{not json"); err != nil {
+	if err := g.store.Set(WhyStoreKey, "{not json"); err != nil {
 		t.Fatal(err)
 	}
 	g.noteWhy(Why{Reply: "after the corruption"})
-	raw, _, _ := storeGet(g.store, whyKey)
+	raw, _, _ := g.store.Get(WhyStoreKey)
 	got, err := DecodeWhy(raw)
 	if err != nil {
 		t.Fatalf("the trace did not recover: %v", err)

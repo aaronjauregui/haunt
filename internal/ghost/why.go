@@ -26,14 +26,12 @@ import (
 //     you just said", not an audit log going back to installation.
 
 const (
-	whyKey = internalKeyPrefix + "why"
+	// WhyStoreKey holds the trace, and is exported for `haunt history`.
+	WhyStoreKey = internalKeyPrefix + "why"
 	// whyKept is how many turns keep their reasons: enough that anything
 	// still near the bottom of `haunt history` can still be asked about.
 	whyKept = 12
 )
-
-// WhyStoreKey exposes the trace's store key to the CLI.
-const WhyStoreKey = whyKey
 
 // Why is the account of one turn.
 type Why struct {
@@ -71,7 +69,7 @@ func (w WhyWindow) Empty() bool { return w.App == "" && w.Title == "" }
 // noteWhy records the reasons behind a reply, oldest entries falling off
 // the end.
 func (g *Ghost) noteWhy(w Why) {
-	raw, _, err := storeGet(g.store, whyKey)
+	raw, _, err := g.store.Get(WhyStoreKey)
 	if err != nil {
 		g.log.Warn(hlog.Store, "reading the reply trace: %v", err)
 		return
@@ -93,7 +91,7 @@ func (g *Ghost) noteWhy(w Why) {
 	if err != nil {
 		return
 	}
-	if err := g.store.Set(whyKey, string(b)); err != nil {
+	if err := g.store.Set(WhyStoreKey, string(b)); err != nil {
 		g.log.Warn(hlog.Store, "saving the reply trace: %v", err)
 	}
 }

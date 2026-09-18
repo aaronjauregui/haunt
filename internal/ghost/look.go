@@ -89,7 +89,7 @@ func (g *Ghost) look(asked string) (answer, app string, err error) {
 	if strings.TrimSpace(asked) != "" {
 		question = asked
 	}
-	answer, err = g.aiSvc.Look(context.Background(), question, png)
+	answer, err = g.aiSvc.Look(g.sessionContext(), question, png)
 	if err != nil {
 		g.log.Warn(hlog.Screen, "look: %v", err)
 		return "", "", err

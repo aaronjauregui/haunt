@@ -173,7 +173,7 @@ wasm = "brain.wasm"
 
 		"brain/go.mod": fmt.Sprintf(`module %s-brain
 
-go 1.22
+go 1.25
 
 require github.com/aaronjauregui/haunt v0.0.0
 

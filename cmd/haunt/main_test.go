@@ -3,8 +3,6 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"image"
-	"image/png"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -168,80 +166,6 @@ wasm = "brain.wasm"
 	if _, err := os.Stat(filepath.Join(stateDir, "state.db")); err != nil {
 		t.Errorf("state.db missing: %v", err)
 	}
-}
-
-// waitBalloon polls screenshots for balloon-background pixels in the region
-// right of the sprite.
-// balloonVisible reports whether a balloon panel is on screen right now.
-func balloonVisible(t *testing.T, c *testenv.Compositor, dir string, spriteX, spriteY int) bool {
-	t.Helper()
-	return balloonInShot(shot(t, c, filepath.Join(dir, "balloon-now.png")), spriteX, spriteY)
-}
-
-// balloonInShot looks for the panel's dark navy in the band beside the
-// sprite.
-func balloonInShot(img image.Image, spriteX, spriteY int) bool {
-	for y := spriteY; y < spriteY+160; y++ {
-		for x := spriteX + 160; x < min(spriteX+560, img.Bounds().Max.X); x++ {
-			r, g, b, _ := img.At(x, y).RGBA()
-			if r>>8 < 60 && g>>8 < 60 && b>>8 > 40 && b>>8 < 90 {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func waitBalloon(t *testing.T, c *testenv.Compositor, dir string, spriteX, spriteY int, want bool) {
-	t.Helper()
-	// Balloon background from balloon.DefaultTheme(), fully composited over
-	// the sway background; alpha 235 blending shifts it slightly, so match
-	// loosely.
-	path := filepath.Join(dir, "balloon-poll.png")
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		found := balloonInShot(shot(t, c, path), spriteX, spriteY)
-		if found == want {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("balloon presence = %v, want %v", found, want)
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-}
-
-func shot(t *testing.T, c *testenv.Compositor, path string) image.Image {
-	t.Helper()
-	if err := c.Screenshot(path); err != nil {
-		t.Fatal(err)
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	img, err := png.Decode(f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return img
-}
-
-func build(t *testing.T, out, pkg string, env ...string) {
-	t.Helper()
-	cmd := exec.Command("go", "build", "-o", out, pkg)
-	cmd.Env = append(os.Environ(), env...)
-	if b, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("building %s: %v: %s", pkg, err, b)
-	}
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // TestLongDialogueStaysOnScreen: a reply of several paragraphs must not

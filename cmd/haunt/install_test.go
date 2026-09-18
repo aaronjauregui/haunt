@@ -1,14 +1,12 @@
 package main
 
 import (
-	"bufio"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/aaronjauregui/haunt/internal/testenv"
 )
@@ -137,28 +135,5 @@ wasm = "brain.wasm"
 	daemon2.Process.Signal(syscall.SIGTERM)
 	if err := daemon2.Wait(); err != nil {
 		t.Errorf("daemon2 exited uncleanly: %v", err)
-	}
-}
-
-func waitFor(t *testing.T, r interface{ Read([]byte) (int, error) }, prefix string) {
-	t.Helper()
-	found := make(chan bool, 1)
-	go func() {
-		sc := bufio.NewScanner(r)
-		for sc.Scan() {
-			if strings.HasPrefix(sc.Text(), prefix) {
-				found <- true
-				return
-			}
-		}
-		found <- false
-	}()
-	select {
-	case ok := <-found:
-		if !ok {
-			t.Fatalf("stream ended before %q", prefix)
-		}
-	case <-time.After(15 * time.Second):
-		t.Fatalf("timed out waiting for %q", prefix)
 	}
 }

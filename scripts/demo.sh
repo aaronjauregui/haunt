@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Launch a nested sway (a normal window under the current session) and run
-# haunt-poc inside it. Close the sway window or Ctrl-C to stop everything.
+# haunt inside it. Close the sway window or Ctrl-C to stop everything.
 #
 # WLR_BACKENDS defaults to "wayland" (nested window); override with
 # WLR_BACKENDS=headless for a smoke test without any visible window.

@@ -87,7 +87,7 @@ func newObligation(limit int, store Store, log *hlog.Logger) *allowance {
 }
 
 func (c *allowance) load() {
-	raw, ok, err := storeGet(c.store, c.key)
+	raw, ok, err := c.store.Get(c.key)
 	if err != nil || !ok {
 		return
 	}

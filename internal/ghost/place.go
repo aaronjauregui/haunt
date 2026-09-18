@@ -36,7 +36,7 @@ type place struct {
 
 // loadPlace reads the remembered position.
 func (g *Ghost) loadPlace() (place, bool) {
-	raw, ok, err := storeGet(g.store, placeKey)
+	raw, ok, err := g.store.Get(placeKey)
 	if err != nil || !ok {
 		return place{}, false
 	}

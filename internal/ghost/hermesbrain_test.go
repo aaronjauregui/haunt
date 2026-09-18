@@ -150,7 +150,7 @@ func TestHermesSilenceIsRefunded(t *testing.T) {
 	if g.blnShowing() {
 		t.Error("silence reached the balloon")
 	}
-	whys, _ := DecodeWhy(mustGet(t, g, whyKey))
+	whys, _ := DecodeWhy(mustGet(t, g, WhyStoreKey))
 	if len(whys) != 1 || !whys[0].Suppressed || !whys[0].SelfPrompt {
 		t.Errorf("the why-trace does not record a suppressed turn: %+v", whys)
 	}
@@ -468,11 +468,6 @@ func mustGet(t *testing.T, g *Ghost, key string) string {
 		t.Fatal(err)
 	}
 	return v
-}
-
-func itoa(n int) string {
-	b, _ := json.Marshal(n)
-	return string(b)
 }
 
 func TestEnvelopeMinutes(t *testing.T) {

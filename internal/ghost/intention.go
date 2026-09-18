@@ -47,7 +47,9 @@ import (
 // for one thing right now. An intention is the opposite shape: the ghost's
 // own, and about later.
 
-const intentionsKey = internalKeyPrefix + "intentions"
+// IntentionsStoreKey holds the list, and is exported for `haunt journal
+// -intentions`.
+const IntentionsStoreKey = internalKeyPrefix + "intentions"
 
 const (
 	// maxIntentions bounds what a ghost may be holding. Small, because a
@@ -389,7 +391,7 @@ func when(due, now time.Time) string {
 }
 
 func (g *Ghost) loadIntentions() []Intention {
-	raw, ok, err := storeGet(g.store, intentionsKey)
+	raw, ok, err := g.store.Get(IntentionsStoreKey)
 	if err != nil || !ok {
 		return nil
 	}
@@ -409,13 +411,10 @@ func (g *Ghost) saveIntentions(list []Intention) {
 	if err != nil {
 		return
 	}
-	if err := g.store.Set(intentionsKey, string(b)); err != nil {
+	if err := g.store.Set(IntentionsStoreKey, string(b)); err != nil {
 		g.log.Warn(hlog.Store, "saving intentions: %v", err)
 	}
 }
-
-// IntentionsStoreKey exposes the list's store key to the CLI.
-const IntentionsStoreKey = intentionsKey
 
 // DecodeIntentions parses a stored list, for `haunt intentions`.
 func DecodeIntentions(raw string) ([]Intention, error) {

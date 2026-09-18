@@ -14,6 +14,6 @@ describe what is, in the present tense, never what was done or when. A
 change to user-facing behaviour updates the matching page under `docs/`
 in the same change.
 
-Build and test: `make build test` (needs Go 1.24+, `sway`, `grim`,
+Build and test: `make build test` (needs Go 1.25+, `sway`, `grim`,
 `foot`; tests run against a headless sway). Demos: `make demo`,
 `make demo-ai`, `make demo-troupe`.

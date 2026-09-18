@@ -20,7 +20,7 @@ import (
 // So the driver shows the wait. The indicator is the driver's, not the
 // brain's, because every ghost needs one and no ghost author should have to
 // think about slow backends to get it; the words beside it are the brain's
-// (the `wait` field on the chat and imagine intents), because waiting is
+// (the `wait` field on the imagine and act intents), because waiting is
 // something a character does in its own voice.
 //
 // Three rules it obeys, all of them about not being in the way:

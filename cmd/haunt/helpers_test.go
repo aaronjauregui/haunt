@@ -1,11 +1,17 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
+	"fmt"
+	"image"
+	"image/png"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -113,5 +119,168 @@ func waitFake(t *testing.T, path string, want int, d time.Duration, match func(f
 			t.Fatalf("fakehermes logged %d matching entries, want %d; its log:\n%s", len(got), want, data)
 		}
 		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// startGhost launches `haunt run` for a ghost dir with an isolated runtime
+// dir, waiting for READY.
+func startGhost(t *testing.T, c *testenv.Compositor, bin, ghostDir, stateDir, recordPath, runtimeDir string, x, y int) *exec.Cmd {
+	t.Helper()
+	args := []string{"run", "-x", fmt.Sprint(x), "-y", fmt.Sprint(y), "-state", stateDir}
+	if recordPath != "" {
+		args = append(args, "-record", recordPath)
+	}
+	args = append(args, ghostDir)
+	cmd := exec.Command(bin, args...)
+	cmd.Env = append(c.Env(), "HAUNT_RUNTIME_DIR="+runtimeDir)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cmd.Process.Signal(syscall.SIGTERM)
+		cmd.Wait()
+	})
+	waitFor(t, stdout, "READY")
+	return cmd
+}
+
+func stopGhost(t *testing.T, cmd *exec.Cmd) {
+	t.Helper()
+	cmd.Process.Signal(syscall.SIGTERM)
+	if err := cmd.Wait(); err != nil {
+		t.Errorf("ghost exited uncleanly: %v", err)
+	}
+}
+
+func writeGhost(t *testing.T, dir, manifest string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ghost.toml"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// waitRecordContains polls a session recording for a substring.
+func waitRecordContains(t *testing.T, path, want string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		data, _ := os.ReadFile(path)
+		if strings.Contains(string(data), want) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("recording %s never contained %q; have:\n%s", path, want, data)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func waitFor(t *testing.T, r interface{ Read([]byte) (int, error) }, prefix string) {
+	t.Helper()
+	found := make(chan bool, 1)
+	go func() {
+		sc := bufio.NewScanner(r)
+		for sc.Scan() {
+			if strings.HasPrefix(sc.Text(), prefix) {
+				found <- true
+				return
+			}
+		}
+		found <- false
+	}()
+	select {
+	case ok := <-found:
+		if !ok {
+			t.Fatalf("stream ended before %q", prefix)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatalf("timed out waiting for %q", prefix)
+	}
+}
+
+// waitLog polls the daemon's stderr for a line.
+func waitLog(t *testing.T, buf *syncBuffer, want string) {
+	t.Helper()
+	for i := 0; i < 100; i++ {
+		if strings.Contains(buf.String(), want) {
+			return
+		}
+		wait100ms()
+	}
+	t.Fatalf("log never contained %q; have:\n%s", want, buf.String())
+}
+
+// balloonVisible reports whether a balloon panel is on screen right now.
+func balloonVisible(t *testing.T, c *testenv.Compositor, dir string, spriteX, spriteY int) bool {
+	t.Helper()
+	return balloonInShot(shot(t, c, filepath.Join(dir, "balloon-now.png")), spriteX, spriteY)
+}
+
+// balloonInShot looks for the panel's dark navy in the band beside the
+// sprite.
+func balloonInShot(img image.Image, spriteX, spriteY int) bool {
+	for y := spriteY; y < spriteY+160; y++ {
+		for x := spriteX + 160; x < min(spriteX+560, img.Bounds().Max.X); x++ {
+			r, g, b, _ := img.At(x, y).RGBA()
+			if r>>8 < 60 && g>>8 < 60 && b>>8 > 40 && b>>8 < 90 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// waitBalloon polls screenshots until a balloon is, or is not, beside the
+// sprite.
+func waitBalloon(t *testing.T, c *testenv.Compositor, dir string, spriteX, spriteY int, want bool) {
+	t.Helper()
+	// Balloon background from balloon.DefaultTheme(), fully composited over
+	// the sway background; alpha 235 blending shifts it slightly, so match
+	// loosely.
+	path := filepath.Join(dir, "balloon-poll.png")
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		found := balloonInShot(shot(t, c, path), spriteX, spriteY)
+		if found == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("balloon presence = %v, want %v", found, want)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func shot(t *testing.T, c *testenv.Compositor, path string) image.Image {
+	t.Helper()
+	if err := c.Screenshot(path); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	img, err := png.Decode(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return img
+}
+
+func build(t *testing.T, out, pkg string, env ...string) {
+	t.Helper()
+	cmd := exec.Command("go", "build", "-o", out, pkg)
+	cmd.Env = append(os.Environ(), env...)
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("building %s: %v: %s", pkg, err, b)
 	}
 }

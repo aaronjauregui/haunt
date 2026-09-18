@@ -21,7 +21,8 @@ own beside it ([Hermes integration](hermes.md)).
 ## Packages
 
 ```
-cmd/haunt            the CLI: run, dev, say, new, shell init, pack, install, perms, journal, history, mcp-serve
+cmd/haunt            the CLI (docs/user/cli.md): run, dev, say, new, shell init, keygen, pack, install,
+                     ls, rm, switch, add, drop, perms, shush, journal, history, mcp-serve
 cmd/haunt-seriko     ukagaka shell art converter (separate binary on purpose)
 brainkit             public SDK for brains in Go; re-exports proto
 skills/              haunt's own hermes skills, embedded

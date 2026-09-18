@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -346,7 +347,7 @@ func toolFace(g *Ghost, _ context.Context, args json.RawMessage) (string, error)
 	if err := decode(args, &a); err != nil {
 		return "", err
 	}
-	if g.shell == nil || !contains(g.shell.Poses(), a.Pose) {
+	if g.shell == nil || !slices.Contains(g.shell.Poses(), a.Pose) {
 		return "", fmt.Errorf("%q is not one of your poses", a.Pose)
 	}
 	if !g.mayPose() {
@@ -528,13 +529,4 @@ func toolTell(g *Ghost, _ context.Context, args json.RawMessage) (string, error)
 		return "", err
 	}
 	return "told " + a.Ghost, nil
-}
-
-func contains(list []string, s string) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
-	}
-	return false
 }

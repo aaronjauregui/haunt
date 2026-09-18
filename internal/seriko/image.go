@@ -135,44 +135,6 @@ func reduce(dst *image.NRGBA, src image.Image, at image.Point) {
 	}
 }
 
-// trim returns the bounds of everything not fully transparent. An empty
-// rectangle means the image is blank.
-func trim(img *image.NRGBA) image.Rectangle {
-	b := img.Bounds()
-	minX, minY := b.Max.X, b.Max.Y
-	maxX, maxY := b.Min.X, b.Min.Y
-	for y := b.Min.Y; y < b.Max.Y; y++ {
-		for x := b.Min.X; x < b.Max.X; x++ {
-			if img.Pix[img.PixOffset(x, y)+3] == 0 {
-				continue
-			}
-			if x < minX {
-				minX = x
-			}
-			if y < minY {
-				minY = y
-			}
-			if x >= maxX {
-				maxX = x + 1
-			}
-			if y >= maxY {
-				maxY = y + 1
-			}
-		}
-	}
-	if minX >= maxX || minY >= maxY {
-		return image.Rectangle{}
-	}
-	return image.Rect(minX, minY, maxX, maxY)
-}
-
-// crop copies a sub-rectangle out into its own image.
-func crop(img *image.NRGBA, r image.Rectangle) *image.NRGBA {
-	out := image.NewNRGBA(image.Rect(0, 0, r.Dx(), r.Dy()))
-	draw.Draw(out, out.Bounds(), img, r.Min, draw.Src)
-	return out
-}
-
 // blank is a fully transparent image of a given size, which is how a
 // variant says "nothing here": SERIKO clears an animation frame with a
 // surface ID of -1, and a haunt layer needs something to wear instead.

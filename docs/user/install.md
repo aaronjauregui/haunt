@@ -16,7 +16,7 @@ Requirements:
 
 | For | Needs |
 |---|---|
-| Building | Go 1.24 or later |
+| Building | Go 1.25 or later |
 | A ghost that thinks | hermes-agent, see [The brain](hermes.md) |
 | A ghost that looks at your screen | `grim` |
 | Running the tests | `sway` and `grim`, and `foot` for the window tests |

@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"image/png"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,8 +16,6 @@ import (
 	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/proto"
 )
-
-func bytesReader(b []byte) io.Reader { return bytes.NewReader(b) }
 
 // internalKeyPrefix marks driver-owned store keys hidden from brains.
 const internalKeyPrefix = "_haunt/"
@@ -95,7 +92,7 @@ func (g *Ghost) imagine(prompt string, fresh bool, waitText string, lingerMS int
 		}
 	}
 
-	img, err := png.Decode(bytesReader(data))
+	img, err := png.Decode(bytes.NewReader(data))
 	if err != nil {
 		return "", fmt.Errorf("image backend returned invalid PNG: %w", err)
 	}
@@ -123,11 +120,6 @@ func (g *Ghost) publishAIResult(e proto.Event, userDriven bool) {
 
 func (g *Ghost) publishAIError(msg, tag string) {
 	g.publish(proto.Event{Type: proto.EventAIError, Text: msg, Tag: tag})
-}
-
-// storeGet reads one key.
-func storeGet(s Store, key string) (string, bool, error) {
-	return s.Get(key)
 }
 
 // toolResultChars is how much of one tool's answer goes back to the model.

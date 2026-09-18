@@ -1,7 +1,7 @@
 package ghost
 
 import (
-	"strings"
+	"slices"
 	"sync"
 	"time"
 
@@ -17,8 +17,8 @@ import (
 // is actually needed, the driver asks, in the balloon, about the thing that
 // is happening right now:
 //
-//	Wisp would like to generate dialogue with your configured language
-//	model. Allow?
+//	Wisp would like to talk with you through your language model (hermes).
+//	Allow?
 //	1. Allow
 //	2. Not now
 //	3. Never ask again
@@ -313,10 +313,5 @@ func (g *Ghost) declares(cap string) bool {
 	if g.manifest == nil {
 		return false
 	}
-	for _, c := range g.manifest.Ghost.Capabilities {
-		if strings.EqualFold(c, cap) {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(g.manifest.Ghost.Capabilities, cap)
 }

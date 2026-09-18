@@ -680,17 +680,6 @@ func (r *evalRig) snapIntentions(name string) error {
 	return nil
 }
 
-// waitOccasion returns once the trial's occasion has fired. The driver
-// logs nothing when it does; the minute passing is the event, and what
-// the ghost made of it is in the trace.
-func (r *evalRig) waitOccasion() error {
-	if r.occasionAt.IsZero() {
-		return errors.New("waitOccasion: the trial has no occasion (rigOptions.Occasion)")
-	}
-	time.Sleep(time.Until(r.occasionAt) + 2*time.Second)
-	return nil
-}
-
 // answer waits up to within for the ghost's next question (the ask tool)
 // and picks the first choice matching pattern, a case-insensitive regexp,
 // or the first choice if none does. It returns the choice it picked.

@@ -10,8 +10,8 @@ import (
 	"github.com/aaronjauregui/haunt/internal/wlclient"
 )
 
-// Talking to your ghost without a terminal. Clicking the sprite opens a
-// line in its balloon; Enter sends it as a message event — the same event
+// Talking to your ghost without a terminal. Right-clicking the sprite opens
+// a line in its balloon; Enter sends it as a message event — the same event
 // `haunt say` produces, so brains need no new handling — and Escape, or
 // losing keyboard focus, abandons it.
 //

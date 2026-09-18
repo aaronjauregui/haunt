@@ -18,8 +18,8 @@ import (
 // brain, save, and the ghost reloads in place with its state intact.
 func cmdDev(args []string) error {
 	fs := flag.NewFlagSet("dev", flag.ExitOnError)
-	x := fs.Int("x", 100, "initial sprite x position")
-	y := fs.Int("y", 100, "initial sprite y position")
+	x := fs.Int("x", 100, "sprite x position (default: where it was left)")
+	y := fs.Int("y", 100, "sprite y position (default: where it was left)")
 	state := fs.String("state", "", "override state directory")
 	fs.Parse(args)
 	if fs.NArg() != 1 {
@@ -41,6 +41,7 @@ func cmdDev(args []string) error {
 		go func() {
 			runDone <- ghost.Run(runCtx, dir, ghost.Options{
 				X: *x, Y: *y,
+				Placed:   isSet(fs, "x") || isSet(fs, "y"),
 				StateDir: *state,
 				Logger:   hlog.Open(os.Stderr),
 				OnReady:  func() { fmt.Println("READY") },

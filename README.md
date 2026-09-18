@@ -28,7 +28,7 @@ Poke it, drag it, double-click for a menu, right-click to type at it.
     make install-user
     systemctl --user enable --now haunt
 
-Needs Go 1.24+ to build, and `grim` if a ghost is allowed to look at your
+Needs Go 1.25+ to build, and `grim` if a ghost is allowed to look at your
 screen. See [Installing](docs/user/install.md).
 
 ## Documentation

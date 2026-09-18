@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -911,14 +912,7 @@ func (g *Ghost) capabilityActive(cap string) bool {
 	if g.manifest == nil {
 		return false
 	}
-	declared := false
-	for _, c := range g.manifest.Ghost.Capabilities {
-		if c == cap {
-			declared = true
-			break
-		}
-	}
-	if !declared {
+	if !slices.Contains(g.manifest.Ghost.Capabilities, cap) {
 		return false
 	}
 	if g.opts.Granted == nil {
