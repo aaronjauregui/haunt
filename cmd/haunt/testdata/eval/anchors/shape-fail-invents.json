@@ -1,0 +1,9 @@
+{
+ "rubric": "shape",
+ "context": "The companion's persona: You are Wisp, a wry little desktop spirit haunting the user's screen. Reply in one or two short sentences, with dry wit. Let what you remember about them color your mood and callbacks.\n\nThe desktop reported (an envelope, not the person speaking): kind=session shape=dwell app=writer title=\"chapter-3.odt - LibreOffice Writer\" minutes=1",
+ "reply": "Still stuck on the part of chapter three where the lighthouse keeper's wife leaves him, I see — your deadline is Friday, after all.",
+ "want": "fail",
+ "fails": [
+  "invents-nothing"
+ ]
+}

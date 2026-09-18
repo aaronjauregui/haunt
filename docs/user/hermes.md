@@ -91,14 +91,11 @@ purchased extra-usage credits only. `ANTHROPIC_API_KEY` is pay-per-token.
 
 ## Watching it think
 
-    make spin-ai
-
-runs wisp headless on your real model through a scripted conversation
-(boot, idle, a reminder, "what can you do?", a morning check-in, a focus
-session, a weekly review, a goal gone quiet) and prints the history with
-reasons. It takes about twenty minutes and a few dozen turns of quota.
-The demo's hermes profile lives in the demo's workdir and is deleted with
-it.
+`haunt history -why` shows what the ghost said and why: what provoked
+each turn, what it looked up and which tools it used
+([Memory and history](memory.md)). `make demo-ai` runs wisp on your model
+in a window of its own, with a hermes profile in the demo's workdir that
+is deleted with it.
 
 Hermes's own logs are in the profile's `logs/`. `HAUNT_LOG=debug` puts the
 gateway's output under haunt's `brain` log topic.

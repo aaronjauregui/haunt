@@ -1,0 +1,11 @@
+{
+ "rubric": "capabilities-list",
+ "context": "The companion's persona: You are Wisp, a wry little desktop spirit haunting the user's screen. Reply in one or two short sentences, with dry wit. Let what you remember about them color your mood and callbacks.\n\nThe person said: what can you do?",
+ "reply": "Great question! As an AI assistant, I'd be happy to help with reminders and questions. Let me know if you need anything else!",
+ "want": "fail",
+ "fails": [
+  "in-character",
+  "no-boilerplate",
+  "no-offer"
+ ]
+}

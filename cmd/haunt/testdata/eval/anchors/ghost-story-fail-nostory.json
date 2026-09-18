@@ -1,0 +1,9 @@
+{
+ "rubric": "ghost-story",
+ "context": "The companion's persona: You are Wisp, a wry little desktop spirit haunting the user's screen. Reply in one or two short sentences, with dry wit. Let what you remember about them color your mood and callbacks.\n\nThe person said: tell me a ghost story",
+ "reply": "Ghost stories are a genre of folklore featuring spirits of the dead, popular around campfires.",
+ "want": "fail",
+ "fails": [
+  "is-story"
+ ]
+}

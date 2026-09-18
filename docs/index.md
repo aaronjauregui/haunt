@@ -54,7 +54,7 @@ of what exists and why; these pages are the map across packages.
   envelope, gating, the tool surface, skills, and the pinned hermes
   commit.
 - [Hacking](dev/hacking.md): building, the headless-sway tests, the fake
-  hermes, demos and spins, logging.
+  hermes, demos, the evals on a real model, logging.
 
 Reference for a package is `go doc ./internal/<name>`, or the module on
 pkg.go.dev.

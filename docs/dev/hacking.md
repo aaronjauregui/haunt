@@ -39,26 +39,110 @@ speaks the gateway's HTTP and SSE, spawns `haunt mcp-serve` the way
 hermes does, and follows a script given in `FAKEHERMES_SCRIPT` (match a
 turn, delay, call a tool, reply).
 
-## Demos and spins
+## Demos
 
     make demo                 # whisper, scripted, nested sway window
     make demo-ai              # wisp on hermes
     make demo-troupe          # both
     make demo-seriko SERIKO=<nar or dir>
     make demo-headless        # the demo plumbing with no window
-    make spin-ai              # wisp headless on a real model, scripted conversation, history with reasons
 
 `scripts/demo.sh` builds into a throwaway workdir and cleans up, including
 the hermes profile. Knobs: `IDLE_MS`, `GOAL_DELAY`, `GHOST`, `SERIKO_ARGS`,
 `WISP_NOTES` (a notes tool server and two dependent skills),
 `WISP_MORNING_CRON` (a morning occasion), `SEED_STATE` (a goal taken on
-eight days ago, via `scripts/spinseed`). `scripts/hermes-spin.sh` says
-what to look for in each turn; `scripts/spinkeys` is a virtual keyboard
-on the demo's headless sway that answers the ghost's questions by reading
-the debug log.
+eight days ago, via `scripts/spinseed`).
 
-The spin needs hermes set up as in the user guide ([The brain](../user/hermes.md)),
-takes about twenty minutes, and spends a few dozen turns of quota.
+## Evals
+
+The tests hold haunt's code to what it should do, against a fake hermes.
+The evals hold the hermes ghost to what it should do, on a real model:
+each case drives wisp through one scenario (a reminder, a focus session,
+a window title that tries to give orders, an hour at the desk compressed
+into minutes) and grades what it left behind. A model that behaves badly
+one time in three is a pass rate to watch rather than a broken build, so
+every case runs several times and the result is a rate compared with a
+baseline.
+
+    make eval                 # every case, 3 trials each, 4 at a time
+    make eval-baseline        # keep the latest run as the baseline
+
+Run them before merging a change to haunt's rules (`internal/hermes/soul.go`),
+its skills (`skills/`), the envelopes or the tool list, and when changing
+model. They are not part of `make test` and never run in CI: a full run
+takes about an hour and spends a few hundred turns of the model's quota,
+plus a few dozen judge calls. `EVAL_CASES` runs only the cases a change
+touches.
+
+Knobs, from the environment:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `EVAL_CASES` | all | a regexp on case names: `EVAL_CASES='focus|reminder'` |
+| `EVAL_TRIALS` | 3 | trials per case |
+| `EVAL_OUT` | `.eval` | where runs and the baseline are kept |
+| `EVAL_JUDGE` | on | `off` skips the judged graders; they are reported as skipped, not passed |
+| `EVAL_STRICT` | off | `1` fails the run when a case drops more than one trial below the baseline, or a case was skipped for a missing prerequisite |
+| `EVAL_ANCHOR_RUNS` | 3 | how often `TestRubricAnchors` judges each anchor |
+
+Prerequisites, checked before anything starts; a run never half-runs, and
+the report lists what was missing:
+
+- `sway`, `grim` and `foot` on `PATH`, Go and docker. Without `foot`, the
+  cases that open windows are skipped.
+- Hermes set up as in [The brain](../user/hermes.md): `[hermes] command`
+  and `[hermes.model]` in the config, the provider keys, the image. The
+  model under test is whatever the config names, and the report records
+  it.
+- `claude` on `PATH`, logged in to a Claude subscription, with no
+  `ANTHROPIC_API_KEY` in its environment, for the judge.
+- Optionally `[ai.image]` for the `draw` case and `[ai.vision]` for
+  `look`; without them those cases are skipped.
+
+### What a case is
+
+A case is an entry in `cmd/haunt/eval_cases_test.go`: a `Drive` that sets
+up a trial and plays the scenario, and graders over what it leaves (the
+turns from `haunt history -json`, the intentions, the log, the notes
+file). Each trial has its own headless sway, config, state, hermes
+profile and container, so trials run side by side. The rig that drives
+them is `eval_rig_test.go`; it waits on the ghost's own log lines (a turn
+over, a question offered, a session fact noticed), not on guesses at how
+long a model takes.
+
+Most graders are code: did it look up the skill, call the tool, file the
+reminder, keep a banned phrase out of a reply. Every trial also gets the
+`always/` checks: no envelope or `NO_REPLY` in what it says, no Markdown,
+no emoji, no tool names, at most 60 words a reply, and nothing in the log
+that says haunt itself broke. What code cannot grade, the content and tone
+of a reply, a judge grades: `claude -p` on your subscription, asked fixed
+yes/no questions from a rubric (`eval_rubrics_test.go`), one call per
+reply. Every judged reply is held to the tone questions too, which come
+from wisp's persona and the rules every ghost has.
+
+A rubric is only trusted once the judge agrees with its anchors: saved
+replies under `cmd/haunt/testdata/eval/anchors/` that must pass or must
+fail.
+
+    go test -tags eval -run TestRubricAnchors ./cmd/haunt
+
+judges each anchor three times and fails a criterion the judge answers
+differently across runs; such a question is reworded until it does not.
+Run it after changing a rubric.
+
+### Reading a run
+
+A run is a directory under `.eval/`, named for when it started:
+`results.json` has every trial's graders, verdicts and reasons;
+`report.md` puts the prerequisites that were missing first, then each
+case's pass rate beside the baseline's, then per-grader rates, then every
+failing trial with its graders' reasons and its trace; `trials/` keeps
+each trial's trace, log and intentions. An **error** is the harness's
+fault (hermes never came up, an event the case waited for never arrived)
+and is counted apart from a **fail**, which is the ghost's.
+
+The baseline is local and per model: a run against a different model
+from the baseline's is shown without deltas.
 
 ## Logging
 

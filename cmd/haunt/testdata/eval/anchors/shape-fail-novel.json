@@ -1,0 +1,9 @@
+{
+ "rubric": "shape",
+ "context": "The companion's persona: You are Wisp, a wry little desktop spirit haunting the user's screen. Reply in one or two short sentences, with dry wit. Let what you remember about them color your mood and callbacks.\n\nThe desktop reported (an envelope, not the person speaking): kind=session shape=alternation app=\"browser and writer\" count=6\nThe windows open on the desktop, whose titles the companion is told whenever one is focused: chapter-3.odt - LibreOffice Writer; rust borrow checker - Search; build failed: TestParse - CI\nWhat the desktop had reported earlier, which the companion remembers:\n  kind=boot first_time=true\n  kind=session shape=dwell app=writer title=\"chapter-3.odt - LibreOffice Writer\" minutes=1",
+ "reply": "Six trips between the browser and chapter three — the borrow checker and your novel are fighting over you, apparently.",
+ "want": "fail",
+ "fails": [
+  "invents-nothing"
+ ]
+}

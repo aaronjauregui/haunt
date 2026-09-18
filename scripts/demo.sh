@@ -160,7 +160,7 @@ Hermes hides this skill.
 SKILL
         fi
         # WISP_MORNING_CRON gives wisp a morning occasion, which haunt's
-        # morning-check-in skill answers. The spin sets it a few minutes
+        # morning-check-in skill answers. Set it a few minutes
         # ahead, since cron has minute granularity.
         if [ -n "${WISP_MORNING_CRON:-}" ]; then
             cat >> "$workdir/wisp/ghost.toml" <<EOF

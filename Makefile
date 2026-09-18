@@ -1,6 +1,6 @@
 GO ?= go
 
-.PHONY: build test vet fmt demo demo-ai spin-ai demo-troupe demo-seriko demo-headless install-user clean
+.PHONY: build test vet fmt eval eval-baseline demo demo-ai demo-troupe demo-seriko demo-headless install-user clean
 
 build:
 	$(GO) build ./...
@@ -16,6 +16,32 @@ vet:
 fmt:
 	gofmt -l -w .
 
+# The evals: wisp on the real model in [hermes] / [hermes.model], each case
+# run EVAL_TRIALS times (default 3) four at a time, graded by code and by
+# `claude -p` on a Claude subscription. Spends quota; not part of `test`.
+# Results and report.md go to .eval/<timestamp>/ (EVAL_OUT moves .eval).
+# EVAL_CASES=focus|reminder picks cases, EVAL_JUDGE=off skips the judge,
+# EVAL_STRICT=1 fails on a drop of more than one trial below the baseline
+# or on a case skipped for a missing prerequisite. -count=1 because a
+# cached eval would be no eval at all.
+EVAL_OUT ?= .eval
+export EVAL_OUT
+
+eval:
+	$(GO) test -tags eval -count=1 -run '^TestEval$$' -parallel 4 -timeout 120m ./cmd/haunt; \
+	status=$$?; \
+	latest=$$(ls -1 "$(EVAL_OUT)" 2>/dev/null | grep '^[0-9]' | sort | tail -n 1); \
+	if [ -n "$$latest" ]; then echo "report: $(EVAL_OUT)/$$latest/report.md"; fi; \
+	exit $$status
+
+# Keep the newest run's results as the baseline later runs are compared
+# with. A baseline is per model, and stays local.
+eval-baseline:
+	@latest=$$(ls -1 "$(EVAL_OUT)" 2>/dev/null | grep '^[0-9]' | sort | tail -n 1); \
+	if [ -z "$$latest" ]; then echo "no run under $(EVAL_OUT)/: make eval first"; exit 2; fi; \
+	cp "$(EVAL_OUT)/$$latest/results.json" "$(EVAL_OUT)/baseline.json"; \
+	echo "baseline: $(EVAL_OUT)/$$latest/results.json"
+
 # Opens a nested sway window in your current session with the whisper
 # ghost inside it. Close the window (or Ctrl-C) to stop.
 demo:
@@ -29,13 +55,6 @@ demo:
 # IDLE_MS=10000 shortens the wait before it speaks unprompted.
 demo-ai:
 	GHOST=wisp ./scripts/demo.sh
-
-# The AI ghost on a real model, with no window: a scripted conversation
-# (boot, idle, a reminder, "what can you do?", haunt's and wisp's skills) and its
-# history with reasons, answering the ghost's questions with a virtual keyboard.
-# About 21 minutes, and a few dozen turns of the model's quota.
-spin-ai:
-	./scripts/hermes-spin.sh
 
 # Two ghosts at once, in one nested sway. Whisper is scripted and wisp runs
 # on hermes, so they behave differently — which is the point.

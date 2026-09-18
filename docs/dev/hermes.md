@@ -369,5 +369,5 @@ and speaks the captured SSE format from a script (`FAKEHERMES_SCRIPT`:
 match, delay, tool call, reply). `newHermesRig` is the shared rig. The
 fake gateway also logs what it finds under `skills.external_dirs`.
 `internal/hermes` tests replay captured SSE and cover the profile merge
-and the skills install. `make spin-ai` is the live counterpart
-([Hacking](hacking.md)).
+and the skills install. The evals are the live counterpart, on a real
+model ([Hacking](hacking.md#evals)).

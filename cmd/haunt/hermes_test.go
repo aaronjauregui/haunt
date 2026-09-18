@@ -556,3 +556,64 @@ func waitHermesIntentions(t *testing.T, bin, state, rt, want string) string {
 	}
 }
 
+// TestHermesHiddenSkillWarning: a package skill that requires a tool the
+// ghost does not offer is one hermes will never list, and the driver says
+// so once the tool list is known. The usual cause is a [[tool]] server's
+// tool spelled as the server spells it rather than as hermes does; the
+// same skill spelled right is not warned about.
+func TestHermesHiddenSkillWarning(t *testing.T) {
+	c := testenv.StartT(t)
+	dir := t.TempDir()
+	rig := newHermesRig(t, dir, nil, "")
+	notes := filepath.Join(dir, "notes-server")
+	build(t, notes, "./testdata/toolserver")
+	gDir := filepath.Join(dir, "wisp")
+	writeGhost(t, gDir, fmt.Sprintf(`[ghost]
+name = "wisp"
+capabilities = ["message", "llm", "tools"]
+
+[[tool]]
+name = "notes"
+command = [%q]
+`, notes))
+	for name, tool := range map[string]string{
+		"spelled-right": "mcp__haunt__notes__append",
+		"spelled-wrong": "mcp__notes__append",
+	} {
+		sk := filepath.Join(gDir, "skills", name)
+		if err := os.MkdirAll(sk, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		os.WriteFile(filepath.Join(sk, "SKILL.md"), []byte("---\nname: "+name+
+			"\ndescription: Notes.\nmetadata:\n  hermes:\n    requires_tools: ["+tool+"]\n---\n"), 0o644)
+	}
+
+	cmd := exec.Command(rig.Bin, "run", "-x", "100", "-y", "100", "-state", filepath.Join(dir, "state"), gDir)
+	cmd.Env = append(c.Env(), rig.env()...)
+	var log syncBuffer
+	cmd.Stderr = &log
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cmd.Process.Signal(syscall.SIGINT)
+		cmd.Wait()
+	})
+	waitFor(t, stdout, "READY")
+
+	const warned = "hermes will not list the skill spelled-wrong: it needs tool mcp__notes__append"
+	deadline := time.Now().Add(30 * time.Second)
+	for !strings.Contains(log.String(), warned) {
+		if time.Now().After(deadline) {
+			t.Fatalf("no warning about the misspelled skill:\n%s", log.String())
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if strings.Contains(log.String(), "the skill spelled-right") {
+		t.Errorf("the skill that names the tool as hermes does was warned about:\n%s", log.String())
+	}
+}
