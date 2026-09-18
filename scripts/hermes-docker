@@ -80,6 +80,12 @@ esac
 name="hermes-$(printf '%s' "$home" | sha256sum | cut -c1-12)"
 docker rm -f "$name" >/dev/null 2>&1 || true
 args+=(--name "$name")
+# With that container gone, no gateway runs for this home, so what the
+# last one left behind is stale. A gateway stopped by a signal leaves
+# gateway_state.json saying it should be running, and the image's boot
+# reconciler then starts a supervised copy of its own beside haunt's, which
+# races it for the profile and takes the container down.
+rm -f "$home/gateway_state.json" "$home/gateway.pid"
 
 # haunt stops the gateway with SIGTERM to this script's process group and
 # SIGKILL ten seconds later, so the container gets eight.

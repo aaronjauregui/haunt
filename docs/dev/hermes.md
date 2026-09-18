@@ -354,7 +354,11 @@ binary read-only, because hermes spawns `mcp-serve` from the path in
 override the environment). It sets `HERMES_GATEWAY_NO_SUPERVISE=1` (or
 the image's s6 supervisor and boot reconciler start gateways that race
 haunt's), `HERMES_DASHBOARD=0`, and `HERMES_UID`/`HERMES_GID` instead of
-`--user`, which the image refuses.
+`--user`, which the image refuses. Before starting, it removes the
+profile's leftover container and the stopped gateway's
+`gateway_state.json` and `gateway.pid`: a gateway stopped by a signal
+leaves its state saying it should be running, and the boot reconciler
+would start a second gateway from it on the next start.
 
 ## Tests
 
