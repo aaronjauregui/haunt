@@ -276,11 +276,69 @@ func shot(t *testing.T, c *testenv.Compositor, path string) image.Image {
 	return img
 }
 
+// TestMain gives the package one directory for built fixtures, so the
+// daemon, the whisper brain and the fakes are compiled once per run rather
+// than once per test that wants them.
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "haunt-test-build-*")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	builds.dir = dir
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
+
+// builds is the cache of compiled fixtures, keyed by package and build
+// environment. Tests run in parallel, so a build is held under its own
+// entry while it happens and the others wait for it rather than starting
+// a second one.
+var builds struct {
+	mu   sync.Mutex
+	dir  string
+	done map[string]*buildResult
+}
+
+type buildResult struct {
+	ready chan struct{}
+	path  string
+	err   error
+}
+
+// build compiles pkg with the given environment into out, from the cache
+// when it has been built before in this run.
 func build(t *testing.T, out, pkg string, env ...string) {
 	t.Helper()
-	cmd := exec.Command("go", "build", "-o", out, pkg)
-	cmd.Env = append(os.Environ(), env...)
-	if b, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("building %s: %v: %s", pkg, err, b)
+	key := pkg + "\x00" + strings.Join(env, "\x00")
+	builds.mu.Lock()
+	if builds.done == nil {
+		builds.done = map[string]*buildResult{}
+	}
+	r, ok := builds.done[key]
+	if !ok {
+		r = &buildResult{ready: make(chan struct{}), path: filepath.Join(builds.dir, fmt.Sprint(len(builds.done)))}
+		builds.done[key] = r
+		builds.mu.Unlock()
+		cmd := exec.Command("go", "build", "-o", r.path, pkg)
+		cmd.Env = append(os.Environ(), env...)
+		if b, err := cmd.CombinedOutput(); err != nil {
+			r.err = fmt.Errorf("building %s: %v: %s", pkg, err, b)
+		}
+		close(r.ready)
+	} else {
+		builds.mu.Unlock()
+		<-r.ready
+	}
+	if r.err != nil {
+		t.Fatal(r.err)
+	}
+	data, err := os.ReadFile(r.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(out, data, 0o755); err != nil {
+		t.Fatal(err)
 	}
 }

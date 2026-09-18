@@ -27,8 +27,8 @@ Where the tests are:
   temp dir, `haunt run` is driven in-process against the headless sway,
   and the test pokes, types, waits and reads the log. `helpers_test.go`
   has the rig. Fixtures in `cmd/haunt/testdata` are small programs the
-  tests build: a fake hermes, a tool server, an actor, a looker, a
-  chooser.
+  tests build, once per run: a fake hermes, a tool server, an actor, a
+  looker, a chooser.
 - Package tests sit beside their packages. `internal/hermes` replays
   captured SSE from `testdata`; `internal/seriko` round-trips shells;
   `internal/ghost` tests consent, initiative, intentions, goals, polls,
