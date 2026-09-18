@@ -1,12 +1,13 @@
-// Command spinseed prepares a ghost's state for scripts/hermes-spin.sh: it
-// writes a goal taken on eight days ago and never seen since, so the
-// driver's goal check finds it gone quiet within the spin instead of a
-// week later (goalMinAge and driftAfter in internal/ghost/goal.go).
-// Dev-only; it writes the store directly, so the ghost must not be running.
+// Command spinseed prepares a ghost's state for a demo (scripts/demo.sh's
+// SEED_STATE): it writes a goal taken on eight days ago and never seen
+// since, so the driver's goal check finds it gone quiet within the demo
+// instead of a week later (goalMinAge and driftAfter in
+// internal/ghost/goal.go).
+// Dev-only; it writes the store directly (ghost.SeedGoal, which the evals
+// share), so the ghost must not be running.
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -43,16 +44,5 @@ func seed(state, text string, watch []string, age time.Duration) error {
 		return err
 	}
 	defer s.Close()
-	list := []ghost.Intention{{
-		Name:  "hermes/spin-goal",
-		Text:  text,
-		Made:  time.Now().Add(-age),
-		Watch: watch,
-		Asked: true,
-	}}
-	b, err := json.Marshal(list)
-	if err != nil {
-		return err
-	}
-	return s.Set(ghost.IntentionsStoreKey, string(b))
+	return ghost.SeedGoal(s, text, watch, age)
 }
