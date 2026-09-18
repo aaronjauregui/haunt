@@ -11,12 +11,10 @@ import (
 
 // cmdPerms lists and changes what an installed ghost is allowed to do.
 //
-// The design promised this from the start and the install prompt has been
-// pointing at it for as long as it has existed ("installing with no
-// capabilities granted (haunt perms to change later)"). Until now there was
-// nowhere to change it: consent was a single yes/no at install and a
-// granted capability was granted for good, which is the wrong shape for a
-// thing that lives on your desktop for months.
+// The install prompt points here ("installing with no capabilities
+// granted (haunt perms to change later)"). A single yes/no at install with
+// no way back is the wrong shape for a thing that lives on your desktop for
+// months, so grants are listed, changed and withdrawn from here.
 //
 // Revocation takes effect on a running ghost, not at next start — see
 // library.GrantWatch. A permission you can only withdraw by restarting the

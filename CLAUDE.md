@@ -1,19 +1,19 @@
 # Haunt
 
-A Wayland desktop companion (ukagaka-style ghost driver) in Go. Read in
-this order:
+A Wayland desktop companion (ukagaka-style ghost driver) in Go.
 
-- `README.md` — what it does today and how to run it.
-- `DESIGN.md` — what it is meant to be, the effect/judgment rule, and the
-  decisions that are settled.
-- `docs/hermes-brain.md` — the planned replacement of the LLM path with
-  hermes-agent as the brain: what is deleted, what hermes takes over, what
-  haunt keeps, and the phases.
+Documentation is `docs/`, in three guides: `docs/user/` for running a
+ghost, `docs/ghosts/` for making one, `docs/dev/` for changing haunt.
+`docs/index.md` lists every page; `docs/dev/architecture.md` and
+`docs/dev/decisions.md` are where to start on the code. Package and
+function comments are the record of what exists and why; `go doc
+./internal/<name>` is the reference for a package.
 
-The code is the record of what exists; package and function comments
-explain why things are shaped as they are. There is no status log or
-backlog file on purpose.
+There is no status log, changelog or backlog file, on purpose. Docs
+describe what is, in the present tense, never what was done or when. A
+change to user-facing behaviour updates the matching page under `docs/`
+in the same change.
 
-Build and test: `make build test` (needs Go 1.24+, `sway`, `grim`; tests
-run against a headless sway). Demos: `make demo`, `make demo-ai`,
-`make demo-troupe`.
+Build and test: `make build test` (needs Go 1.24+, `sway`, `grim`,
+`foot`; tests run against a headless sway). Demos: `make demo`,
+`make demo-ai`, `make demo-troupe`.

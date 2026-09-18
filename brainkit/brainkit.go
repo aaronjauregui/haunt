@@ -265,9 +265,9 @@ func (em *Emitter) SetAside(name string) {
 	em.emit(Intent{Type: proto.IntentSetAside, Name: name})
 }
 
-// Note writes a private journal entry. Recent notes are injected into LLM
-// context on every Chat, so what the ghost chooses to remember shapes its
-// future behavior. The user can read the journal with `haunt journal`.
+// Note writes a line in the ghost's journal, the record of what it did.
+// The person reads it with `haunt journal`. It is an action log, not a
+// memory: nothing reads it back into the brain.
 func (em *Emitter) Note(text string) {
 	em.emit(Intent{Type: proto.IntentNote, Text: text})
 }

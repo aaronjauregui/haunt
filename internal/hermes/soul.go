@@ -25,7 +25,7 @@ type Persona struct {
 //
 // The rules are haunt's and are regenerated on every manifest change, so a
 // persona author never has to know about envelopes or NO_REPLY; the order
-// is fixed (docs/hermes-brain.md, 5.3) because the first two are what keep
+// is fixed (docs/ghosts/persona-and-skills.md) because the first two are what keep
 // a desktop companion from narrating every window change.
 func Soul(p Persona) string {
 	var b strings.Builder

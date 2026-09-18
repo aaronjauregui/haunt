@@ -9,5 +9,6 @@
 // as MCP tool calls through `haunt mcp-serve` and the control socket, and
 // never through here.
 //
-// See docs/hermes-brain.md for the plan this implements.
+// docs/dev/hermes.md is the map of this integration and the hermes
+// commit it is checked against.
 package hermes

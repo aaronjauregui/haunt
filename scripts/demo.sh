@@ -97,7 +97,7 @@ EOF
         ;;
     wisp)
         # No [brain] section and nothing to compile: art and a persona are a
-        # whole ghost, and hermes is its brain (docs/hermes-brain.md). Its
+        # whole ghost, and hermes is its brain (docs/user/hermes.md). Its
         # profile is made under the demo's own hermes home (below), so give
         # it a model in [hermes.model] and its keys in the file
         # scripts/hermes-docker reads.
@@ -110,7 +110,7 @@ capabilities = ["message", "llm", "imagine", "window", "tell"]
 [persona]
 system = "You are Wisp, a wry little desktop spirit haunting the user's screen. Reply in one or two short sentences, with dry wit. Let what you remember about them color your mood and callbacks."
 
-# One of hermes's own skills (docs/hermes-brain.md, section 14).
+# One of hermes's own skills (docs/ghosts/persona-and-skills.md).
 [hermes]
 bundled_skills = ["humanizer"]
 EOF
@@ -171,7 +171,7 @@ name = "morning"
 EOF
         fi
         # A skill of wisp's own: a package's skills/ is installed into its
-        # hermes profile beside haunt's (docs/hermes-brain.md, section 14).
+        # hermes profile beside haunt's (docs/ghosts/persona-and-skills.md).
         mkdir -p "$workdir/wisp/skills/ghost-story"
         cat > "$workdir/wisp/skills/ghost-story/SKILL.md" <<'EOF'
 ---

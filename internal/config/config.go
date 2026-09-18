@@ -42,7 +42,7 @@ type File struct {
 	Animation AnimationConfig
 	Awareness AwarenessConfig
 	Curiosity CuriosityConfig
-	// Hermes is where the ghosts' brain lives (docs/hermes-brain.md).
+	// Hermes is where the ghosts' brain lives (docs/dev/hermes.md).
 	Hermes hermes.Config
 }
 

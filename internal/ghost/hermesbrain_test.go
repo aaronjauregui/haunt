@@ -441,7 +441,7 @@ func TestHermesToolList(t *testing.T) {
 		}
 	}
 	// Beliefs are hermes memory's, and a correction is an edit to it
-	// (docs/hermes-brain.md, section 13).
+	// (docs/dev/decisions.md).
 	for _, not := range []string{"remember", "note", "move", "watch", "correct", "beliefs"} {
 		if names[not] {
 			t.Errorf("%s should not be offered", not)

@@ -136,7 +136,7 @@ func TestGhostActsThroughTheModel(t *testing.T) {
 	}
 	// A package skill that needs the server's tool names it the way
 	// hermes does, and the tools the model was offered satisfy it
-	// (docs/hermes-brain.md, section 14, direction 5).
+	// (docs/dev/hermes.md, "Skills").
 	skill := fstest.MapFS{"shopping/SKILL.md": {Data: []byte("---\nname: shopping\ndescription: x\n" +
 		"metadata:\n  hermes:\n    requires_toolsets: [mcp-haunt]\n    requires_tools: [mcp__haunt__notes__append]\n---\n")}}
 	if unmet, err := hermes.Unmet(skill, list.Tools); err != nil || len(unmet) > 0 {

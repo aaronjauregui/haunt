@@ -28,7 +28,7 @@ import (
 // socket (hermestools.go) and is performed there, under the same gates as
 // everything else; what the model says arrives as the turn's reply and is
 // shown here. The division of labour is the one
-// docs/hermes-brain.md draws: the driver owns effects — who pays for a wake,
+// docs/dev/hermes.md draws: the driver owns effects — who pays for a wake,
 // whether the balloon may show, what the person sees — and the model owns
 // what to make of an event and whether to say anything at all.
 //

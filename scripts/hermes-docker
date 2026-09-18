@@ -23,7 +23,7 @@
 # gateway can only be reached from the host through the host's loopback.
 #
 # Environment: HERMES_IMAGE (default hermes-agent:6005aa1, built from the
-# commit docs/hermes-brain.md was checked against).
+# commit docs/dev/hermes.md is checked against).
 set -euo pipefail
 
 image="${HERMES_IMAGE:-hermes-agent:6005aa1}"

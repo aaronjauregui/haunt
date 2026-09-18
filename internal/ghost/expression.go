@@ -107,7 +107,7 @@ func (g *Ghost) inferExpression(text string) {
 //
 // The occasion for a change is something the driver knows and the brain
 // does not: the shape of the working day (internal/session), which the
-// brain already hears about as a `session` event and until now could only
+// brain already hears about as a `session` event and would otherwise only
 // turn into words. So the driver *offers* — it marks the event MayPose —
 // and the brain decides whether to wear anything and what. That division
 // is deliberate: choosing a face with nothing to derive it from is closer

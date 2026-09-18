@@ -6,7 +6,7 @@ carries its own upstream license beside it.
 
 Ghost profiles opt out of hermes's bundled library (`.no-bundled-skills`),
 because nearly all of it assumes a shell, files or the web
-(docs/hermes-brain.md, section 14). A ghost's manifest may name any of
+(docs/dev/hermes.md, "Skills"). A ghost's manifest may name any of
 these under `[hermes] bundled_skills`, and haunt installs them read-only
 into the profile, like its own skills.
 

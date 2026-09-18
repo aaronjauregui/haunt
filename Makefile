@@ -22,7 +22,7 @@ demo:
 	./scripts/demo.sh
 
 # The AI ghost: a persona and no brain at all, run by hermes-agent
-# (docs/hermes-brain.md, "Running on a real model": hermes in its container
+# (docs/user/hermes.md: hermes in its container
 # via scripts/hermes-docker, a model in [hermes.model]). Its hermes profile
 # lives in the demo's workdir and goes with it. Draws via your image backend
 # ([ai.image] in ~/.config/haunt/config.toml).

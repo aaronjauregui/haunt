@@ -16,7 +16,7 @@ import (
 )
 
 // A ghost's skills: routines hermes lists in the prompt and the model loads
-// with skill_view when one applies (docs/hermes-brain.md, section 14).
+// with skill_view when one applies (docs/dev/hermes.md, "Skills").
 //
 // Haunt's own skills and the ghost package's are copied into the profile,
 // under SkillsDir, and named in skills.external_dirs. A copy rather than a

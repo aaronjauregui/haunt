@@ -28,7 +28,7 @@ import (
 //
 // Deliberately absent: remember, note and anything that edits beliefs
 // (hermes's memory tool is the one writer of what the model concludes, and
-// a correction is an edit to it — docs/hermes-brain.md, section 13), move
+// a correction is an edit to it — docs/dev/decisions.md), move
 // (nothing a model should decide) and watch (a permission question, asked
 // from the menu).
 

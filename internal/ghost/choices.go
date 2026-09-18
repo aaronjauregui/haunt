@@ -27,8 +27,7 @@ import (
 //     click lands on whichever row it is over.
 //   - The keyboard. Digits pick a row, arrows move, Enter takes the
 //     highlighted one, Escape dismisses. This is the first interaction in
-//     the project that does not require a mouse, which the accessibility
-//     hole in DESIGN.md has been waiting for.
+//     the project that does not require a mouse.
 //
 // Dismissal is an answer too. A brain that asked a question and heard
 // nothing back would wait forever, so clicking the ghost, pressing Escape

@@ -106,7 +106,7 @@ func (g *Gateway) spawn(ctx context.Context) (<-chan struct{}, error) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGTERM}
 	if err := cmd.Start(); err != nil {
 		if _, lookErr := exec.LookPath(argv[0]); lookErr != nil {
-			return nil, fmt.Errorf("hermes is not installed (%s not found); see docs/hermes-brain.md", argv[0])
+			return nil, fmt.Errorf("hermes is not installed (%s not found); see docs/user/hermes.md", argv[0])
 		}
 		return nil, fmt.Errorf("starting the hermes gateway: %w", err)
 	}

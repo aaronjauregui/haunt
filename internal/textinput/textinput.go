@@ -2,7 +2,7 @@
 //
 // Keys arrive from Wayland as Linux evdev scancodes, and turning those into
 // characters is properly the job of libxkbcommon — which is cgo, and the
-// driver avoids cgo by design (see DESIGN.md). So this maps a US layout in
+// driver avoids cgo by design (see docs/dev/decisions.md). So this maps a US layout in
 // pure Go: enough to type at your ghost, not enough for the world. Other
 // layouts, dead keys, compose sequences and input methods all need the real
 // thing, and the seam to add it later is Keymap.Rune.

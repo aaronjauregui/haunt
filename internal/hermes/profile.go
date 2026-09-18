@@ -298,7 +298,7 @@ var disabledToolsets = []string{
 const noBundledSkills = ".no-bundled-skills"
 
 // configVersion is hermes's config schema version (`_config_version` in
-// hermes_cli/config_defaults.py) at the commit docs/hermes-brain.md pins.
+// hermes_cli/config_defaults.py) at the commit docs/dev/hermes.md pins.
 const configVersion = 45
 
 func (c Config) writeConfig(path string, spec ProfileSpec, hasSkills bool) error {
@@ -358,9 +358,9 @@ func (c Config) writeConfig(path string, spec ProfileSpec, hasSkills bool) error
 		// not a companion. Only defaulted: the person may want otherwise.
 		memory["write_approval"] = false
 	}
-	// Hermes memory is the ghost's only memory. A profile from before
-	// phase 2 may still name haunt's memory provider, which no longer
-	// exists; hermes would fail to load it.
+	// Hermes memory is the ghost's only memory. A profile that names a
+	// haunt memory provider is from a haunt that had one; hermes would
+	// fail to load it.
 	if memory["provider"] == "haunt" {
 		delete(memory, "provider")
 	}

@@ -1,6 +1,6 @@
 // Command haunt-poc renders a sprite as a draggable layer-shell overlay.
-// It is the phase-1 proof of concept, normally run against a headless
-// compositor (see internal/testenv); pass an explicit WAYLAND_DISPLAY to
+// It is a rendering test bed with no ghost behind it, normally run against a
+// headless compositor (see internal/testenv); pass an explicit WAYLAND_DISPLAY to
 // target a real session.
 package main
 

@@ -1,6 +1,6 @@
 // Package skills carries haunt's own hermes skills: routines a ghost on
-// hermes can follow, written against its haunt tools (docs/hermes-brain.md,
-// section 14). The driver installs them into every ghost's profile, read-only,
+// hermes can follow, written against its haunt tools (docs/dev/hermes.md,
+// "Skills"). The driver installs them into every ghost's profile, read-only,
 // so hermes lists them in the prompt and the model loads one with skill_view
 // when it applies.
 //

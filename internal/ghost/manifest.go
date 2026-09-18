@@ -14,9 +14,9 @@ import (
 	hermesskills "github.com/aaronjauregui/haunt/third_party/hermes-skills"
 )
 
-// Manifest is ghost.toml, the package descriptor. v1 covers identity, shell
-// art, and the brain; capabilities, signing, and AI grants land with the
-// packaging phase.
+// Manifest is ghost.toml, the package descriptor: identity and
+// capabilities, the shell, a persona or a brain, tool servers and triggers.
+// docs/ghosts/manifest.md is the field reference.
 type Manifest struct {
 	Ghost    GhostSection     `toml:"ghost"`
 	Shell    ShellSection     `toml:"shell"`
@@ -31,7 +31,7 @@ type Manifest struct {
 // meaningful with the llm capability.
 type PersonaSection struct {
 	// System is the character's text, which leads the hermes profile's
-	// SOUL.md (docs/hermes-brain.md, section 5.3).
+	// SOUL.md (docs/ghosts/persona-and-skills.md).
 	System string `toml:"system"`
 }
 
