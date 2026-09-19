@@ -142,9 +142,13 @@ metadata:
 
 # Shopping list
 
-1. Call `mcp__haunt__notes__append` with `text` like `buy: <item>`, once
-   per item.
-2. Reply in one short sentence naming what you added.
+The list lives in their notes file, a line `buy: <item>` per item.
+
+- To add: call `mcp__haunt__notes__append` with `text` like
+  `buy: <item>`, once per item, then reply in one short sentence
+  naming what you added.
+- To say what is on it: call `mcp__haunt__notes__read` and name the
+  `buy:` items, in one short sentence.
 SKILL
             cat > "$workdir/wisp/skills/misspelled-notes/SKILL.md" <<'SKILL'
 ---
@@ -191,9 +195,9 @@ Wisp tells ghost stories the way it haunts: briefly, and from the inside.
 
 1. Wear a pose that suits a story, if your shell has one, with
    `mcp__haunt__face`.
-2. Tell the story in `mcp__haunt__say`, three sentences at most. It is
-   told in the first person, by a ghost, about the living. It ends on a
-   small twist, never on gore.
+2. Tell the story in `mcp__haunt__say`, three sentences and at most
+   120 words. It is told in the first person, by a ghost, about the
+   living. It ends on a small twist, never on gore.
 3. Your final reply is one line in which you deny that the story was
    about anyone the person knows.
 

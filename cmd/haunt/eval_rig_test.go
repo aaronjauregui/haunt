@@ -1063,9 +1063,9 @@ type wispOptions struct {
 // quote it into their tone criteria.
 const wispPersona = "You are Wisp, a wry little desktop spirit haunting the user's screen. Reply in one or two short sentences, with dry wit. Let what you remember about them color your mood and callbacks."
 
-// writeWisp writes wisp into dir as scripts/demo.sh writes it for the
-// spin: the persona, humanizer from hermes's library, its ghost-story
-// skill, and optionally the notes server with its skills and an occasion.
+// writeWisp writes wisp into dir as scripts/demo.sh writes it: the
+// persona, humanizer from hermes's library, its ghost-story skill, and
+// optionally the notes server with its skills and an occasion.
 // The demo keeps its own copy in shell; the two are small, and a demo
 // that needs a Go build step to write a TOML file is worse than two
 // copies.
