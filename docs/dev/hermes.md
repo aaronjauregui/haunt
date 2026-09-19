@@ -60,8 +60,8 @@ Rewritten every start (haunt's):
   `platforms.api_server`, `platform_toolsets`, `agent.disabled_toolsets`,
   `tools.tool_search`, `mcp_servers.haunt`, its own entry in
   `skills.external_dirs`, and `_config_version` if absent; it defaults
-  `memory.write_approval` to false and `skills.guard_agent_created` to
-  true. Everything else, the model above all, stays as the person set it
+  `memory.write_approval` to false, `skills.guard_agent_created` to
+  true and `tts.provider` to `piper`. Everything else, the model above all, stays as the person set it
   unless `[hermes.model]` in the haunt config says otherwise.
 - **`.env`** gets `API_SERVER_KEY` (32 random bytes, hex),
   `API_SERVER_PORT` (a free loopback port), `API_SERVER_HOST=127.0.0.1`
@@ -94,7 +94,12 @@ shell. `clarify` is left out because the API server passes no clarify
 callback and the tool only ever answers that it is unavailable; haunt's
 `ask` is how a question is put. Tool search must be off: with it on, the
 MCP tools and `session_search` hide behind a lookup a small model does not
-think to use. The model receives exactly `memory`, `skill_manage`,
+think to use. `tts.provider` is set because hermes checks every tool's
+availability before a turn, disabled ones included (`tools/registry.py`
+`check_fn`), and the check for its default voice, `edge`, imports
+`edge_tts` through `tools.lazy_deps`, which pip-installs it: two seconds
+before a fresh profile's first turn, for a toolset the ghost cannot use.
+Piper's check is a `find_spec` and installs nothing. The model receives exactly `memory`, `skill_manage`,
 `skill_view`, `skills_list`, `session_search` and `mcp__haunt__…`.
 
 ## The gateway

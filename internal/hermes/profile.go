@@ -352,6 +352,16 @@ func (c Config) writeConfig(path string, spec ProfileSpec, hasSkills bool) error
 	tools := section("tools")
 	tools["tool_search"] = map[string]any{"enabled": "off"}
 
+	// Hermes checks every tool's availability before each turn, disabled
+	// toolsets included, and checking its default voice (edge) installs
+	// the edge-tts package on a profile that lacks it: seconds before a
+	// fresh ghost's first word, for a tool it cannot call. Piper's check
+	// only looks for the package. A voice the person chose is kept.
+	tts := section("tts")
+	if _, set := tts["provider"]; !set {
+		tts["provider"] = "piper"
+	}
+
 	memory := section("memory")
 	if _, set := memory["write_approval"]; !set {
 		// A companion that asks permission to remember your cat's name is

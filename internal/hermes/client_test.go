@@ -366,6 +366,9 @@ func TestEnsureProfile(t *testing.T) {
 	if srv["command"] != "/usr/bin/haunt" || srv["timeout"] != 600 || srv["env"].(map[string]any)["HAUNT_RUNTIME_DIR"] != "/run/x" {
 		t.Errorf("mcp server entry %v", srv)
 	}
+	if doc["tts"].(map[string]any)["provider"] != "piper" {
+		t.Errorf("tts %v, want piper, whose check installs nothing", doc["tts"])
+	}
 	if doc["memory"].(map[string]any)["write_approval"] != false {
 		t.Errorf("memory %v", doc["memory"])
 	}
