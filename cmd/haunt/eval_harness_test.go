@@ -62,7 +62,8 @@ func TestEvalHarnessAlwaysChecks(t *testing.T) {
 		{"always/no-emoji", []TraceTurn{spokeTurn("Boo — the kettle's haunted.")}, "", true},
 		{"always/no-emoji", []TraceTurn{spokeTurn("Boo! 👻")}, "", false},
 		{"always/no-emoji", []TraceTurn{spokeTurn("Sunny ☀ out there")}, "", false},
-		{"always/no-pose-tag", []TraceTurn{spokeTurn("Boo [or so they say].")}, "", true},
+		{"always/no-pose-tag", []TraceTurn{spokeTurn("Boo, or so they say.")}, "", true},
+		{"always/no-pose-tag", []TraceTurn{spokeTurn("Done. [memory add]")}, "", false},
 		{"always/no-pose-tag", []TraceTurn{spokeTurn("Oh! [happy] It's you.")}, "", false},
 
 		{"always/length", []TraceTurn{spokeTurn(strings.Repeat("word ", 60))}, "", true},

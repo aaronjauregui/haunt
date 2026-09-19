@@ -187,9 +187,11 @@ the tool reaches for it before nearly every greeting; the tag rides on
 the words instead. The stream is held while its opening could still be a tag
 (`MaybePose`), as it is while it could be `NO_REPLY`; the pose goes on
 with the first words shown, or, for a turn not streamed, with the
-finished reply. Any leading tag of that shape is taken off, a pose the
-shell has or not, since a stage direction is no more for the balloon
-than a pose name; an unknown one falls back to the lexicon. The `say`
+finished reply. Any short bracketed opening is taken off, a pose the
+shell has or not: told to open with a bracket, a model also opens with
+labels for what it did (`[memory add]`) or stage directions, and none of
+those is for the balloon. One that names no pose falls back to the
+lexicon. The `say`
 tool reads a tag the same way. Hermes keeps the tag in the session, so
 the client takes it off assistant messages as it reads them, and
 `history` and the evals see the words alone; the evals fail a trial

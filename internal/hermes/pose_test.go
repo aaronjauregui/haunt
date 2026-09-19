@@ -1,6 +1,9 @@
 package hermes
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // A leading tag is taken off whatever it names; one anywhere else is words.
 func TestCutPose(t *testing.T) {
@@ -10,7 +13,10 @@ func TestCutPose(t *testing.T) {
 		{"[surprised_2]Oh!", "surprised_2", "Oh!"},
 		{"[sighs] Fine.", "sighs", "Fine."},
 		{"Oh [happy] hello", "", "Oh [happy] hello"},
-		{"[not a pose] hi", "", "[not a pose] hi"},
+		{"[memory add] Done.", "", "Done."},
+		{"[first boot — face neutral] Well.", "", "Well."},
+		{"[ happy ] Hi", "happy", "Hi"},
+		{"[a] [b] two", "a", "[b] two"},
 		{"[happy] NO_REPLY", "happy", "NO_REPLY"},
 		{"plain", "", "plain"},
 	} {
@@ -25,8 +31,8 @@ func TestCutPose(t *testing.T) {
 func TestMaybePose(t *testing.T) {
 	for in, want := range map[string]bool{
 		"": true, " ": true, "[": true, "[hap": true, " [happy": true,
-		"[happy]": false, "[happy] Oh": false, "Oh": false, "[not a": false,
-		"[" + string(make([]byte, 40)): false,
+		"[happy]": false, "[happy] Oh": false, "Oh": false, "[not a": true,
+		"[" + strings.Repeat("x", 81): false, "[two\nlines": false,
 	} {
 		if got := MaybePose(in); got != want {
 			t.Errorf("MaybePose(%q) = %v, want %v", in, got, want)

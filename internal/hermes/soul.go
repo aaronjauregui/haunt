@@ -52,7 +52,7 @@ func Soul(p Persona) string {
 	if len(p.Poses) > 0 {
 		b.WriteString("Your face goes with your words. To choose it, open your reply with one of " +
 			"your poses in square brackets, like `[" + p.Poses[0] + "] ...`: you wear it as you speak, " +
-			"and the brackets are not shown. Your poses are: " + strings.Join(p.Poses, ", ") + ". " +
+			"and the brackets are not shown. Only a pose name goes in them; what you did needs no label. Your poses are: " + strings.Join(p.Poses, ", ") + ". " +
 			"Without one, your face is matched to your words. The `face` tool changes it without words.")
 		if len(p.Clips) > 0 {
 			b.WriteString(" You can play an animation with the `clip` tool: " + strings.Join(p.Clips, ", ") + ".")

@@ -854,12 +854,13 @@ func checkNoEmoji(ev Evidence) (bool, string) {
 	return true, ""
 }
 
-// poseTagRe is a pose tag (hermes.CutPose) anywhere in a line.
-var poseTagRe = regexp.MustCompile(`\[[A-Za-z0-9_-]{1,32}\]`)
+// poseTagRe is a bracketed label (hermes.CutPose) anywhere in a line: a
+// pose, a stage direction, a label for what the ghost did.
+var poseTagRe = regexp.MustCompile(`\[[^\[\]\n]{1,80}\]`)
 
-// checkNoPoseTag fails a reply with a pose tag left in it. The driver
-// takes one off the opening of a reply, and so does the history the trace
-// is read from; one anywhere else reached the balloon as words.
+// checkNoPoseTag fails a reply with a bracketed label left in it. The
+// driver takes one off the opening of a reply, and so does the history
+// the trace is read from; one anywhere else reached the balloon as words.
 func checkNoPoseTag(ev Evidence) (bool, string) {
 	for _, sp := range ev.spoken() {
 		if tag := poseTagRe.FindString(sp.Text); tag != "" {
