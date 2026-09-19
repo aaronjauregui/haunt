@@ -12,6 +12,13 @@ hermes home, and its own gateway process, started and stopped with the
 ghost. The profile is a normal hermes profile: `hermes -p haunt-wisp`
 opens the same one the ghost runs on.
 
+The gateway takes a few seconds to start, longer in its container, and
+the ghost is on screen meanwhile. Anything said to it then waits for the
+gateway, and after that for its greeting, with "waking up…" and then
+"thinking…" in its balloon to show it was heard. It is never lost to a
+start that is merely slow: the ghost gives up with a line in its balloon
+only if the gateway is not up within two minutes.
+
 ## Setting it up
 
 1. **Install hermes.** Either natively:

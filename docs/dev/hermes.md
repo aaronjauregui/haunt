@@ -158,7 +158,13 @@ first_token_timeout`, 30 s) is on the first sign of life, and a tool
 event counts; the waiting indicator comes down on the first delta; the
 talk animation runs while deltas arrive; tool events feed the why-trace
 and suppress the lexicon face when the model wore one itself. One turn
-in flight per ghost. The person's words queue behind it.
+in flight per ghost. The person's words queue behind it, and so does
+everything before the gateway is up (`lateTurner`, two minutes at most).
+Words that queue show the waiting indicator from the moment they are
+queued, "waking up…" until the gateway is up and "thinking…" after, so
+a first start spent on the container and the boot turn does not look
+like a message dropped; the indicator gives up the balloon to anything
+that replaces it, such as that boot greeting, and comes back after.
 
 **Silence.** Hermes does not filter `NO_REPLY` on this path. A final
 reply that is `NO_REPLY` alone, or at the start or end of a reply under

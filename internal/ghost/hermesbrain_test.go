@@ -344,6 +344,66 @@ func waitBusy(t *testing.T, b *hermesBrain) {
 	}
 }
 
+// eventually polls cond for a second, reporting whether it came true.
+func eventually(cond func() bool) bool {
+	deadline := time.Now().Add(time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return true
+}
+
+// Words sent while the ghost is busy with something of its own show that
+// they were heard, while they wait: an unprompted turn shows nothing, so
+// without it the ghost would sit silent until the turn is over.
+func TestHermesQueuedWordsShowTheyWereHeard(t *testing.T) {
+	g, b, ft := hermesGhost(t, 5)
+	release := make(chan struct{})
+	ft.reply = func(ctx context.Context, req hermes.TurnRequest) (hermes.Reply, error) {
+		if hermes.EnvelopeKind(req.Input) == "boot" {
+			<-release
+		}
+		return hermes.Reply{Text: hermes.NoReply}, nil
+	}
+	b.Deliver(proto.Event{Type: proto.EventBoot})
+	waitBusy(t, b)
+	b.Deliver(proto.Event{Type: proto.EventMessage, Text: "hello?"})
+	if !eventually(g.waitingUp) {
+		t.Error("no waiting indicator while the words wait behind the boot turn")
+	}
+	close(release)
+	waitTurn(t, ft)
+	waitTurn(t, ft)
+	if !eventually(func() bool { return !g.waitingUp() }) {
+		t.Error("the indicator outlived the turn it was for")
+	}
+}
+
+// Before the gateway is up the ghost says it is waking up, and once it is,
+// that it is thinking; the words go when it is.
+func TestHermesWordsWaitForTheGateway(t *testing.T) {
+	g, b, ft := hermesGhost(t, 0)
+	late := newLateTurner()
+	b.turner = late
+	if b.up() || b.waitingText() != wakingText {
+		t.Fatalf("up = %v, text %q before the gateway is; want waking", b.up(), b.waitingText())
+	}
+	b.Deliver(proto.Event{Type: proto.EventMessage, Text: "hello?"})
+	if !eventually(g.waitingUp) {
+		t.Error("no waiting indicator while the gateway starts")
+	}
+	late.set(ft, nil)
+	if got := waitTurn(t, ft); got != "hello?" {
+		t.Errorf("sent %q, want the words", got)
+	}
+	if !b.up() || b.waitingText() != thinkingText {
+		t.Errorf("up = %v, text %q once the gateway is; want thinking", b.up(), b.waitingText())
+	}
+}
+
 // Envelopes carry fields, not instructions.
 func TestHermesEnvelopes(t *testing.T) {
 	g, b, ft := hermesGhost(t, 5)

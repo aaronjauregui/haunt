@@ -27,10 +27,11 @@ import (
 //   - It appears only after waitDelay. A fast local model answers inside
 //     that, and a dot pattern that flashed on every reply would be its own
 //     kind of noise.
-//   - It never takes a balloon that is already on screen. Something the
-//     user is still reading — a paged reply, mid-page — outranks the news
-//     that another answer is coming. It waits, and appears if and when the
-//     balloon goes away.
+//   - It never takes a balloon that is already on screen, and gives its
+//     own up to anything that replaces it. Something the user is still
+//     reading — a paged reply, mid-page, or the greeting of a turn their
+//     words are queued behind — outranks the news that another answer is
+//     coming. It waits, and appears if and when the balloon goes away.
 //   - It is chrome, not dialogue: not billed to the curiosity budget, not
 //     written to history, silent during quiet hours, and never painted over
 //     a line the user is typing.
@@ -74,6 +75,12 @@ type waiter struct {
 // balloon. text is what the brain wants said while waiting, and may be
 // empty — the dots alone are a complete signal.
 func (g *Ghost) startWaiting(text string) *waiter {
+	return g.startWaitingFor(func() string { return text })
+}
+
+// startWaitingFor is startWaiting for a wait whose words change as it
+// goes: text is asked again for every frame.
+func (g *Ghost) startWaitingFor(text func() string) *waiter {
 	w := &waiter{stop: make(chan struct{}), done: make(chan struct{})}
 	go func() {
 		defer close(w.done)
@@ -90,23 +97,20 @@ func (g *Ghost) startWaiting(text string) *waiter {
 
 		shown := false
 		frame := 0
+		last := ""
 		for {
-			if g.drawWaiting(text, frame, shown) {
+			say := text()
+			// Reduced motion gets the indicator, not the animation: the
+			// dots are decoration on top of the fact that it is there. It
+			// is painted again only when its words change or something
+			// else has had the balloon.
+			still := g.reducedMotion && shown && say == last && g.waitingUp()
+			if !still && g.drawWaiting(say, frame, shown) {
 				shown = true
-				// Reduced motion gets the indicator, not the animation: the
-				// dots are decoration on top of the fact that it is there.
-				if g.reducedMotion {
-					select {
-					case <-w.stop:
-						g.clearWaiting()
-						return
-					case <-g.done:
-						return
-					case <-g.stoppingC():
-						return
-					}
+				last = say
+				if !g.reducedMotion {
+					frame = (frame + 1) % balloon.WaitFrames
 				}
-				frame = (frame + 1) % balloon.WaitFrames
 			}
 			select {
 			case <-w.stop:
@@ -155,9 +159,9 @@ func (g *Ghost) drawWaiting(text string, frame int, shown bool) bool {
 	if rend == nil {
 		return false
 	}
-	if !shown && g.balloonBusy() {
-		// Someone is reading something. Wait for it rather than snatching
-		// it away.
+	if g.balloonBusy() {
+		// Someone is reading something, perhaps something that replaced
+		// the indicator. Wait for it rather than snatching it away.
 		return false
 	}
 	sp := rend.RenderWaiting(text, frame)
@@ -198,6 +202,13 @@ func (g *Ghost) markWaiting(v bool) {
 	g.blnMu.Lock()
 	g.blnWaiting = v
 	g.blnMu.Unlock()
+}
+
+// waitingUp reports whether the balloon on screen is the indicator.
+func (g *Ghost) waitingUp() bool {
+	g.blnMu.Lock()
+	defer g.blnMu.Unlock()
+	return g.blnWaiting
 }
 
 // balloonBusy reports whether a balloon the user might be reading is on

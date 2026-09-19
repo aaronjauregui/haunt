@@ -76,6 +76,10 @@ type hermesTurn struct {
 	// after runs once the turn is over, with whether anything reached the
 	// screen.
 	after func(shown bool)
+	// waiting is the indicator of a person's turn queued behind something,
+	// started when it was queued so that words sent to a ghost still
+	// starting, or busy, do not look lost.
+	waiting *waiter
 }
 
 // deferredTurn is an unprompted turn waiting for the one in flight.
@@ -108,8 +112,12 @@ const (
 )
 
 // thinkingText is what the waiting indicator says for a turn someone is
-// waiting on.
-const thinkingText = "thinking…"
+// waiting on, and wakingText what it says while the gateway is still
+// starting.
+const (
+	thinkingText = "thinking…"
+	wakingText   = "waking up…"
+)
 
 // doubleClick is how close two pokes must be to open the menu.
 const doubleClick = 700 * time.Millisecond
@@ -324,11 +332,45 @@ func (b *hermesBrain) Deliver(e proto.Event) error {
 
 // person queues the person's own words, verbatim.
 func (b *hermesBrain) person(text string) {
-	select {
-	case b.turns <- hermesTurn{input: text, person: true}:
-	default:
+	if !b.queuePerson(hermesTurn{input: text, person: true}) {
 		b.g.log.Warn(hlog.Brain, "dropping %q: %d turns are already waiting", text, hermesQueue)
 	}
+}
+
+// queuePerson queues a turn someone is waiting on, reporting whether there
+// was room. One that has to wait — for the gateway to come up, or for a
+// turn in flight — shows the waiting indicator from now rather than from
+// when its own turn starts: at a first start that is the container, then
+// the boot greeting, and a ghost silent through all of it looks as though
+// it never heard.
+func (b *hermesBrain) queuePerson(t hermesTurn) bool {
+	if b.inTurn() || !b.up() {
+		t.waiting = b.g.startWaitingFor(b.waitingText)
+	}
+	select {
+	case b.turns <- t:
+		return true
+	default:
+		t.waiting.Stop()
+		return false
+	}
+}
+
+// up is whether the gateway has finished starting. A turner that is not
+// started late is up from the beginning.
+func (b *hermesBrain) up() bool {
+	if u, ok := b.turner.(interface{ Up() bool }); ok {
+		return u.Up()
+	}
+	return true
+}
+
+// waitingText is what a person waiting on the ghost is told.
+func (b *hermesBrain) waitingText() string {
+	if !b.up() {
+		return wakingText
+	}
+	return thinkingText
 }
 
 // unprompted wakes the model about something nobody said to it, if the
@@ -417,10 +459,7 @@ func (b *hermesBrain) menu() {
 	case menuHelp:
 		// The person asked, so it is a turn somebody is waiting on — but it
 		// is the menu speaking, not them, so it goes as an envelope.
-		select {
-		case b.turns <- hermesTurn{input: hermes.Envelope("help"), person: true}:
-		default:
-		}
+		b.queuePerson(hermesTurn{input: hermes.Envelope("help"), person: true})
 	case menuWatch:
 		g.execWatch()
 	case menuNothing:
@@ -435,6 +474,10 @@ func (b *hermesBrain) run(t hermesTurn) {
 		t.refund = noRefund
 	}
 	userDriven := g.respondingToUser()
+	// A deferred closure, not a deferred call: waiting may be started
+	// below, after the capability check.
+	waiting := t.waiting
+	defer func() { waiting.Stop() }()
 
 	// Talking through the person's model is a capability like any other,
 	// and a person waiting may be asked for it (unprompted turns were
@@ -445,11 +488,9 @@ func (b *hermesBrain) run(t hermesTurn) {
 		return
 	}
 
-	var waiting *waiter
-	if t.person {
-		waiting = g.startWaiting(thinkingText)
+	if t.person && waiting == nil {
+		waiting = g.startWaitingFor(b.waitingText)
 	}
-	defer waiting.Stop()
 
 	// A gateway still starting is not a gateway that has gone quiet, so the
 	// wait for it is not charged to the first-token deadline below.
@@ -807,6 +848,16 @@ func (l *lateTurner) set(t hermes.Turner, err error) {
 		l.t, l.err = t, err
 		close(l.ready)
 	})
+}
+
+// Up reports whether the gateway has finished starting, well or badly.
+func (l *lateTurner) Up() bool {
+	select {
+	case <-l.ready:
+		return true
+	default:
+		return false
+	}
 }
 
 // Ready waits for the gateway.
