@@ -699,3 +699,21 @@ func TestHermesGoalQuiet(t *testing.T) {
 		t.Error("the goal went with the finding")
 	}
 }
+
+// The line that ends a turn says how long it took and how the face went
+// with the words, which is what the evals measure pace and face by.
+func TestTurnOutcomeLine(t *testing.T) {
+	for _, c := range []struct {
+		out  turnOutcome
+		want string
+	}{
+		{turnOutcome{took: 4230 * time.Millisecond, spoke: true, face: "happy", by: "tag"}, " took=4.2s face=happy by=tag"},
+		{turnOutcome{took: time.Second, spoke: true}, " took=1s face=-"},
+		{turnOutcome{took: 3 * time.Second}, " took=3s silent"},
+		{turnOutcome{failed: true}, " failed"},
+	} {
+		if got := c.out.String(); got != c.want {
+			t.Errorf("%+v = %q, want %q", c.out, got, c.want)
+		}
+	}
+}

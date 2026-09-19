@@ -178,10 +178,12 @@ func (b *hermesBrain) work() {
 	defer close(b.done)
 	for t := range b.turns {
 		b.busy.Store(true)
-		b.g.guard(hlog.Brain, "a hermes turn", func() { b.run(t) })
+		var out turnOutcome
+		b.g.guard(hlog.Brain, "a hermes turn", func() { out = b.run(t) })
 		// The one line that says a turn has ended, spoken, silent or
 		// failed, and what it was about: what the evals wait on before
-		// the next step.
+		// the next step, and what they measure the ghost's pace and face
+		// by.
 		over := "turn over: event"
 		if t.person {
 			over = "turn over: person"
@@ -189,7 +191,7 @@ func (b *hermesBrain) work() {
 		if kind := hermes.EnvelopeKind(t.input); kind != "" {
 			over += " kind=" + kind
 		}
-		b.g.log.Debug(hlog.Brain, "%s", over)
+		b.g.log.Debug(hlog.Brain, "%s%s", over, out)
 		b.deferMu.Lock()
 		b.busy.Store(false)
 		if len(b.turns) == 0 {
@@ -529,8 +531,41 @@ func (b *hermesBrain) menu() {
 	}
 }
 
+// turnOutcome is how a turn went, for the line that ends it.
+type turnOutcome struct {
+	// took is from the gateway being ready to the turn being over: the
+	// model and its tools, not the container.
+	took time.Duration
+	// spoke, failed: neither means the ghost chose to say nothing.
+	spoke, failed bool
+	// face is the pose worn with the words, and by what: "tool" (the
+	// model called face), "lexicon" (the driver's guess from the words),
+	// or "" when the face did not change.
+	face, by string
+}
+
+// String renders the outcome as fields on the turn-over line:
+// " took=4.2s face=happy by=lexicon", " took=3.1s silent".
+func (o turnOutcome) String() string {
+	s := ""
+	if o.took > 0 {
+		s += " took=" + o.took.Round(100*time.Millisecond).String()
+	}
+	switch {
+	case o.failed:
+		s += " failed"
+	case !o.spoke:
+		s += " silent"
+	case o.face == "":
+		s += " face=-"
+	default:
+		s += " face=" + o.face + " by=" + o.by
+	}
+	return s
+}
+
 // run is one turn, start to finish.
-func (b *hermesBrain) run(t hermesTurn) {
+func (b *hermesBrain) run(t hermesTurn) (out turnOutcome) {
 	g := b.g
 	if t.refund == nil {
 		t.refund = noRefund
@@ -547,7 +582,7 @@ func (b *hermesBrain) run(t hermesTurn) {
 	// the question would otherwise replace.
 	if t.person && !g.ensureCapability("llm") {
 		b.fail(t, fmt.Errorf("the llm capability is not granted"))
-		return
+		return turnOutcome{failed: true}
 	}
 
 	if t.person && waiting == nil {
@@ -565,9 +600,11 @@ func (b *hermesBrain) run(t hermesTurn) {
 	if r, ok := b.turner.(interface{ Ready(context.Context) error }); ok {
 		if err := r.Ready(g.sessionContext()); err != nil {
 			b.fail(t, fmt.Errorf("hermes is not available: %w", err))
-			return
+			return turnOutcome{failed: true}
 		}
 	}
+	began := time.Now()
+	defer func() { out.took = time.Since(began) }()
 
 	// The deadline is on the first sign of life — a word or a tool call —
 	// rather than on the whole turn: a tool that waits on a person's answer
@@ -647,6 +684,7 @@ func (b *hermesBrain) run(t hermesTurn) {
 			err = fmt.Errorf("the brain said nothing for %s — is hermes running?", g.firstTokenTimeout())
 		}
 		b.fail(t, err)
+		out.failed = true
 		return
 	}
 
@@ -678,10 +716,13 @@ func (b *hermesBrain) run(t hermesTurn) {
 	mu.Lock()
 	drewNow, facedNow := drew, faced
 	mu.Unlock()
-	if !facedNow {
+	out.spoke = true
+	if facedNow {
+		out.face, out.by = g.currentPose(), "tool"
+	} else if pose := g.inferExpression(text); pose != "" {
 		// The model wears a face by calling the tool. When it did not, the
 		// lexicon is the free fallback, as for scripted lines.
-		g.inferExpression(text)
+		out.face, out.by = pose, "lexicon"
 	}
 	// Whether it reaches the screen is decided at the screen, as for every
 	// line: a quiet hour holds it back, and a reminder held back is still
@@ -721,6 +762,7 @@ func (b *hermesBrain) run(t hermesTurn) {
 		g.markPrompted()
 	}
 	after(reached)
+	return
 }
 
 // fail ends a turn that did not happen: nothing was said, so nothing is

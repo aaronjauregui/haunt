@@ -135,11 +135,24 @@ Run it after changing a rubric.
 A run is a directory under `.eval/`, named for when it started:
 `results.json` has every trial's graders, verdicts and reasons;
 `report.md` puts the prerequisites that were missing first, then each
-case's pass rate beside the baseline's, then per-grader rates, then every
-failing trial with its graders' reasons and its trace; `trials/` keeps
-each trial's trace, log and intentions. An **error** is the harness's
-fault (hermes never came up, an event the case waited for never arrived)
-and is counted apart from a **fail**, which is the ghost's.
+case's pass rate beside the baseline's, then the run's face and pace,
+then per-grader rates, then every failing trial with its graders'
+reasons and its trace; `trials/` keeps each trial's trace, log and
+intentions. An **error** is the harness's fault (hermes never came up,
+an event the case waited for never arrived) and is counted apart from a
+**fail**, which is the ghost's.
+
+**Face and pace** is read from the line that ends every turn in the
+ghost's log (`turn over: person took=4.2s face=happy by=tag`), and sits
+beside the baseline's (`eval_face_test.go`). It splits the spoken turns
+by how the face went with the words: chosen by the model's tag, by the
+`face` tool (a model round trip of its own), guessed by the driver from
+the words, or not changed at all. It also counts the turns that spent a
+round trip on a face and nothing else, the distinct poses worn per
+trial, and the median boot and person turn from the gateway being up.
+A pass rate says whether the ghost did the right thing; these say
+whether it kept the person waiting, and whether it has gone wooden: fewer
+faces changed, or fewer poses per trial.
 
 The baseline is local and per model: a run against a different model
 from the baseline's is shown without deltas.

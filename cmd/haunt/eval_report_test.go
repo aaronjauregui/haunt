@@ -38,6 +38,9 @@ type evalRun struct {
 	CasesFilter   string       `json:"cases_filter,omitempty"`
 	Prerequisites prereqs      `json:"prerequisites"`
 	Cases         []caseResult `json:"cases"`
+	// Face is the run's face and pace (eval_face_test.go); absent from a
+	// run older than it.
+	Face *faceStats `json:"face,omitempty"`
 
 	// base is the baseline this run is compared with, and baseNote why
 	// there is none or why its deltas are not given.
@@ -159,6 +162,7 @@ func (r *evalRun) finish(at time.Time) {
 	for i := range r.Cases {
 		r.Cases[i].tally()
 	}
+	r.Face = faceOf(r.Cases)
 }
 
 func (c *caseResult) tally() {
@@ -371,6 +375,12 @@ func (r *evalRun) report() string {
 			c.Name, c.Pass, c.Fail, c.Error, c.Skip, pct(c.Rate), base, delta)
 	}
 	b.WriteString("\n")
+
+	var baseFace *faceStats
+	if r.base != nil {
+		baseFace = r.base.Face
+	}
+	b.WriteString(faceReport(r.Face, baseFace))
 
 	b.WriteString("## Graders\n\n")
 	for _, c := range r.Cases {

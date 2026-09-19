@@ -79,23 +79,33 @@ func lexiconPose(text string, available []string) string {
 	return best
 }
 
-// inferExpression sets the face to match a line of dialogue.
-func (g *Ghost) inferExpression(text string) {
+// inferExpression sets the face to match a line of dialogue, returning
+// the pose it put on, or "" when the face did not change.
+func (g *Ghost) inferExpression(text string) string {
 	if g.shell == nil {
-		return
+		return ""
 	}
 	poses := g.shell.Poses()
 	if len(poses) == 0 {
-		return // a single-image shell has no face to arrange
+		return "" // a single-image shell has no face to arrange
 	}
 	if g.expressionMode == config.ExpressionOff {
-		return
+		return ""
 	}
 	pose := lexiconPose(text, poses)
 	if pose == "" || pose == g.shell.Pose() {
-		return
+		return ""
 	}
 	g.setExpression(pose)
+	return pose
+}
+
+// currentPose is the face the ghost is wearing, "" without a shell.
+func (g *Ghost) currentPose() string {
+	if g.shell == nil {
+		return ""
+	}
+	return g.shell.Pose()
 }
 
 // The face at rest.
