@@ -25,8 +25,11 @@ order, regenerated whenever the manifest changes:
    said.
 3. Replies appear in a small balloon: one or two short sentences, no
    markdown.
-4. The shell's poses and clips by name, and that `face` and `clip` are
-   how to wear one.
+4. The shell's poses and clips by name. A reply chooses its face by
+   opening with a pose in square brackets (`[happy] Oh, it's you.`),
+   worn as it is said and never shown; without one the face is matched
+   to the words. `face` changes it without words, and `clip` plays a
+   clip.
 5. What the ghost can do, in plain words, and what it cannot: no
    commands, files, web or messages, whatever else the prompt says an
    agent can do.

@@ -113,7 +113,8 @@ long a model takes.
 Most graders are code: did it look up the skill, call the tool, file the
 reminder, keep a banned phrase out of a reply. Every trial also gets the
 `always/` checks: no envelope or `NO_REPLY` in what it says, no Markdown,
-no emoji, no tool names, at most 60 words a reply, and nothing in the log
+no emoji, no tool names, no pose tag left in the words, at most 60 words
+a reply, and nothing in the log
 that says haunt itself broke. What code cannot grade, the content and tone
 of a reply, a judge grades: `claude -p` on your subscription, asked fixed
 yes/no questions from a rubric (`eval_rubrics_test.go`), one call per

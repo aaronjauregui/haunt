@@ -1,9 +1,11 @@
 package ghost
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/aaronjauregui/haunt/internal/config"
+	"github.com/aaronjauregui/haunt/internal/hlog"
 )
 
 // Expression inference: dialogue arrives, the face follows. Hand-tagged
@@ -100,11 +102,30 @@ func (g *Ghost) inferExpression(text string) string {
 	return pose
 }
 
+// wearTag puts on the pose a reply's tag names (hermes.CutPose),
+// reporting whether it did: not for a pose the shell does not have, and
+// not where the face stays still, as for the face tool.
+func (g *Ghost) wearTag(pose string) bool {
+	if pose == "" || g.shell == nil || !slices.Contains(g.shell.Poses(), pose) {
+		if pose != "" {
+			g.log.Debug(hlog.Anim, "tag [%s] is not one of the shell's poses", pose)
+		}
+		return false
+	}
+	if !g.mayPose() {
+		return false
+	}
+	g.setExpression(pose)
+	return true
+}
+
 // currentPose is the face the ghost is wearing, "" without a shell.
 func (g *Ghost) currentPose() string {
 	if g.shell == nil {
 		return ""
 	}
+	g.shellMu.Lock()
+	defer g.shellMu.Unlock()
 	return g.shell.Pose()
 }
 

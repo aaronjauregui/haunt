@@ -96,7 +96,7 @@ func newFakeHermes(t *testing.T) (*fakeHermes, *httptest.Server) {
 				{"id":"c2","type":"function","function":{"name":"mcp__haunt__face","arguments":"{}"}}]},
 			{"role":"tool","tool_call_id":"c1","content":"{\"results\": [\"they burned the bread\"]}"},
 			{"role":"tool","tool_call_id":"c2","content":"{\"result\":\"ok\"}"},
-			{"role":"assistant","content":"hi there","timestamp":1789614337},
+			{"role":"assistant","content":"[happy] hi there","timestamp":1789614337},
 			{"role":"user","content":"bye"},
 			{"role":"assistant","content":"bye!"}]}`))
 	}))

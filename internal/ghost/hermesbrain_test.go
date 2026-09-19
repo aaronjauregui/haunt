@@ -13,6 +13,7 @@ import (
 	"github.com/aaronjauregui/haunt/internal/hermes"
 	"github.com/aaronjauregui/haunt/internal/proto"
 	"github.com/aaronjauregui/haunt/internal/session"
+	"github.com/aaronjauregui/haunt/internal/shell"
 	"github.com/aaronjauregui/haunt/internal/wlclient"
 )
 
@@ -523,6 +524,67 @@ func TestHermesReplyWaitsForTheInputLine(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Error("the reminder never counted as raised")
+	}
+}
+
+// A reply that opens with a pose wears it with the words, and the tag is
+// never shown or kept as something said, however the stream split it.
+func TestHermesTaggedReply(t *testing.T) {
+	g, b, ft := hermesGhost(t, 0)
+	g.shell, g.surface = shell.Builtin(64), nil // a face to change, and nothing to paint it on
+	ft.reply = func(_ context.Context, req hermes.TurnRequest) (hermes.Reply, error) {
+		req.OnDelta("[hap")
+		if g.currentPose() == "happy" {
+			t.Error("the pose went on before the words")
+		}
+		req.OnDelta("py] There you are.")
+		return hermes.Reply{Text: "[happy] There you are."}, nil
+	}
+	g.markPrompted()
+	b.Deliver(proto.Event{Type: proto.EventMessage, Text: "hello"})
+	waitTurn(t, ft)
+	if got := g.currentPose(); got != "happy" {
+		t.Errorf("pose = %q, want the tag's", got)
+	}
+	var whys []Why
+	json.Unmarshal([]byte(mustGet(t, g, WhyStoreKey)), &whys)
+	if len(whys) != 1 || whys[0].Reply != "There you are." {
+		t.Errorf("why = %+v, want the reply without its tag", whys)
+	}
+}
+
+// A tag naming no pose the shell has is still taken off, and the face is
+// matched to the words as if there had been none.
+func TestHermesUnknownTag(t *testing.T) {
+	g, b, ft := hermesGhost(t, 5)
+	g.shell, g.surface = shell.Builtin(64), nil
+	ft.reply = func(_ context.Context, req hermes.TurnRequest) (hermes.Reply, error) {
+		return hermes.Reply{Text: "[sighs] I'm sorry about that."}, nil
+	}
+	b.Deliver(proto.Event{Type: proto.EventCron, Name: "morning"})
+	waitTurn(t, ft)
+	if got := g.currentPose(); got != "sad" {
+		t.Errorf("pose = %q, want the lexicon's", got)
+	}
+	var whys []Why
+	json.Unmarshal([]byte(mustGet(t, g, WhyStoreKey)), &whys)
+	if len(whys) != 1 || whys[0].Reply != "I'm sorry about that." {
+		t.Errorf("why = %+v", whys)
+	}
+}
+
+// A line said mid-turn may open with its pose too.
+func TestHermesSayWearsItsTag(t *testing.T) {
+	g, _, _ := hermesGhost(t, 0)
+	g.shell, g.surface = shell.Builtin(64), nil
+	if _, err := toolSay(g, context.Background(), json.RawMessage(`{"text":"[sad] Oh no."}`)); err != nil {
+		t.Fatal(err)
+	}
+	if got := g.currentPose(); got != "sad" {
+		t.Errorf("pose = %q, want the tag's", got)
+	}
+	if _, err := toolSay(g, context.Background(), json.RawMessage(`{"text":"[happy]"}`)); err == nil {
+		t.Error("a tag with no words was said")
 	}
 }
 

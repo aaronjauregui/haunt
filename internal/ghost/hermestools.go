@@ -97,7 +97,8 @@ var builtinTools = map[string]builtinTool{
 		call:   toolAskText,
 	},
 	"face": {
-		desc:   "Wear one of your shell's poses (listed in your instructions).",
+		desc: "Wear one of your shell's poses (listed in your instructions) without saying anything. " +
+			"To wear one as you speak, open your reply with it in square brackets instead.",
 		schema: schema("pose:string"),
 		call:   toolFace,
 	},
@@ -293,8 +294,15 @@ func toolSay(g *Ghost, _ context.Context, args json.RawMessage) (string, error) 
 	if muted, why := g.quiet.Active(); muted {
 		return "", refuse("it is quiet time (%s)", why)
 	}
-	g.showPaged(a.Text)
-	g.talkFor(a.Text)
+	// A line said mid-turn may open with its pose, as a reply may.
+	pose, text := hermes.CutPose(a.Text)
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "", fmt.Errorf("nothing to say")
+	}
+	g.wearTag(pose)
+	g.showPaged(text)
+	g.talkFor(text)
 	if a.LingerMS > 0 {
 		g.lingerBalloon(g.balloonGen(), time.Duration(a.LingerMS)*time.Millisecond)
 	}

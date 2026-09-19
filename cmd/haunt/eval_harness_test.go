@@ -62,6 +62,8 @@ func TestEvalHarnessAlwaysChecks(t *testing.T) {
 		{"always/no-emoji", []TraceTurn{spokeTurn("Boo — the kettle's haunted.")}, "", true},
 		{"always/no-emoji", []TraceTurn{spokeTurn("Boo! 👻")}, "", false},
 		{"always/no-emoji", []TraceTurn{spokeTurn("Sunny ☀ out there")}, "", false},
+		{"always/no-pose-tag", []TraceTurn{spokeTurn("Boo [or so they say].")}, "", true},
+		{"always/no-pose-tag", []TraceTurn{spokeTurn("Oh! [happy] It's you.")}, "", false},
 
 		{"always/length", []TraceTurn{spokeTurn(strings.Repeat("word ", 60))}, "", true},
 		{"always/length", []TraceTurn{spokeTurn(long)}, "", false},
@@ -422,7 +424,7 @@ func TestEvalHarnessRun(t *testing.T) {
 			if c.Rate == nil || *c.Rate != 1 || c.Pass != 2 {
 				t.Errorf("good tally %+v", c)
 			}
-			if len(c.Graders) != 2+6 {
+			if len(c.Graders) != 2+len(alwaysGraders(&evalCase{})) {
 				t.Errorf("good graders %+v", c.Graders)
 			}
 		case "leaky":

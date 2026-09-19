@@ -499,6 +499,10 @@ func (c *Client) messages(ctx context.Context, n, argsMax, resultMax int) ([]Mes
 			continue
 		}
 		sec := int64(m.Timestamp)
+		if m.Role == "assistant" {
+			// The pose a reply opened with was worn, not said.
+			_, text = CutPose(text)
+		}
 		msg := Message{
 			Role: m.Role,
 			Text: text,

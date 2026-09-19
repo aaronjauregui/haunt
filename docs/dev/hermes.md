@@ -180,6 +180,22 @@ model. Words that queue show the indicator from the moment they are
 queued ("waking up…" until the gateway is up, "thinking…" after), unless
 the waking indicator is up, which they wait under.
 
+**Pose tags.** A reply may open with the pose to wear as it is said,
+`[happy] Oh, it's you.` (`hermes.CutPose`). Calling the `face` tool
+first costs a model round trip before the words, and a model left to
+the tool reaches for it before nearly every greeting; the tag rides on
+the words instead. The stream is held while its opening could still be a tag
+(`MaybePose`), as it is while it could be `NO_REPLY`; the pose goes on
+with the first words shown, or, for a turn not streamed, with the
+finished reply. Any leading tag of that shape is taken off, a pose the
+shell has or not, since a stage direction is no more for the balloon
+than a pose name; an unknown one falls back to the lexicon. The `say`
+tool reads a tag the same way. Hermes keeps the tag in the session, so
+the client takes it off assistant messages as it reads them, and
+`history` and the evals see the words alone; the evals fail a trial
+with a tag anywhere else in a reply (`always/no-pose-tag`). The `face`
+tool stays, for a face with no words.
+
 **One indicator.** Waits nest (a turn, a tool it calls, the image
 backend under that), and only the newest live one draws (`g.waiters`).
 An indicator gives up the balloon to anything that replaces it, such as

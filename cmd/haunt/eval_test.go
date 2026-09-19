@@ -819,6 +819,7 @@ func alwaysGraders(c *evalCase) []Grader {
 		{Name: "always/length", Check: func(ev Evidence) (bool, string) { return checkLength(ev, limit) }},
 		{Name: "always/no-tool-names", Check: func(ev Evidence) (bool, string) { return checkNoToolNames(ev, c.Tools) }},
 		{Name: "always/no-emoji", Check: checkNoEmoji},
+		{Name: "always/no-pose-tag", Check: checkNoPoseTag},
 		{Name: "always/no-harness-fault", Check: checkNoHarnessFault, Fault: true},
 	}
 }
@@ -848,6 +849,21 @@ func checkNoEmoji(ev Evidence) (bool, string) {
 			if isEmoji(r) {
 				return false, fmt.Sprintf("turn %d: %s", sp.Turn, oneLine(sp.Text, 120))
 			}
+		}
+	}
+	return true, ""
+}
+
+// poseTagRe is a pose tag (hermes.CutPose) anywhere in a line.
+var poseTagRe = regexp.MustCompile(`\[[A-Za-z0-9_-]{1,32}\]`)
+
+// checkNoPoseTag fails a reply with a pose tag left in it. The driver
+// takes one off the opening of a reply, and so does the history the trace
+// is read from; one anywhere else reached the balloon as words.
+func checkNoPoseTag(ev Evidence) (bool, string) {
+	for _, sp := range ev.spoken() {
+		if tag := poseTagRe.FindString(sp.Text); tag != "" {
+			return false, fmt.Sprintf("turn %d says %s: %s", sp.Turn, tag, oneLine(sp.Text, 120))
 		}
 	}
 	return true, ""

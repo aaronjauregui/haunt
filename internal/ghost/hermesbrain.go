@@ -630,6 +630,7 @@ func (b *hermesBrain) run(t hermesTurn) (out turnOutcome) {
 		acc     string
 		shown   bool
 		talking bool
+		tagged  bool
 		faced   bool
 		drew    bool
 		last    time.Time
@@ -639,9 +640,20 @@ func (b *hermesBrain) run(t hermesTurn) (out turnOutcome) {
 		mu.Lock()
 		defer mu.Unlock()
 		acc += delta
-		// Not over a picture it has just drawn: the words wait for it.
-		if !t.person || hermes.MaybeSilent(acc) || (drew && g.pictureShowing()) {
+		// A reply may open with the pose to wear as it is said; until the
+		// opening is known not to be one, nothing is shown.
+		if hermes.MaybePose(acc) {
 			return
+		}
+		pose, words := hermes.CutPose(acc)
+		// Not over a picture it has just drawn: the words wait for it.
+		if !t.person || hermes.MaybeSilent(words) || (drew && g.pictureShowing()) {
+			return
+		}
+		if !tagged {
+			// The face goes on with the first words, not before them.
+			tagged = true
+			g.wearTag(pose)
 		}
 		if !talking {
 			talking = true
@@ -650,7 +662,7 @@ func (b *hermesBrain) run(t hermesTurn) (out turnOutcome) {
 		if time.Since(last) >= 120*time.Millisecond {
 			last = time.Now()
 			waiting.Stop()
-			g.showBalloon(strings.TrimSpace(acc))
+			g.showBalloon(strings.TrimSpace(words))
 			shown = true
 		}
 	}
@@ -688,7 +700,8 @@ func (b *hermesBrain) run(t hermesTurn) (out turnOutcome) {
 		return
 	}
 
-	text := strings.TrimSpace(reply.Text)
+	pose, text := hermes.CutPose(reply.Text)
+	text = strings.TrimSpace(text)
 	silent := hermes.Silent(text)
 	muted, _ := g.quiet.Active()
 	g.noteWhy(Why{
@@ -717,12 +730,19 @@ func (b *hermesBrain) run(t hermesTurn) (out turnOutcome) {
 	drewNow, facedNow := drew, faced
 	mu.Unlock()
 	out.spoke = true
-	if facedNow {
+	switch {
+	case g.wearTag(pose):
+		// Worn already when the reply streamed; again for one that did
+		// not, and it is the face the words go with either way.
+		out.face, out.by = pose, "tag"
+	case facedNow:
 		out.face, out.by = g.currentPose(), "tool"
-	} else if pose := g.inferExpression(text); pose != "" {
-		// The model wears a face by calling the tool. When it did not, the
-		// lexicon is the free fallback, as for scripted lines.
-		out.face, out.by = pose, "lexicon"
+	default:
+		// The model chooses a face by a tag or the tool. When it did
+		// neither, the lexicon is the free fallback, as for scripted lines.
+		if pose := g.inferExpression(text); pose != "" {
+			out.face, out.by = pose, "lexicon"
+		}
 	}
 	// Whether it reaches the screen is decided at the screen, as for every
 	// line: a quiet hour holds it back, and a reminder held back is still

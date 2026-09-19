@@ -135,8 +135,8 @@ Five pose names mean something to the driver: **`happy`, `sad`,
 `surprised`, `asleep`, `thinking`**. When a line is said without a face
 being set, the driver picks one of these from the words. A shell that
 names its poses these gets a face that follows what it says without its
-brain asking for anything. A brain, or a model calling its `face` tool,
-always wins over the inference. The driver also offers moments (a session
+brain asking for anything. A brain, or a model opening its reply with a
+pose tag or calling its `face` tool, always wins over the inference. The driver also offers moments (a session
 event, a return to the desk) at which a brain may change its face; whether
 to is the brain's decision.
 
