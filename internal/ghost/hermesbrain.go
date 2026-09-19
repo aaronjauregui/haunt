@@ -58,6 +58,12 @@ type hermesBrain struct {
 	lastPoke    time.Time
 	pokeN       int
 	lastReacted time.Time
+
+	// waking is the indicator a hermes ghost shows from the moment it is
+	// on screen until it has said hello: the gateway's start and the boot
+	// turn are half a minute on a slow model, and a ghost that sits there
+	// silent through them reads as broken.
+	waking atomic.Pointer[waiter]
 }
 
 var _ brain.Runner = (*hermesBrain)(nil)
@@ -76,10 +82,14 @@ type hermesTurn struct {
 	// after runs once the turn is over, with whether anything reached the
 	// screen.
 	after func(shown bool)
-	// waiting is the indicator of a person's turn queued behind something,
-	// started when it was queued so that words sent to a ghost still
-	// starting, or busy, do not look lost.
+	// waiting is the indicator already up for this turn: a person's turn
+	// queued behind something, started when it was queued so that words
+	// sent to a ghost still starting, or busy, do not look lost; or the
+	// boot turn's, which is the waking indicator.
 	waiting *waiter
+	// boot says this is the greeting, whose failure the person is told
+	// about: they were shown the ghost waking up.
+	boot bool
 }
 
 // deferredTurn is an unprompted turn waiting for the one in flight.
@@ -198,14 +208,14 @@ func (b *hermesBrain) sendDeferredLocked(now time.Time) {
 		waited := now.Sub(d.at)
 		if waited > deferMaxAge {
 			b.g.log.Debug(hlog.Brain, "%s dropped: it waited %s for a turn to end", d.key, waited.Round(time.Second))
-			d.turn.refund()
+			b.drop(d.turn)
 			continue
 		}
 		// Charging checked this when it arrived; a game may have started
 		// since.
 		if b.g.desktop != nil && b.g.desktop.Fullscreen() {
 			b.g.log.Debug(hlog.Brain, "%s dropped: something is fullscreen", d.key)
-			d.turn.refund()
+			b.drop(d.turn)
 			continue
 		}
 		// The model should know it is hearing about this late.
@@ -215,7 +225,7 @@ func (b *hermesBrain) sendDeferredLocked(now time.Time) {
 		select {
 		case b.turns <- d.turn:
 		default:
-			d.turn.refund()
+			b.drop(d.turn)
 		}
 		return
 	}
@@ -234,7 +244,13 @@ func (b *hermesBrain) Deliver(e proto.Event) error {
 				g.log.Warn(hlog.Store, "recording the first boot: %v", err)
 			}
 		}
-		b.unprompted("boot", "boot", hermes.Envelope("boot", hermes.F("first_time", !met)), nil)
+		// Waking up is the ghost's own news, so it is shown whether or
+		// not there turns out to be a greeting; with none, it is gone
+		// once the gateway is up and the ghost is ready.
+		w := g.startWaiting(wakingText)
+		b.waking.Store(w)
+		boot := hermesTurn{input: hermes.Envelope("boot", hermes.F("first_time", !met)), waiting: w, boot: true}
+		b.unpromptedTurn("boot", "boot", boot)
 
 	case proto.EventClick:
 		if !b.lastPoke.IsZero() && e.Time.Sub(b.lastPoke) <= doubleClick {
@@ -343,8 +359,11 @@ func (b *hermesBrain) person(text string) {
 // when its own turn starts: at a first start that is the container, then
 // the boot greeting, and a ghost silent through all of it looks as though
 // it never heard.
+//
+// While the ghost is waking up, that indicator is the one on screen, and
+// the turn waits under it.
 func (b *hermesBrain) queuePerson(t hermesTurn) bool {
-	if b.inTurn() || !b.up() {
+	if (b.inTurn() || !b.up()) && !b.wakingUp() {
 		t.waiting = b.g.startWaitingFor(b.waitingText)
 	}
 	select {
@@ -365,6 +384,26 @@ func (b *hermesBrain) up() bool {
 	return true
 }
 
+// whenUp calls f once the gateway has finished starting, or at once for a
+// turner that is up from the beginning.
+func (b *hermesBrain) whenUp(f func()) {
+	r, ok := b.turner.(interface{ Ready(context.Context) error })
+	if !ok || b.up() {
+		f()
+		return
+	}
+	b.g.go_(hlog.Brain, "waiting for the gateway", func() {
+		r.Ready(b.g.sessionContext())
+		f()
+	})
+}
+
+// wakingUp is whether the waking indicator is still up.
+func (b *hermesBrain) wakingUp() bool {
+	w := b.waking.Load()
+	return w != nil && !w.stopped()
+}
+
 // waitingText is what a person waiting on the ghost is told.
 func (b *hermesBrain) waitingText() string {
 	if !b.up() {
@@ -382,27 +421,36 @@ func (b *hermesBrain) waitingText() string {
 // is only true now and is dropped instead, and otherwise it names what the
 // event is about (deferredTurn).
 func (b *hermesBrain) unprompted(what, key, envelope string, after func(bool)) {
+	b.unpromptedTurn(what, key, hermesTurn{input: envelope, after: after})
+}
+
+// unpromptedTurn is unprompted for a turn with more to it than its words.
+// One that is not sent or kept for later is dropped, indicator and all.
+func (b *hermesBrain) unpromptedTurn(what, key string, t hermesTurn) {
 	g := b.g
 	if key == "" && b.inTurn() {
 		g.log.Debug(hlog.Brain, "%s dropped: the ghost is already in a turn", what)
+		b.drop(t)
 		return
 	}
 	if !g.capabilityActive("llm") {
 		g.log.Debug(hlog.Brain, "%s dropped: the llm capability is not granted", what)
+		b.drop(t)
 		return
 	}
 	// Not under deferMu: charging reaches the room's allowance.
 	ok, refund := g.chargeInitiative(what)
 	if !ok {
+		b.drop(t)
 		return
 	}
-	t := hermesTurn{input: envelope, refund: refund, after: after}
+	t.refund = refund
 	b.deferMu.Lock()
 	defer b.deferMu.Unlock()
 	if b.inTurn() {
 		if key == "" {
 			g.log.Debug(hlog.Brain, "%s dropped: the ghost is already in a turn", what)
-			refund()
+			b.drop(t)
 			return
 		}
 		b.deferLocked(key, t)
@@ -411,8 +459,22 @@ func (b *hermesBrain) unprompted(what, key, envelope string, after func(bool)) {
 	select {
 	case b.turns <- t:
 	default:
-		refund()
+		b.drop(t)
 	}
+}
+
+// drop gives back what a turn that will never run was charged, and takes
+// down any indicator it had up: at once, or for the greeting, once the
+// ghost is ready, which is what the waking indicator is waiting for.
+func (b *hermesBrain) drop(t hermesTurn) {
+	if t.refund != nil {
+		t.refund()
+	}
+	if t.boot {
+		b.whenUp(t.waiting.Stop)
+		return
+	}
+	t.waiting.Stop()
 }
 
 // inTurn is whether a turn is running or waiting to.
@@ -424,14 +486,14 @@ func (b *hermesBrain) inTurn() bool {
 func (b *hermesBrain) deferLocked(key string, t hermesTurn) {
 	for i, d := range b.deferred {
 		if d.key == key {
-			d.turn.refund()
+			b.drop(d.turn)
 			b.deferred = append(b.deferred[:i], b.deferred[i+1:]...)
 			break
 		}
 	}
 	if len(b.deferred) >= maxDeferred {
 		b.g.log.Debug(hlog.Brain, "%s dropped: too much is waiting for a turn to end", b.deferred[0].key)
-		b.deferred[0].turn.refund()
+		b.drop(b.deferred[0].turn)
 		b.deferred = b.deferred[1:]
 	}
 	b.g.log.Debug(hlog.Brain, "%s waits for the turn in flight", key)
@@ -489,6 +551,12 @@ func (b *hermesBrain) run(t hermesTurn) {
 	}
 
 	if t.person && waiting == nil {
+		// Words the person sent while the ghost was waking, when there
+		// was no greeting to wait behind: this turn takes over from the
+		// waking indicator.
+		if b.wakingUp() {
+			b.waking.Load().Stop()
+		}
 		waiting = g.startWaitingFor(b.waitingText)
 	}
 
@@ -503,7 +571,10 @@ func (b *hermesBrain) run(t hermesTurn) {
 
 	// The deadline is on the first sign of life — a word or a tool call —
 	// rather than on the whole turn: a tool that waits on a person's answer
-	// is working, and a gateway that has said nothing at all is not.
+	// is working, and a gateway that has said nothing at all is not. The
+	// indicator is not a sign of life but a promise of words, so it stays
+	// until there are some on screen: a turn that wears a face and then
+	// thinks again is still a turn somebody is waiting on.
 	ctx, cancel := context.WithCancel(g.sessionContext())
 	defer cancel()
 	var timedOut atomic.Bool
@@ -514,10 +585,7 @@ func (b *hermesBrain) run(t hermesTurn) {
 	defer deadline.Stop()
 	var alive sync.Once
 	wake := func() {
-		alive.Do(func() {
-			deadline.Stop()
-			waiting.Stop()
-		})
+		alive.Do(func() { deadline.Stop() })
 	}
 
 	var (
@@ -544,6 +612,7 @@ func (b *hermesBrain) run(t hermesTurn) {
 		}
 		if time.Since(last) >= 120*time.Millisecond {
 			last = time.Now()
+			waiting.Stop()
 			g.showBalloon(strings.TrimSpace(acc))
 			shown = true
 		}
@@ -615,9 +684,16 @@ func (b *hermesBrain) run(t hermesTurn) {
 		g.inferExpression(text)
 	}
 	// Whether it reaches the screen is decided at the screen, as for every
-	// line: a quiet hour or a half-typed line holds it back, and a reminder
-	// held back is still owed.
-	reached := !muted && !g.inputOpen()
+	// line: a quiet hour holds it back, and a reminder held back is still
+	// owed. A half-typed line holds it until the line closes, and it has
+	// reached the screen when it is shown then.
+	if !muted && g.holdLine(text, func() { after(true) }) {
+		if userDriven {
+			g.markPrompted()
+		}
+		return
+	}
+	reached := !muted
 	if drewNow && g.pictureShowing() {
 		// The model drew this turn, and the picture is what was asked for.
 		// The words follow once it has had its time, unless something else
@@ -648,12 +724,13 @@ func (b *hermesBrain) run(t hermesTurn) {
 }
 
 // fail ends a turn that did not happen: nothing was said, so nothing is
-// owed, and a person waiting is told why.
+// owed, and a person waiting is told why — as is one who watched the ghost
+// try to wake up.
 func (b *hermesBrain) fail(t hermesTurn, err error) {
 	g := b.g
 	g.log.Warn(hlog.Brain, "hermes turn: %v", err)
 	t.refund()
-	if t.person {
+	if t.person || t.boot {
 		g.showBalloon("(that didn't work: " + err.Error() + ")")
 		g.lingerBalloon(g.balloonGen(), lingerError)
 	}

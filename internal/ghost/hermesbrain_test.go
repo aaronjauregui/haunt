@@ -3,6 +3,7 @@ package ghost
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"image"
 	"strings"
 	"sync"
@@ -401,6 +402,127 @@ func TestHermesWordsWaitForTheGateway(t *testing.T) {
 	}
 	if !b.up() || b.waitingText() != thinkingText {
 		t.Errorf("up = %v, text %q once the gateway is; want thinking", b.up(), b.waitingText())
+	}
+}
+
+// A hermes ghost says it is waking up from the moment it is on screen,
+// without being asked, through the gateway's start and the greeting, and
+// the greeting is what replaces it.
+func TestHermesWakesUpOnScreen(t *testing.T) {
+	g, b, ft := hermesGhost(t, 0)
+	late := newLateTurner()
+	b.turner = late
+	ft.reply = func(_ context.Context, req hermes.TurnRequest) (hermes.Reply, error) {
+		return hermes.Reply{Text: "Oh. You can see me."}, nil
+	}
+	g.markPromptedFor(bootWindow)
+	b.Deliver(proto.Event{Type: proto.EventBoot})
+	if !eventually(g.waitingUp) {
+		t.Fatal("no waking indicator while the gateway starts")
+	}
+	late.set(ft, nil)
+	if in := waitTurn(t, ft); hermes.EnvelopeKind(in) != "boot" {
+		t.Errorf("sent %q, want the boot envelope", in)
+	}
+	if g.waitingUp() || b.wakingUp() {
+		t.Error("the waking indicator outlived the greeting")
+	}
+	if !g.blnShowing() {
+		t.Error("the greeting did not reach the balloon")
+	}
+}
+
+// With no greeting to wait for, the indicator goes once the ghost is
+// ready, and not before.
+func TestHermesWakingWithoutAGreeting(t *testing.T) {
+	g, b, _ := hermesGhost(t, 0)
+	g.manifest.Ghost.Capabilities = []string{"message"} // no llm: no boot turn
+	late := newLateTurner()
+	b.turner = late
+	b.Deliver(proto.Event{Type: proto.EventBoot})
+	if !eventually(g.waitingUp) {
+		t.Fatal("no waking indicator while the gateway starts")
+	}
+	late.set(&fakeTurner{}, nil)
+	if !eventually(func() bool { return !g.waitingUp() && !b.wakingUp() }) {
+		t.Error("the waking indicator stayed up after the gateway was")
+	}
+}
+
+// A ghost that could not wake up says so: the person watched it try.
+func TestHermesWakingFailureIsShown(t *testing.T) {
+	g, b, _ := hermesGhost(t, 0)
+	late := newLateTurner()
+	b.turner = late
+	g.markPromptedFor(bootWindow)
+	b.Deliver(proto.Event{Type: proto.EventBoot})
+	waitBusy(t, b)
+	late.set(nil, errors.New("the hermes gateway exited while starting"))
+	if !eventually(func() bool { return !b.wakingUp() && g.blnShowing() && !g.waitingUp() }) {
+		t.Error("a failed start left no word in the balloon")
+	}
+}
+
+// The indicator is a promise of words, so a tool call does not take it
+// down; the first words on screen do.
+func TestHermesIndicatorOutlastsATool(t *testing.T) {
+	g, b, ft := hermesGhost(t, 0)
+	tooled := make(chan struct{})
+	release := make(chan struct{})
+	ft.reply = func(_ context.Context, req hermes.TurnRequest) (hermes.Reply, error) {
+		req.OnTool(hermes.ToolEvent{Name: "mcp__haunt__face"})
+		req.OnTool(hermes.ToolEvent{Name: "mcp__haunt__face", Done: true})
+		close(tooled)
+		<-release
+		req.OnDelta("There you are.")
+		return hermes.Reply{Text: "There you are."}, nil
+	}
+	g.markPrompted()
+	b.Deliver(proto.Event{Type: proto.EventMessage, Text: "hello"})
+	<-tooled
+	time.Sleep(waitDelay + 2*waitFramePeriod)
+	if !g.waitingUp() {
+		t.Error("the indicator came down with a tool call and nothing to say yet")
+	}
+	close(release)
+	waitTurn(t, ft)
+	if g.waitingUp() {
+		t.Error("the indicator outlived the reply")
+	}
+}
+
+// A reply that lands while the person is typing their next line waits
+// for the line to close, and a reminder it carries counts as raised only
+// then.
+func TestHermesReplyWaitsForTheInputLine(t *testing.T) {
+	g, b, ft := hermesGhost(t, 5)
+	ft.reply = func(_ context.Context, req hermes.TurnRequest) (hermes.Reply, error) {
+		return hermes.Reply{Text: "Oven. Now."}, nil
+	}
+	shown := make(chan bool, 1)
+	g.openInput()
+	typing := g.balloonGen()
+	b.unprompted("intention", "intention:oven", hermes.Envelope("intention_due"), func(ok bool) { shown <- ok })
+	waitTurn(t, ft)
+	if g.balloonGen() != typing {
+		t.Fatal("the reply was shown over the open line")
+	}
+	select {
+	case <-shown:
+		t.Fatal("the reminder counted as raised before it was seen")
+	default:
+	}
+	g.closeInput()
+	if !g.blnShowing() {
+		t.Error("the held reply was not shown when the line closed")
+	}
+	select {
+	case ok := <-shown:
+		if !ok {
+			t.Error("the reminder was shown but counted as not seen")
+		}
+	case <-time.After(time.Second):
+		t.Error("the reminder never counted as raised")
 	}
 }
 

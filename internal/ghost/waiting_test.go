@@ -85,3 +85,28 @@ func TestWaitingIndicatorGivesUpAReplacedBalloon(t *testing.T) {
 		t.Error("the indicator did not come back once the balloon had gone")
 	}
 }
+
+// Waits nest, and one indicator is up at a time: the newest, whose news
+// is freshest. When it ends the older one takes the balloon back; when the
+// last ends the indicator goes.
+func TestWaitingIndicatorsNest(t *testing.T) {
+	g := pagingGhost(t)
+	outer := g.startWaiting("thinking…")
+	time.Sleep(waitDelay + waitFramePeriod)
+	inner := g.startWaiting("painting…")
+	time.Sleep(waitDelay + waitFramePeriod)
+	if !g.topWaiter(inner) || g.topWaiter(outer) {
+		t.Error("the older wait still has the balloon")
+	}
+	inner.Stop()
+	if !g.waitingUp() {
+		t.Error("the indicator went with the inner wait while the outer one was still going")
+	}
+	if !g.topWaiter(outer) {
+		t.Error("the outer wait did not get the balloon back")
+	}
+	outer.Stop()
+	if g.waitingUp() {
+		t.Error("the indicator outlived every wait")
+	}
+}

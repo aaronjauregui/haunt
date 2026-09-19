@@ -13,11 +13,20 @@ ghost. The profile is a normal hermes profile: `hermes -p haunt-wisp`
 opens the same one the ghost runs on.
 
 The gateway takes a few seconds to start, longer in its container, and
-the ghost is on screen meanwhile. Anything said to it then waits for the
-gateway, and after that for its greeting, with "waking up…" and then
-"thinking…" in its balloon to show it was heard. It is never lost to a
-start that is merely slow: the ghost gives up with a line in its balloon
-only if the gateway is not up within two minutes.
+the greeting is a model turn after that, so a ghost can be on screen for
+half a minute before it says anything. Meanwhile its balloon says
+"waking up…". Its greeting replaces that; with no greeting (a restart it
+lets pass quietly), the balloon clears when the ghost is ready. A ghost
+that could not start says so in its balloon.
+
+Anything said to it before then is kept and answered after the greeting.
+It is never lost to a start that is merely slow: the ghost gives up only
+if the gateway is not up within two minutes.
+
+While it works on an answer its balloon says "thinking…", until the first
+words arrive; wearing a face or looking something up along the way does
+not take that down. A tool with a wait of its own ("painting…") shows its
+own words while it runs.
 
 ## Setting it up
 

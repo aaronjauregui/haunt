@@ -32,8 +32,7 @@ func (g *Ghost) showPaged(text string) {
 		g.log.Debug(hlog.Balloon, "balloon suppressed (%s)", why)
 		return
 	}
-	if g.inputOpen() {
-		g.log.Debug(hlog.Balloon, "balloon suppressed (user is typing)")
+	if g.holdLine(text, nil) {
 		return
 	}
 	// Past both suppressions, so this line is one a bystander could read —

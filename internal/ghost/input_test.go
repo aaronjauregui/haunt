@@ -194,3 +194,26 @@ func TestStaleKeyboardLeaveDoesNotCloseTheNextLine(t *testing.T) {
 		t.Error("the line survived losing focus it actually held")
 	}
 }
+
+// A line the ghost finishes while the person is typing is not lost: it is
+// shown when the line closes. Only the latest is kept.
+func TestLineHeldWhileTyping(t *testing.T) {
+	g := pagingGhost(t)
+	g.openInput()
+	typing := g.balloonGen()
+	g.showPaged("first")
+	g.showPaged("second")
+	if g.balloonGen() != typing {
+		t.Fatal("a line was shown over the open input line")
+	}
+	g.inputMu.Lock()
+	held := g.input.held
+	g.inputMu.Unlock()
+	if held != "second" {
+		t.Errorf("held %q, want the latest line", held)
+	}
+	g.closeInput()
+	if !g.blnShowing() || g.balloonGen() == typing {
+		t.Fatal("the held line was not shown when the input line closed")
+	}
+}

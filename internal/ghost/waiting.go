@@ -3,6 +3,7 @@ package ghost
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"time"
 
@@ -32,6 +33,10 @@ import (
 //     reading — a paged reply, mid-page, or the greeting of a turn their
 //     words are queued behind — outranks the news that another answer is
 //     coming. It waits, and appears if and when the balloon goes away.
+//   - There is one on screen at a time. Waits nest — a turn waits on the
+//     model, which waits on a tool, which waits on an image backend — and
+//     the newest is the one with news, so it speaks and the others hold
+//     their peace until it is done.
 //   - It is chrome, not dialogue: not billed to the curiosity budget, not
 //     written to history, silent during quiet hours, and never painted over
 //     a line the user is typing.
@@ -94,41 +99,85 @@ func (g *Ghost) startWaitingFor(text func() string) *waiter {
 			return
 		case <-time.After(waitDelay):
 		}
+		g.pushWaiter(w)
 
 		shown := false
 		frame := 0
 		last := ""
 		for {
-			say := text()
-			// Reduced motion gets the indicator, not the animation: the
-			// dots are decoration on top of the fact that it is there. It
-			// is painted again only when its words change or something
-			// else has had the balloon.
-			still := g.reducedMotion && shown && say == last && g.waitingUp()
-			if !still && g.drawWaiting(say, frame, shown) {
-				shown = true
-				last = say
-				if !g.reducedMotion {
-					frame = (frame + 1) % balloon.WaitFrames
+			if g.topWaiter(w) {
+				say := text()
+				// Reduced motion gets the indicator, not the animation: the
+				// dots are decoration on top of the fact that it is there.
+				// It is painted again only when its words change or
+				// something else has had the balloon.
+				still := g.reducedMotion && shown && say == last && g.waitingUp()
+				if !still && g.drawWaiting(say, frame, shown) {
+					shown = true
+					last = say
+					if !g.reducedMotion {
+						frame = (frame + 1) % balloon.WaitFrames
+					}
 				}
+			} else {
+				// A newer wait has the balloon. Starting afresh when it is
+				// done repaints this one's words over whatever it left.
+				shown = false
 			}
 			select {
 			case <-w.stop:
-				if shown {
+				// The last wait out takes the indicator down, whichever of
+				// them drew it; while an older one is still going, it
+				// stays, to be repainted with that one's words.
+				if !g.popWaiter(w) {
 					g.clearWaiting()
 				}
 				return
 			case <-g.done:
+				g.popWaiter(w)
 				return
 			case <-g.stoppingC():
 				// The compositor connection is on its way out; painting
 				// into it now is at best pointless and at worst a hang.
+				g.popWaiter(w)
 				return
 			case <-time.After(waitFramePeriod):
 			}
 		}
 	}()
 	return w
+}
+
+// pushWaiter makes w the newest wait.
+func (g *Ghost) pushWaiter(w *waiter) {
+	g.waitMu.Lock()
+	g.waiters = append(g.waiters, w)
+	g.waitMu.Unlock()
+}
+
+// popWaiter removes w, reporting whether other waits are still going.
+func (g *Ghost) popWaiter(w *waiter) bool {
+	g.waitMu.Lock()
+	defer g.waitMu.Unlock()
+	g.waiters = slices.DeleteFunc(g.waiters, func(o *waiter) bool { return o == w })
+	return len(g.waiters) > 0
+}
+
+// topWaiter is whether w is the newest wait, the one that draws.
+func (g *Ghost) topWaiter(w *waiter) bool {
+	g.waitMu.Lock()
+	defer g.waitMu.Unlock()
+	return len(g.waiters) > 0 && g.waiters[len(g.waiters)-1] == w
+}
+
+// stopped is whether Stop has been called.
+func (w *waiter) stopped() bool {
+	select {
+	case <-w.stop:
+		return true
+	default:
+		return false
+	}
 }
 
 // Stop ends the indicator, blocking until anything it drew is gone.

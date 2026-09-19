@@ -53,7 +53,8 @@ resident set is who `haunt run` and the service start.
   A menu is answered with the mouse or with the digits, arrows, Enter and
   Escape.
 - **Right-click** to type at it. An input line opens in its balloon; the
-  keyboard is taken only while the line is open.
+  keyboard is taken only while the line is open. Anything the ghost
+  finishes saying while you type is shown when the line closes.
 - **From a script**, `haunt say "text"`. With several ghosts resident and
   no `-ghost`, it goes to the one you last interacted with.
 

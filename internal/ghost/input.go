@@ -39,6 +39,12 @@ type inputState struct {
 	// to a question about what it has got wrong. Buffered by the caller, so
 	// closing a line never blocks on a listener that gave up.
 	reply chan string
+	// held is the last line the ghost finished while this one was open,
+	// shown when it closes: a reply that lands while the person is typing
+	// their next thought is still an answer to their last one. heldShown,
+	// if set, is told when it is.
+	held      string
+	heldShown func()
 }
 
 // openInput starts a line of input, unless one is already open.
@@ -115,11 +121,38 @@ func (g *Ghost) closeInputWith(answer string) {
 		g.input.reply = nil
 	}
 	g.input.editor.Reset()
+	held, shown := g.input.held, g.input.heldShown
+	g.input.held, g.input.heldShown = "", nil
 	g.inputMu.Unlock()
 	g.log.Debug(hlog.Input, "input line closed")
 
 	g.takeKeyboard(false)
 	g.hideBalloon()
+	if held != "" {
+		g.showPaged(held)
+		g.lingerBalloon(g.balloonGen(), heldLinger)
+		if shown != nil && g.blnShowing() {
+			shown()
+		}
+	}
+}
+
+// heldLinger is how long a line held back by the input line stays once it
+// is shown: as long as a reply.
+const heldLinger = 12 * time.Second
+
+// holdLine keeps text for when the open line closes, reporting whether
+// there was a line to wait for. A newer line replaces an older one, whose
+// shown is never called: only the latest word is worth the wait.
+func (g *Ghost) holdLine(text string, shown func()) bool {
+	g.inputMu.Lock()
+	defer g.inputMu.Unlock()
+	if !g.input.open {
+		return false
+	}
+	g.input.held, g.input.heldShown = text, shown
+	g.log.Debug(hlog.Balloon, "line held until the input line closes")
+	return true
 }
 
 // onKeyboardFocus reacts to the compositor handing the keyboard over or

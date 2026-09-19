@@ -226,6 +226,11 @@ type Ghost struct {
 	// indicator (see waiting.go) rather than anything the ghost said, so it
 	// can be replaced without taking away something the user is reading.
 	blnWaiting bool
+	// waiters are the indicators past their delay, oldest first. Only the
+	// newest draws: a tool's own wait ("painting…") speaks over the turn
+	// that called it, and the turn's comes back when the tool is done.
+	waitMu  sync.Mutex
+	waiters []*waiter
 	// blnPicture says the balloon on screen is a picture the ghost drew, so
 	// a hermes reply streaming in after the draw does not paint over it
 	// (see hermesBrain.run).

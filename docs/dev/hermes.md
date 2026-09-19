@@ -160,16 +160,35 @@ then `assistant.completed {content, completed, partial, interrupted}`,
 
 On the driver's side: the first-token deadline (`[hermes]
 first_token_timeout`, 30 s) is on the first sign of life, and a tool
-event counts; the waiting indicator comes down on the first delta; the
-talk animation runs while deltas arrive; tool events feed the why-trace
-and suppress the lexicon face when the model wore one itself. One turn
-in flight per ghost. The person's words queue behind it, and so does
+event counts; the waiting indicator comes down when the first words are
+put on screen, not on a tool event, since a `face` call followed by
+another model round trip is seconds with nothing to show; the talk
+animation runs while deltas arrive; tool events feed the why-trace and
+suppress the lexicon face when the model wore one itself. One turn in
+flight per ghost. The person's words queue behind it, and so does
 everything before the gateway is up (`lateTurner`, two minutes at most).
-Words that queue show the waiting indicator from the moment they are
-queued, "waking up…" until the gateway is up and "thinking…" after, so
-a first start spent on the container and the boot turn does not look
-like a message dropped; the indicator gives up the balloon to anything
-that replaces it, such as that boot greeting, and comes back after.
+
+**Waking.** The boot event starts the waking indicator ("waking up…")
+the moment the ghost is on screen, and the boot turn carries it
+(`hermesTurn.waiting`), so it stays through the gateway's start and the
+turn and comes down just before the greeting is shown. A boot turn that
+is never sent (no `llm` grant yet, no allowance) takes it down once the
+gateway is up instead (`hermesBrain.drop`, `whenUp`); one that fails
+shows why, as a person's turn does. A first start measures roughly: the
+container 2 s, the gateway 4 s, then the boot turn, most of it the
+model. Words that queue show the indicator from the moment they are
+queued ("waking up…" until the gateway is up, "thinking…" after), unless
+the waking indicator is up, which they wait under.
+
+**One indicator.** Waits nest (a turn, a tool it calls, the image
+backend under that), and only the newest live one draws (`g.waiters`).
+An indicator gives up the balloon to anything that replaces it, such as
+the greeting or a `say`, and comes back after.
+
+**Typing.** A line finished while the input line is open is held and
+shown when it closes (`holdLine`), the latest one only. A reply held
+this way has reached the screen when it is shown, so a reminder it
+carries is resolved then, not before.
 
 **Silence.** Hermes does not filter `NO_REPLY` on this path. A final
 reply that is `NO_REPLY` alone, or at the start or end of a reply under
