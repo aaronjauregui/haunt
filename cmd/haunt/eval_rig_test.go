@@ -616,15 +616,27 @@ func (r *evalRig) waitNoticed(shape string, within time.Duration) error {
 // from the start of the trial, so one that ended while the case was busy
 // is not missed, and none is waited on twice.
 func (r *evalRig) waitKind(kind string, within time.Duration) error {
-	line := "kind=" + kind + "\n"
 	want := r.kinds[kind]
 	if err := r.waitLog("a "+kind+" turn", within, func(log string) bool {
-		return strings.Count(log, line) > want
+		return turnsOfKind(log, kind) > want
 	}); err != nil {
 		return err
 	}
 	r.kinds[kind]++
 	return nil
+}
+
+// turnsOfKind counts the turns of an event kind that are over. The kind
+// is one field of the turn-over line among others (eval_face_test.go), so
+// it is read as a field, not found as the line's end.
+func turnsOfKind(log, kind string) int {
+	n := 0
+	for _, l := range turnLines(log) {
+		if l.kind == kind {
+			n++
+		}
+	}
+	return n
 }
 
 // nudge presses Shift, which is the person at the desk without typing
@@ -642,7 +654,7 @@ func (r *evalRig) nudge() error {
 // An idle that arrives mid-turn is dropped by design, so the case calls
 // it with nothing else in flight.
 func (r *evalRig) waitIdle() error {
-	r.kinds["idle"] = strings.Count(r.log.String(), "kind=idle\n")
+	r.kinds["idle"] = turnsOfKind(r.log.String(), "idle")
 	if err := r.nudge(); err != nil {
 		return err
 	}

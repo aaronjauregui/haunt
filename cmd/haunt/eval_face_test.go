@@ -241,3 +241,15 @@ func TestEvalFaceAndPace(t *testing.T) {
 		t.Error("a run with no evidence has face stats")
 	}
 }
+
+// A turn's kind is found among the line's other fields, and a kind that is
+// the prefix of another is not counted as it.
+func TestTurnsOfKind(t *testing.T) {
+	log := "haunt: [brain] turn over: event kind=boot took=20s face=happy by=tool\n" +
+		"haunt: [brain] turn over: event kind=boot\n" +
+		"haunt: [brain] turn over: event kind=bootleg took=1s silent\n" +
+		"haunt: [brain] intention due kind=boot\n"
+	if n := turnsOfKind(log, "boot"); n != 2 {
+		t.Errorf("%d boot turns, want 2", n)
+	}
+}
