@@ -13,6 +13,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
@@ -56,6 +57,14 @@ const (
 	// paragraphs, which is what the model can use, and small enough that
 	// several reads still fit a turn.
 	pageChunkRunes = 1800
+	// pageChunkBytes bounds the same chunk the way the caller's own limit
+	// on a tool result does, in bytes rather than runes. A page in a
+	// script that spends three bytes a rune would otherwise come back
+	// several times longer than a tool result may be, and the clip would
+	// land on the footer that says where to read on from — leaving the
+	// offset a guess, and the runes between the clip and that offset
+	// unread by anyone.
+	pageChunkBytes = 1500
 	// pageCacheTTL keeps an extracted page around long enough to page
 	// through it in conversation without fetching it again.
 	pageCacheTTL = 10 * time.Minute
@@ -427,8 +436,12 @@ func (p Page) Excerpt(from int) string {
 	end := from + pageChunkRunes
 	if end >= len(runes) {
 		end = len(runes)
-	} else if cut := paragraphCut(runes[from:end]); cut > 0 {
-		end = from + cut
+	}
+	end = from + byteCut(runes[from:end])
+	if end < len(runes) {
+		if cut := paragraphCut(runes[from:end]); cut > 0 {
+			end = from + cut
+		}
 	}
 
 	title := p.Title
@@ -446,6 +459,21 @@ func (p Page) Excerpt(from int) string {
 		b.WriteString("[end of page]")
 	}
 	return b.String()
+}
+
+// byteCut is how many of a chunk's runes fit in pageChunkBytes, so what a
+// read returns is bounded the same way the tool result carrying it is. It
+// cuts on a rune, never inside one.
+func byteCut(chunk []rune) int {
+	bytes := 0
+	for i, r := range chunk {
+		n := utf8.RuneLen(r)
+		if bytes+n > pageChunkBytes {
+			return i
+		}
+		bytes += n
+	}
+	return len(chunk)
 }
 
 // paragraphCut finds the paragraph break a chunk should end on, so a read

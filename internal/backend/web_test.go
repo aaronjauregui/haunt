@@ -518,3 +518,38 @@ func TestGuardIsOnTheDialer(t *testing.T) {
 		t.Fatal("the guarded dialer reached loopback")
 	}
 }
+
+// A page in a script that does not fit a byte to a rune still comes back
+// small enough to survive the tool-result limit whole. If the excerpt
+// overran it, the caller's clip would take the "[more: …]" footer off with
+// it, and the model would be left to guess where to read from next —
+// guessing the rune offset it was never told, and skipping what the clip
+// removed.
+func TestExcerptFitsAToolResult(t *testing.T) {
+	// Roughly a page of Japanese: three bytes to the rune.
+	page := Page{Title: "題", URL: "https://example.com/j", Text: strings.Repeat("あ", 4000)}
+	got := page.Excerpt(0)
+	if len(got) > 1800 {
+		t.Errorf("excerpt is %d bytes, too long to survive a tool result", len(got))
+	}
+	if !strings.Contains(got, "[more: read_page with from=") {
+		t.Fatalf("no paging footer: %q", oneLineForTest(got))
+	}
+	// The offset it reports is one a second read can use: what comes back
+	// must carry on where the first left off, not skip over unread text.
+	var from int
+	if _, err := fmt.Sscanf(got[strings.Index(got, "[more: read_page with from="):],
+		"[more: read_page with from=%d", &from); err != nil {
+		t.Fatal(err)
+	}
+	if from <= 0 || from >= 4000 {
+		t.Fatalf("from=%d out of range", from)
+	}
+	body := strings.TrimSpace(strings.SplitN(got, "\n", 2)[1])
+	body = strings.TrimSuffix(body, got[strings.Index(got, "[more:"):])
+	if n := len([]rune(strings.TrimSpace(body))); n != from {
+		t.Errorf("said to read on from %d, but only %d runes were shown", from, n)
+	}
+}
+
+func oneLineForTest(s string) string { return strings.ReplaceAll(s, "\n", "\\n") }
