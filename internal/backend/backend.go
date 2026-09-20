@@ -338,14 +338,6 @@ func (s *Service) ToolTimeout() time.Duration {
 	return defaultToolTimeout
 }
 
-// ImageCacheKey identifies the image backend configuration for
-// content-addressed caching: same key + prompt = reusable result.
-func (s *Service) ImageCacheKey() string {
-	i := &s.cfg.Image
-	return fmt.Sprintf("%s|%s|%s|%s|%d|%g|%s|%s",
-		i.Backend, i.BaseURL, i.Model, i.Size, i.Steps, i.CFG, i.Sampler, i.Negative)
-}
-
 // DrawRequest is one picture to make. The prompt is whole — the ghost's
 // house style is already part of it, because what the picture is of and
 // what it looks like are one sentence to an image model.
