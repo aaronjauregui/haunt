@@ -300,7 +300,7 @@ Tools that only speak or read are not marked.
 | `ask` | `text`, `choices[1..9]` | the choice, `""` if dismissed | none; blocks |
 | `ask_text` | `prompt` | typed text | none; blocks |
 | `face`, `clip` | `pose` / `name` | ok | reduced motion, fullscreen |
-| `draw` | `prompt`, `style?`, `see?` | the picture's name and prompt | `imagine`, image budget, fullscreen |
+| `draw` | `prompt`, `style?`, `see?`, `like?` | the picture's name and prompt | `imagine`, image budget, fullscreen |
 | `show` | `id` | the picture's name and prompt | `imagine` |
 | `pictures` | `count?` | the gallery, newest first | `imagine` |
 | `style` | `set?`, `reset?` | the style it draws in | a set or reset only on the person's turn; taint |

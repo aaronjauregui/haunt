@@ -70,7 +70,12 @@ type comfyRun struct {
 // waiting and fetching the result are the same either way.
 func comfyPlan(cfg *ImageConfig, req DrawRequest) (*comfyRun, error) {
 	negative := joinNonEmpty(", ", cfg.Negative, req.Negative)
-	seed := rand.Int63()
+	// A seed of the caller's is how a picture is painted again, or painted
+	// again with one thing changed. Without one, a fresh number.
+	seed := req.Seed
+	if seed == 0 {
+		seed = rand.Int63()
+	}
 
 	if cfg.Workflow != "" {
 		wf, err := cfg.loadWorkflow()

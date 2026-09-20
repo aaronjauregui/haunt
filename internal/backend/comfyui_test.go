@@ -309,3 +309,53 @@ func TestSortedNodeIDs(t *testing.T) {
 		t.Errorf("sortedNodeIDs = %v, want %v", got, want)
 	}
 }
+
+// A seed the caller supplies is the seed the graph is given, and the run
+// reports it back so the picture can record what it came out of. Without
+// one, each picture gets its own.
+func TestSeedGivenIsSeedUsed(t *testing.T) {
+	cfg := &ImageConfig{Backend: "comfyui", BaseURL: "http://x", Model: "test.safetensors"}
+	run, err := comfyPlan(cfg, DrawRequest{Prompt: "a whale", Seed: 4242})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.seed != 4242 {
+		t.Errorf("run seed = %d, want 4242", run.seed)
+	}
+	if got := run.graph["5"].(map[string]any)["inputs"].(map[string]any)["seed"]; got != int64(4242) {
+		t.Errorf("graph seed = %#v, want 4242", got)
+	}
+
+	// The same seed and the same prompt is the same picture: that is what
+	// makes changing one word of the prompt a variation rather than a
+	// fresh roll.
+	again, err := comfyPlan(cfg, DrawRequest{Prompt: "a whale", Seed: 4242})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.seed != run.seed {
+		t.Errorf("seed drifted: %d then %d", run.seed, again.seed)
+	}
+
+	// No seed given, and two draws differ.
+	a, _ := comfyPlan(cfg, DrawRequest{Prompt: "a whale"})
+	b, _ := comfyPlan(cfg, DrawRequest{Prompt: "a whale"})
+	if a.seed == b.seed {
+		t.Errorf("two unseeded draws shared seed %d", a.seed)
+	}
+}
+
+// A workflow is given the caller's seed the same way, through {{seed}}.
+func TestWorkflowTakesAGivenSeed(t *testing.T) {
+	cfg := &ImageConfig{Backend: "comfyui", BaseURL: "http://x", Workflow: writeWorkflow(t, sampleWorkflow)}
+	run, err := comfyPlan(cfg, DrawRequest{Prompt: "a whale", Seed: 777})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.seed != 777 {
+		t.Errorf("run seed = %d, want 777", run.seed)
+	}
+	if got := run.graph["3"].(map[string]any)["inputs"].(map[string]any)["seed"]; got != int64(777) {
+		t.Errorf("graph seed = %#v, want 777", got)
+	}
+}

@@ -45,8 +45,14 @@ mean, say so and offer to paint a new one.
    turn, or `mcp__haunt__pictures`.
 2. Write the same prompt with only what they asked for changed. Keep the
    subject and the setting word for word.
-3. Draw it, and say the old one is still there if they end up preferring
-   it.
+3. Draw it with `like` set to the old picture's name. That keeps the
+   composition, so the whale stays the whale it was and only the colour
+   moves. Without it you get a different whale that happens to be bluer.
+4. Say the old one is still there if they end up preferring it.
+
+Only use `like` when they want *that* picture changed. A fresh request
+deserves a fresh picture, and passing `like` with a prompt you have not
+changed paints the same picture over again.
 
 ## Writing the prompt
 

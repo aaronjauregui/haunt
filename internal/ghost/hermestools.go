@@ -123,8 +123,9 @@ var builtinTools = map[string]builtinTool{
 	"draw": {
 		desc: "Paint a picture in your balloon. prompt is for an image generator: a concrete visual " +
 			"description (subject, setting, lighting). Your own style is added unless style=false. " +
-			"see=true also tells you, in one sentence, what came out.",
-		schema: schema("prompt:string", "style?:boolean", "see?:boolean"),
+			"like=<name of a picture you painted> keeps that picture's composition and changes only " +
+			"what your prompt changes. see=true also tells you, in one sentence, what came out.",
+		schema: schema("prompt:string", "style?:boolean", "see?:boolean", "like?:string"),
 		call:   toolDraw,
 	},
 	"show": {
@@ -467,6 +468,7 @@ func toolDraw(g *Ghost, ctx context.Context, args json.RawMessage) (string, erro
 		Prompt string `json:"prompt"`
 		Style  *bool  `json:"style"`
 		See    bool   `json:"see"`
+		Like   string `json:"like"`
 	}
 	if err := decode(args, &a); err != nil {
 		return "", err
@@ -481,9 +483,25 @@ func toolDraw(g *Ghost, ctx context.Context, args json.RawMessage) (string, erro
 	// asked for something else, and a model that forgets the argument gets
 	// the house look rather than a picture out of character.
 	styled := a.Style == nil || *a.Style
+	// The model asks for a picture by the name it knows it by, and the
+	// seed is looked up here. A seed is nineteen digits; a name is two,
+	// and the gallery exists because short names are what a model can
+	// repeat without getting one wrong.
+	var seed int64
+	if a.Like != "" {
+		like, ok := g.picture(a.Like)
+		if !ok {
+			return "", fmt.Errorf("no picture %s; call pictures to see what you have", a.Like)
+		}
+		if like.Seed == 0 {
+			return "", fmt.Errorf("%s was not painted from a seed, so there is nothing to keep; draw it fresh instead", a.Like)
+		}
+		seed = like.Seed
+	}
 	p, err := g.drawPicture(drawRequest{
 		prompt:   a.Prompt,
 		style:    styled,
+		seed:     seed,
 		wait:     "painting…",
 		lingerMS: int(pictureLinger / time.Millisecond),
 	})
@@ -494,6 +512,9 @@ func toolDraw(g *Ghost, ctx context.Context, args json.RawMessage) (string, erro
 	out := fmt.Sprintf("Drew %s: %q", p.ID, p.Prompt)
 	if p.Style != "" {
 		out += fmt.Sprintf(" (in your style: %s)", p.Style)
+	}
+	if a.Like != "" {
+		out += fmt.Sprintf(" (from %s, so only what you changed has changed)", a.Like)
 	}
 	out += ". It is in your balloon."
 	if a.See {

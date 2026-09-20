@@ -311,3 +311,37 @@ func TestAStyleIsAShortLine(t *testing.T) {
 		t.Error("a style with a newline in it was accepted")
 	}
 }
+
+// A picture painted "like" another is painted from that one's seed, so
+// what differs between the two is what the prompt asked to differ. The
+// model names the picture; the nineteen-digit number never leaves the
+// driver.
+func TestDrawLikeCarriesTheSeed(t *testing.T) {
+	g := drawingGhost(t)
+	first := Picture{ID: "p1", Prompt: "a whale", Sent: "a whale", Seed: 4242, At: time.Now()}
+	if err := g.savePicture(first, []byte("png")); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := g.picture("p1"); !ok || got.Seed != 4242 {
+		t.Fatalf("seed not kept: %+v", got)
+	}
+
+	// A name nobody painted is a refusal naming the way to find out what
+	// was, not a picture painted from nothing.
+	_, err := toolDraw(g, context.Background(), json.RawMessage(`{"prompt":"a whale, bluer","like":"p9"}`))
+	if err == nil || !strings.Contains(err.Error(), "no picture p9") {
+		t.Errorf("unknown name: err = %v", err)
+	}
+
+	// Neither is a picture whose backend reported no seed: there is
+	// nothing to keep, and saying so is better than quietly painting
+	// something unrelated.
+	noSeed := Picture{ID: "p2", Prompt: "a cat", Sent: "a cat", At: time.Now()}
+	if err := g.savePicture(noSeed, []byte("png")); err != nil {
+		t.Fatal(err)
+	}
+	_, err = toolDraw(g, context.Background(), json.RawMessage(`{"prompt":"a cat, bluer","like":"p2"}`))
+	if err == nil || !strings.Contains(err.Error(), "not painted from a seed") {
+		t.Errorf("seedless picture: err = %v", err)
+	}
+}

@@ -74,7 +74,7 @@ The model acts through tools haunt offers it. Their hermes names are
 | `ask` | a question with 1 to 9 choices; waits for the pick, or `""` if dismissed |
 | `ask_text` | opens the input line and waits for typed text |
 | `face`, `clip` | wear a pose, play a clip |
-| `draw` | paint a picture in the balloon from a `prompt`, in the ghost's style unless `style: false`, and with `see: true` describe what came out (`imagine` capability) |
+| `draw` | paint a picture in the balloon from a `prompt`, in the ghost's style unless `style: false`, with `like: <name>` to keep an earlier picture's composition, and with `see: true` describe what came out (`imagine` capability) |
 | `show` | put a picture painted earlier back in the balloon, by its name (`imagine`) |
 | `pictures` | list the pictures painted, newest first, with prompts and captions (`imagine`) |
 | `style` | the house style added to every picture: read it, `set` it, or `reset` it to the package's, and the change only on a turn the person started (`imagine`) |

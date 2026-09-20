@@ -97,7 +97,7 @@ parts that vary substituted into it:
 |---|---|
 | `{{prompt}}` | what the ghost is drawing, its style already folded in. Required, at least once. |
 | `{{negative}}` | `negative` above, joined with whatever the ghost's package asks to keep out. |
-| `{{seed}}` | a fresh random seed, recorded with the picture. |
+| `{{seed}}` | the seed the picture is painted from, recorded with it. A graph that leaves this out gets its own seed each time, and the ghost cannot then paint a variation of an earlier picture. |
 | `{{width}}`, `{{height}}` | `size`, or 1024 when it is empty. |
 
 `{{prompt}}` and `{{negative}}` are substituted inside a string, so

@@ -349,6 +349,12 @@ type DrawRequest struct {
 	// dislikes and this is the ghost's. ComfyUI only; an OpenAI-compatible
 	// endpoint has no such notion and ignores it.
 	Negative string
+	// Seed is the number to paint from, or zero to choose one. Painting
+	// the same prompt from the same seed gives the same picture back;
+	// changing a word of the prompt and keeping the seed gives that
+	// picture with the change made, which is what "the same whale, but
+	// bluer" means. ComfyUI only, and only when the graph asks for a seed.
+	Seed int64
 }
 
 // Image is a finished picture and what the backend can say about how it

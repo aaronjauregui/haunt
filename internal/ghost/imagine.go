@@ -57,7 +57,11 @@ type drawRequest struct {
 	// reuse accepts a picture already painted from exactly this prompt.
 	// The hermes brain never asks for it: it has the gallery and says
 	// which picture it wants by name.
-	reuse    bool
+	reuse bool
+	// seed paints from the number an earlier picture came out of, so that
+	// what changes between the two is what the prompt changed and nothing
+	// else. Zero picks a fresh one.
+	seed     int64
 	wait     string
 	lingerMS int
 }
@@ -107,6 +111,7 @@ func (g *Ghost) drawPicture(req drawRequest) (Picture, error) {
 	img, err := g.backend.Draw(g.sessionContext(), backend.DrawRequest{
 		Prompt:   sent,
 		Negative: g.manifest.Imagine.Negative,
+		Seed:     req.seed,
 	})
 	wait.Stop()
 	if err != nil {
