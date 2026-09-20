@@ -6,9 +6,10 @@ changes expression, and a **balloon** it speaks in.
 
 ![A ghost dragged across the screen, asked "what are you?" by typing at it, and answering in its balloon](docs/media/demo.gif)
 
-It remembers you across sessions, takes on reminders, can act through the
-tool servers you give it, and speaks first now and then, within a daily
-allowance you set.
+It remembers you across sessions, takes on reminders, paints a picture
+when you ask for one, looks things up on the web if you let it, can act
+through the tool servers you give it, and speaks first now and then,
+within a daily allowance you set.
 
 The words are the ukagaka community's. Nothing else is: there is no SHIORI,
 SSTP or SakuraScript, and this runs on wlroots-based Wayland compositors

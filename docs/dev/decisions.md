@@ -80,6 +80,32 @@ constraint on changes, not a history.
   because being able to would make quiet negotiable.
 - **Image generation is refused while something is fullscreen.** A
   scheduling rule: a local diffusion run takes the whole GPU for seconds.
+- **A gallery, not a prompt hash.** Pictures a ghost has painted are kept
+  with names it can repeat, and showing one again is a verb of its own.
+  Reuse a person can ask for is worth more than reuse that happens by
+  accident behind the same prompt, and it makes "show me the whale again"
+  cost nothing.
+- **The house style is the driver's, and changes only on the person's
+  turn.** A look the model rewrote whenever it felt like it would drift a
+  package's art away from itself unremarked; a look that web text could
+  rewrite would be an injection with a long memory. The package seeds it,
+  the person can let the ghost change it, and the negative stays the
+  author's.
+- **The web is the driver's to hold, not a toolset handed to hermes.**
+  The keys, the consent question, the ration, the refusal texts and the
+  taint all live where the rest of them live. Hermes's own `web` toolset
+  stays off, so there is one way in and one place that says no.
+- **Unprompted searching is bounded by the turn's event kind.** The
+  driver cannot see which skill the model loaded, so it gates on what it
+  can see: the kinds a skill acts on, none of which carry text from the
+  person's windows. It is approximate on purpose — the ration and quiet
+  hours bound what the approximation costs — and the point it does buy is
+  that what is on their screen never becomes a query.
+- **Web text taints the turn it entered.** After a page or a result has
+  been read, the verbs that reach past the person are asked about again
+  in the balloon, and refused outright on a turn the person did not
+  start. Showing them something is not one of those verbs; telling
+  somebody else is.
 
 ## The shell
 

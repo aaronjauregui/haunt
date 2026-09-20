@@ -62,11 +62,20 @@ author = ""
 # Capabilities the ghost asks the user to grant. Declaring one only means
 # it may *ask*: llm is what lets it talk, "window" lets it offer to notice
 # what you are working on (from its menu, and only if you say yes). Add
-# "imagine" for pictures and "screen" to let it look at them.
+# "imagine" for pictures, "screen" to let it look at them, and "web" to let
+# it search and read a page.
 capabilities = ["message", "llm", "window"]
 
 [shell]
 # sprite = "shell.png"   # PNG with transparency; omit for the built-in blob
+
+# The look its pictures have, before it writes a word of prompt. Needs the
+# "imagine" capability. The ghost can be asked to change style; negative is
+# yours alone, and ComfyUI only.
+#
+# [imagine]
+# style = "soft watercolour, muted palette, paper texture"
+# negative = "photorealistic"
 
 # No [brain] section: this ghost runs on hermes-agent, which talks in the
 # persona below, remembers what you tell it, takes on reminders, and speaks

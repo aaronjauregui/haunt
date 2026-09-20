@@ -38,7 +38,8 @@ internal/
   hermes             haunt's side of hermes-agent: profile, gateway, session, turns, envelope, skills install
   control            the per-ghost Unix socket: inbound messages, and tool_list/tool_call for mcp-serve
   mcp                a small MCP stdio client: start a server, list its tools, call one
-  backend            the models the driver calls itself, for drawing and looking, and the hourly budgets
+  backend            the models and services the driver calls itself, for drawing, looking,
+                     searching the web and reading a page, and the hourly budgets
   shell              the shell format: layers, variants, poses, clips, transforms, hit regions
   sprite             decoded art: premultiplied buffers and alpha input regions
   artimport          OpenRaster drawing to shell
@@ -142,7 +143,7 @@ ghost's public actions to the others as `observed` events.
 | What the model remembers | the hermes profile's `memories/` | hermes only |
 | The conversation | the hermes profile's session database | hermes only |
 | Control sockets | `XDG_RUNTIME_DIR` (`HAUNT_RUNTIME_DIR`) | |
-| Generated images | the ghost's state directory, content-addressed | |
+| The pictures a ghost has painted | `ghosts/<name>/pictures/<id>.png`, the newest hundred, with their prompts and captions under `_haunt/picture/` in the store | the running ghost only |
 
 **While a ghost runs it is the sole writer of its store.** Everything
 that changes a running ghost goes through its control socket, which is

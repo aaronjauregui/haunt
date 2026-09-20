@@ -1,10 +1,11 @@
 // Package backend is the driver-owned backend layer for the verbs the driver
-// performs itself: drawing a picture and looking at the screen, plus the
-// hourly ration on tool calls. Brains never hold API keys or talk to
-// backends; the driver calls the user-configured backend within budget.
-// Conversation is hermes's (internal/hermes). Local-first: any
-// OpenAI-compatible endpoint works (Ollama, llama.cpp server, vLLM, cloud
-// providers), and ComfyUI for images.
+// performs itself: drawing a picture, looking at the screen, and searching
+// the web and reading a page, plus the hourly ration on tool calls. Brains
+// never hold API keys or talk to backends; the driver calls the
+// user-configured backend within budget. Conversation is hermes's
+// (internal/hermes). Local-first: any OpenAI-compatible endpoint works
+// (Ollama, llama.cpp server, vLLM, cloud providers), ComfyUI for images,
+// and a SearXNG of the person's own for search.
 package backend
 
 import (
