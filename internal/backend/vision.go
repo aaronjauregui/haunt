@@ -11,6 +11,14 @@ import (
 	"strings"
 )
 
+// DescribeImage shows the vision model a picture the ghost made, rather
+// than the person's screen, and returns what it says. It is the same model
+// and the same ration as Look; what differs is that no screen grant is
+// involved, because nothing of the person's is being looked at.
+func (s *Service) DescribeImage(ctx context.Context, png []byte, question string) (string, error) {
+	return "", fmt.Errorf("describe image: not implemented")
+}
+
 // Look shows a PNG to the vision model and returns what it says.
 //
 // The question is the caller's, and it should be a specific one. "Comment

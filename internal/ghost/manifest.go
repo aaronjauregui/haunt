@@ -23,6 +23,7 @@ type Manifest struct {
 	Brain    BrainSection     `toml:"brain"`
 	Persona  PersonaSection   `toml:"persona"`
 	Hermes   HermesSection    `toml:"hermes"`
+	Imagine  ImagineSection   `toml:"imagine"`
 	Triggers []TriggerSection `toml:"trigger"`
 	Tools    []ToolSection    `toml:"tool"`
 }
@@ -145,6 +146,7 @@ var KnownCapabilities = map[string]string{
 	// tool is still asked about separately the first time it is used.
 	"tools":  "do things through the tool servers it declares, one tool at a time",
 	"screen": "take pictures of the focused window and show them to a vision model",
+	"web":    "search the web and read pages, sending your words and its queries to your search provider",
 }
 
 type GhostSection struct {
@@ -153,6 +155,21 @@ type GhostSection struct {
 	Author  string `toml:"author"`
 	// Capabilities the ghost requests; each needs a user grant to activate.
 	Capabilities []string `toml:"capabilities"`
+}
+
+// ImagineSection is the ghost's house style: the look its pictures have
+// before the model writes a word of prompt. It is the package author's
+// taste, seeded into the driver, and the person can let the ghost change it
+// from there (hermestools.go, the style tool).
+type ImagineSection struct {
+	// Style is appended to every prompt the ghost draws, so that a ghost
+	// looks like itself across pictures rather than like whatever the
+	// model felt like that turn.
+	Style string `toml:"style"`
+	// Negative is what to keep out of the picture. ComfyUI only: the
+	// OpenAI image endpoint has nowhere to put it. Unlike Style it stays
+	// the author's, and the ghost cannot change it.
+	Negative string `toml:"negative"`
 }
 
 // ShellSection is the ghost's visual form: one image, or a stack of layers

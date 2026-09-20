@@ -43,6 +43,12 @@ type builtinTool struct {
 	desc   string
 	schema string
 	call   func(g *Ghost, ctx context.Context, args json.RawMessage) (string, error)
+	// sideEffect marks a verb that reaches past the person in front of the
+	// ghost — it messages someone, or writes something that outlives the
+	// turn. Showing the person something is not a side effect; telling
+	// somebody else is. Once web text has entered a turn, these are the
+	// ones that need asking about again (web.go, taint).
+	sideEffect bool
 }
 
 // refusal is an error that means the driver would not, as opposed to could

@@ -27,6 +27,7 @@ import (
 type Config struct {
 	Image  ImageConfig  `toml:"image"`
 	Vision VisionConfig `toml:"vision"`
+	Search SearchConfig `toml:"search"`
 	Budget BudgetConfig `toml:"budget"`
 
 	// ToolTimeout is how long one tool call may take, in seconds (default
@@ -56,6 +57,42 @@ type ImageConfig struct {
 	CFG      float64 `toml:"cfg"`
 	Sampler  string  `toml:"sampler"`
 	Negative string  `toml:"negative"`
+	// Workflow is a path to a ComfyUI graph exported with "Save (API
+	// format)", with {{prompt}} and friends where the varying parts go. It
+	// replaces the built-in graph, and with it Model, Steps, CFG and
+	// Sampler: the workflow owns them. ComfyUI only.
+	Workflow string `toml:"workflow"`
+}
+
+// SearchConfig points at a web search provider. Empty disables search
+// regardless of what a ghost asks for, the way VisionConfig does for
+// looking: the capability says a ghost may search, this says there is
+// anything to search with.
+type SearchConfig struct {
+	// Backend selects the provider: "searxng" (a SearXNG instance, which
+	// needs no key and can be the person's own) or "brave" (the Brave
+	// Search API, which has a fixed URL and needs a key).
+	Backend string `toml:"backend"`
+	// BaseURL is the SearXNG instance. Brave ignores it.
+	BaseURL string `toml:"base_url"`
+	// APIKeyEnv names the environment variable holding the key. Brave only.
+	APIKeyEnv string `toml:"api_key_env"`
+	// Results is how many results a search returns, 1 to 10.
+	Results int `toml:"results"`
+	// SafeSearch is "off", "moderate" (default) or "strict".
+	SafeSearch string `toml:"safesearch"`
+	// Unprompted says when a ghost may search on a turn the person did not
+	// start: "never", "skills" (default) or "any". The driver enforces it
+	// by the turn's event kind, since it cannot see which skill the model
+	// loaded.
+	Unprompted string `toml:"unprompted"`
+}
+
+func (c *SearchConfig) apiKey() string {
+	if c.APIKeyEnv == "" {
+		return ""
+	}
+	return os.Getenv(c.APIKeyEnv)
 }
 
 // VisionConfig points at a model that can be shown a picture. Empty
@@ -91,6 +128,13 @@ type BudgetConfig struct {
 	// ToolRequestsPerHour caps how fast a ghost may *act*: a tool call
 	// changes the world, and one turn can contain several.
 	ToolRequestsPerHour int `toml:"tool_requests_per_hour"`
+	// SearchRequestsPerHour caps searches and page reads together. Both
+	// leave the machine and both cost the provider something.
+	SearchRequestsPerHour int `toml:"search_requests_per_hour"`
+	// UnpromptedSearchPerHour is the slice of that ration a ghost may
+	// spend on turns the person did not start. Looking things up while
+	// nobody is watching is the part worth keeping small.
+	UnpromptedSearchPerHour int `toml:"unprompted_search_per_hour"`
 }
 
 const (
@@ -99,6 +143,13 @@ const (
 	// defaultToolPerHour is a working afternoon's worth of doing things
 	// and nothing like enough for a loop.
 	defaultToolPerHour = 60
+	// defaultSearchPerHour is enough to follow a conversation that keeps
+	// needing a fact, and not enough to crawl.
+	defaultSearchPerHour = 30
+	// defaultUnpromptedSearchPerHour is deliberately a handful: a ghost
+	// looking things up unwatched should be an occasional touch, not a
+	// habit.
+	defaultUnpromptedSearchPerHour = 4
 
 	// defaultToolTimeout is long enough for a build or a slow network call
 	// and short enough that a wedged server is noticed the same afternoon.
@@ -117,6 +168,12 @@ func WithDefaults(cfg Config) *Config {
 	}
 	if cfg.Budget.ToolRequestsPerHour == 0 {
 		cfg.Budget.ToolRequestsPerHour = defaultToolPerHour
+	}
+	if cfg.Budget.SearchRequestsPerHour == 0 {
+		cfg.Budget.SearchRequestsPerHour = defaultSearchPerHour
+	}
+	if cfg.Budget.UnpromptedSearchPerHour == 0 {
+		cfg.Budget.UnpromptedSearchPerHour = defaultUnpromptedSearchPerHour
 	}
 	return &cfg
 }
@@ -138,6 +195,11 @@ type Budgets struct {
 	image  *budget
 	vision *budget
 	tool   *budget
+	// search rations search and page reads together; unprompted is the
+	// part of it that turns the person did not start may spend, and such a
+	// call spends both.
+	search     *budget
+	unprompted *budget
 }
 
 // NewBudgets builds an hourly ration from config. Defaults are filled in
@@ -149,6 +211,9 @@ func NewBudgets(cfg BudgetConfig) *Budgets {
 		image:  newBudget(orDefault(cfg.ImageRequestsPerHour, defaultImagePerHour)),
 		vision: newBudget(orDefault(cfg.VisionRequestsPerHour, defaultVisionPerHour)),
 		tool:   newBudget(orDefault(cfg.ToolRequestsPerHour, defaultToolPerHour)),
+		search: newBudget(orDefault(cfg.SearchRequestsPerHour, defaultSearchPerHour)),
+		unprompted: newBudget(orDefault(cfg.UnpromptedSearchPerHour,
+			defaultUnpromptedSearchPerHour)),
 	}
 }
 
