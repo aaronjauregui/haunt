@@ -258,3 +258,62 @@ func TestManifestBundledSkills(t *testing.T) {
 		t.Fatalf("err = %v, want google-workspace refused and the allowed ones listed", err)
 	}
 }
+
+// The house style is a style, not a prompt: one short line, or the package
+// is refused. It rides ahead of the subject on every picture the ghost
+// paints, and a paragraph of it would be the picture.
+func TestManifestHouseStyle(t *testing.T) {
+	const head = "[ghost]\nname = \"wisp\"\ncapabilities = [\"llm\", \"imagine\"]\n\n[imagine]\n"
+	m, err := LoadManifest(writeManifest(t, head+"style = \"soft watercolour, muted palette\"\nnegative = \"photorealistic\"\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Imagine.Style != "soft watercolour, muted palette" || m.Imagine.Negative != "photorealistic" {
+		t.Errorf("imagine = %+v", m.Imagine)
+	}
+	long := strings.Repeat("x", styleChars+1)
+	if _, err := LoadManifest(writeManifest(t, head+"style = \""+long+"\"\n")); err == nil {
+		t.Error("a style longer than the limit loaded")
+	}
+	if _, err := LoadManifest(writeManifest(t, head+"style = \"\"\"\nsoft\nwatercolour\n\"\"\"\n")); err == nil {
+		t.Error("a style over several lines loaded")
+	}
+	if _, err := LoadManifest(writeManifest(t, head+"negative = \""+long+"\"\n")); err == nil {
+		t.Error("a negative longer than the limit loaded")
+	}
+}
+
+// A style with no capability to draw with is a section nobody will read.
+// Worth saying, and not worth refusing the package over: the ghost is still
+// perfectly good at everything else it does.
+func TestManifestWarnsAboutAStyleThatCannotDraw(t *testing.T) {
+	head := "[ghost]\nname = \"wisp\"\ncapabilities = [\"llm\"]\n\n[imagine]\nstyle = \"soft watercolour\"\n"
+	m, err := LoadManifest(writeManifest(t, head))
+	if err != nil {
+		t.Fatal(err)
+	}
+	warnings := m.Warnings()
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "imagine capability") {
+		t.Fatalf("warnings = %v, want one about the missing capability", warnings)
+	}
+	m.Ghost.Capabilities = append(m.Ghost.Capabilities, "imagine")
+	if got := m.Warnings(); len(got) != 0 {
+		t.Errorf("with the capability, warnings = %v", got)
+	}
+}
+
+// Reaching the web is a capability like any other: declared in the
+// manifest, granted by the person, and described in the words they are
+// asked in.
+func TestManifestWebCapability(t *testing.T) {
+	m, err := LoadManifest(writeManifest(t, "[ghost]\nname = \"wisp\"\ncapabilities = [\"llm\", \"web\"]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Ghost.Capabilities) != 2 {
+		t.Fatalf("capabilities = %v", m.Ghost.Capabilities)
+	}
+	if KnownCapabilities["web"] == "" {
+		t.Error("web has no description to ask the person with")
+	}
+}

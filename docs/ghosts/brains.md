@@ -104,7 +104,7 @@ with `kv_set` as it goes; there is no read intent. Keys starting with
 | `set_expression` | `name` | wear a declared pose; overrides the driver's inference |
 | `play_clip` | `name` | run a declared clip |
 | `tell` | `name` (ghost), `text` | address another resident ghost (`tell` capability) |
-| `imagine` | `text`, `fresh`, `wait`, `tag` | draw a picture in the balloon (`imagine`); the cache is keyed by prompt unless `fresh` |
+| `imagine` | `text`, `fresh`, `wait`, `tag` | paint a picture in the balloon (`imagine`); a picture the ghost already has of that prompt is shown again unless `fresh` |
 | `look` | `text` (a question), `tag` | show the focused window to a vision model (`screen`); the answer comes to the brain, never to the balloon |
 | `watch` | | ask the person for window awareness; honoured only right after they acted, so offer it from a menu |
 | `act` | `name` (`server.tool`), `args`, `tag` | run a declared tool (`tools`); the person is asked about each tool the first time |

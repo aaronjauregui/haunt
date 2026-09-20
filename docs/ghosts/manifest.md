@@ -24,6 +24,10 @@ You are Wisp, a wry little desktop spirit. Reply in one or two short sentences.
 [hermes]
 bundled_skills = ["humanizer"]  # hermes's own skills the ghost may use
 
+[imagine]                       # the look of its pictures; needs the imagine capability
+style = "soft watercolour, muted palette, paper texture"
+negative = "photorealistic"     # optional; ComfyUI only
+
 # [brain]                       # a scripted ghost instead; see brains.md
 # wasm = "brain.wasm"           # or
 # command = ["./brain"]         # needs the native-brain capability
@@ -64,6 +68,7 @@ The capabilities:
 | `screen` | a picture of the focused window, to a vision model | the `look` tool, the `look` intent |
 | `tools` | acting through the declared tool servers | any `[[tool]]`; the manifest is refused without it |
 | `tell` | messaging other resident ghosts | the `tell` tool or intent |
+| `web` | searching the web and reading a page | the `search` and `read_page` tools |
 | `native-brain` | running `brain.command` as a process | `brain.command` |
 
 Ask only for what the ghost uses. Every capability is a question put to
@@ -89,6 +94,32 @@ ghost's profile. Profiles opt out of that library, since nearly all of it
 needs a shell, files or the web; only `humanizer`, `weekly-review-planning`,
 `meeting-action-items` and `songwriting-and-ai-music` may be named, and
 any other name is refused at load.
+
+## `[imagine]`
+
+The ghost's house style: the look its pictures have before the model
+writes a word of prompt. It is the author's taste, and it is what makes a
+ghost's pictures look like one ghost's rather than like whatever the model
+felt like that turn.
+
+| Field | Meaning |
+|---|---|
+| `style` | Added to every prompt the ghost draws with. At most 200 characters, on one line. |
+| `negative` | What to keep out of the picture. ComfyUI only: the OpenAI image endpoint has nowhere to put it. Same limits. |
+
+Write `style` the way the image model wants to be spoken to — tags for
+Stable Diffusion, a phrase for Flux — and keep it about the look rather
+than the subject. It rides ahead of whatever the picture is of, so a
+paragraph of it would be the picture.
+
+Only `style` is the ghost's to change. A person can tell their ghost to
+draw in something else for good, which the driver keeps and `haunt journal
+-style` shows; the package's `style` is the seed it started from, and
+`haunt journal -style -reset` goes back to it. `negative` stays the
+author's either way.
+
+A `[imagine]` section without the `imagine` capability is a warning at
+start, not a refusal: the ghost simply never draws.
 
 ## `[brain]`
 

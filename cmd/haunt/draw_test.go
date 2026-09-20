@@ -70,9 +70,9 @@ func (p *imagePrompts) all() []string {
 }
 
 // TestHermesGhostDraws: the model paints by calling draw. The picture shows
-// in the balloon and lands in the cache; a fresh draw paints again; the same
-// prompt again is served from the cache; and the hourly image budget is the
-// driver's, told to the model in words when it runs out.
+// in the balloon and joins the gallery under a name; the same words again
+// paint again; showing one by name costs nothing; and the hourly image
+// budget is the driver's, told to the model in words when it runs out.
 func TestHermesGhostDraws(t *testing.T) {
 	c := testenv.StartT(t)
 	prompts := &imagePrompts{}
@@ -81,7 +81,9 @@ func TestHermesGhostDraws(t *testing.T) {
 	dir := t.TempDir()
 	rig := newHermesRig(t, dir, []fakeRule{
 		{Match: "[haunt event]", Reply: "NO_REPLY"},
-		{Match: "draw it again", Tool: "draw", Args: map[string]any{"prompt": "a sunset, watercolour", "fresh": true},
+		{Match: "show me that sunset", Tool: "show", Args: map[string]any{"id": "p1"},
+			Reply: "here it is again: {tool}"},
+		{Match: "draw it again", Tool: "draw", Args: map[string]any{"prompt": "a sunset, watercolour"},
 			Reply: "again: {tool}"},
 		{Match: "draw a sunset", Tool: "draw", Args: map[string]any{"prompt": "a sunset, watercolour"},
 			Reply: "there: {tool}"},
@@ -119,39 +121,49 @@ system = "You are Wisp, a wry desktop spirit."
 		cmd.Wait()
 	})
 	waitFor(t, stdout, "READY")
-	cacheGlob := filepath.Join(state, "cache", "*.png")
+	galleryGlob := filepath.Join(state, "pictures", "*.png")
 	draws := func(e fakeEntry) bool { return e.Kind == "tool_call" && e.Name == "draw" }
+	shows := func(e fakeEntry) bool { return e.Kind == "tool_call" && e.Name == "show" }
 
-	// The picture is painted, shown beside the ghost and cached.
+	// The picture is painted, shown beside the ghost, and kept under a name
+	// the model is told.
 	rig.say(t, "draw a sunset")
 	waitOrange(t, c, dir, 100, 100)
-	waitFileCount(t, cacheGlob, 1)
+	waitFileCount(t, galleryGlob, 1)
 	if got := prompts.all(); len(got) != 1 || got[0] != "a sunset, watercolour" {
 		t.Errorf("image prompts = %q, want the model's own", got)
 	}
 	call := waitFake(t, rig.FakeLog, 1, 10*time.Second, draws)[0]
-	if call.IsError || !strings.Contains(call.Text, "in your balloon") {
+	if call.IsError || !strings.Contains(call.Text, "Drew p1") {
 		t.Errorf("draw answered %+v", call)
 	}
 
-	// Fresh: the same prompt, painted again, into a second file.
+	// The same words again paint again: reuse is something the ghost asks
+	// for by name, never something that happens to it.
 	rig.say(t, "draw it again")
-	waitFileCount(t, cacheGlob, 2)
-
-	// The same thing once more is free: served from the cache, with no new
-	// generation and no new file.
-	rig.say(t, "draw a sunset")
-	waitFake(t, rig.FakeLog, 3, 10*time.Second, draws)
+	waitFileCount(t, galleryGlob, 2)
 	if got := prompts.all(); len(got) != 2 {
-		t.Errorf("a cached picture was painted again; image prompts = %q", got)
+		t.Errorf("the second draw did not paint; image prompts = %q", got)
 	}
+
+	// Showing one by name puts it back in the balloon for nothing: no
+	// generation, no new file, no budget.
+	rig.say(t, "show me that sunset")
+	shown := waitFake(t, rig.FakeLog, 1, 10*time.Second, shows)[0]
+	if shown.IsError || !strings.Contains(shown.Text, "p1 is in your balloon") {
+		t.Errorf("show answered %+v", shown)
+	}
+	if got := prompts.all(); len(got) != 2 {
+		t.Errorf("showing a picture painted one; image prompts = %q", got)
+	}
+	waitFileCount(t, galleryGlob, 2)
 
 	// The budget is two an hour, and both are spent: the model is told why
 	// there is no picture.
 	rig.say(t, "draw it again")
-	refused := waitFake(t, rig.FakeLog, 4, 10*time.Second, draws)[3]
+	refused := waitFake(t, rig.FakeLog, 3, 10*time.Second, draws)[2]
 	if !refused.IsError || !strings.Contains(refused.Text, "limit of 2 requests/hour") {
 		t.Errorf("an over-budget draw answered %+v", refused)
 	}
-	waitFileCount(t, cacheGlob, 2)
+	waitFileCount(t, galleryGlob, 2)
 }

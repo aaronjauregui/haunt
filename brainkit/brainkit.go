@@ -108,8 +108,8 @@ func (em *Emitter) Tell(ghostName, text string) {
 }
 
 // Imagine generates an image (requires the imagine capability), shown as an
-// image balloon and reported by an ai_image event. Identical prompts are
-// served from the generation cache.
+// image balloon and reported by an ai_image event. A prompt the ghost has
+// already painted is shown again rather than painted twice.
 func (em *Emitter) Imagine(prompt string) {
 	em.emit(Intent{Type: proto.IntentImagine, Text: prompt})
 }
@@ -121,8 +121,9 @@ func (em *Emitter) ImagineWaiting(prompt, waiting string) {
 	em.emit(Intent{Type: proto.IntentImagine, Text: prompt, Wait: waiting})
 }
 
-// ImagineFresh is Imagine that ignores the cache, so a repeated prompt
-// produces a new image — the "draw that again" gesture.
+// ImagineFresh is Imagine that skips reuse of an earlier picture of the
+// same prompt, so a repeated prompt produces a new image — the "draw that
+// again" gesture.
 func (em *Emitter) ImagineFresh(prompt string) {
 	em.emit(Intent{Type: proto.IntentImagine, Text: prompt, Fresh: true})
 }

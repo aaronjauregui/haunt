@@ -38,6 +38,13 @@ func (s *lockedStore) Get(k string) (string, bool, error) {
 	return v, ok, nil
 }
 
+func (s *lockedStore) Delete(k string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.m, k)
+	return nil
+}
+
 func (s *lockedStore) All() (map[string]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

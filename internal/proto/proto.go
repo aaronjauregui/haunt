@@ -211,7 +211,7 @@ const (
 	IntentKVSet         IntentType = "kv_set"         // persist a value
 	IntentLog           IntentType = "log"            // debug output
 	IntentTell          IntentType = "tell"           // message another ghost
-	IntentImagine       IntentType = "imagine"        // generate an image of Text
+	IntentImagine       IntentType = "imagine"        // paint a picture of Text
 	IntentNote          IntentType = "note"           // write a line in the journal
 	IntentSetExpression IntentType = "set_expression" // wear a declared pose
 	IntentPlayClip      IntentType = "play_clip"      // run a declared animation
@@ -253,8 +253,8 @@ type Intent struct {
 	// text at it. They are also where consent belongs — asked in the moment,
 	// about a thing the person can see.
 	Choices []string `json:"choices,omitempty"`
-	// Fresh skips the generation cache for IntentImagine, so asking again
-	// for the same prompt produces a different image.
+	// Fresh skips reuse of an earlier picture of the same prompt for
+	// IntentImagine, so asking again produces a different image.
 	Fresh bool `json:"fresh,omitempty"`
 	// LingerMS hides what this intent puts on screen after the given delay,
 	// and only if it is still the thing on screen. It is the fix for a bug
