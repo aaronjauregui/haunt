@@ -96,8 +96,9 @@ the report lists what was missing:
   it.
 - `claude` on `PATH`, logged in to a Claude subscription, with no
   `ANTHROPIC_API_KEY` in its environment, for the judge.
-- Optionally `[backend.image]` for the `draw` case and `[backend.vision]` for
-  `look`; without them those cases are skipped.
+- Optionally `[backend.image]` for the picture cases (`draw`,
+  `show-again`, `change-picture`, `style-standing`, `style-oneoff`) and
+  `[backend.vision]` for `look`; without them those cases are skipped.
 
 ### What a case is
 

@@ -30,6 +30,10 @@ func init() {
 		morningCase(),
 		weeklyCase(),
 		drawCase(),
+		showAgainCase(),
+		changePictureCase(),
+		styleStandingCase(),
+		styleOneOffCase(),
 		restraintCase(),
 		shapesCase(),
 		injectionTitleCase(),
@@ -469,6 +473,8 @@ func weeklyCase() evalCase {
 
 // draw: haunt's draw-on-request skill, and the draw tool called. Whether
 // the picture came out is the image backend's business, not the ghost's.
+// The picture's name is graded because everything else the gallery offers
+// — showing it again, changing it — hangs off the model having read it.
 func drawCase() evalCase {
 	return evalCase{
 		Name:  "draw",
@@ -482,6 +488,176 @@ func drawCase() evalCase {
 		Graders: []Grader{
 			lookedGrader("draw-on-request"),
 			actedGrader("draw"),
+			Grader{Name: "draw answered with a name", Check: func(ev Evidence) (bool, string) {
+				for _, res := range ev.actedResults("draw") {
+					if pictureName.MatchString(res) {
+						return true, ""
+					}
+				}
+				return false, fmt.Sprintf("draw results: %q", ev.actedResults("draw"))
+			}},
+		},
+	}
+}
+
+// pictureName is a gallery id as draw and pictures write it.
+var pictureName = regexp.MustCompile(`\bp[0-9]+\b`)
+
+// actedResults is what each call of a haunt tool answered, in order: the
+// counterpart of actedArgs, for cases that grade what the model was told.
+func (ev Evidence) actedResults(tool string) []string {
+	var out []string
+	for _, tu := range ev.Turns {
+		for _, c := range tu.Acted {
+			if c.Tool == tool {
+				out = append(out, c.Result)
+			}
+		}
+	}
+	return out
+}
+
+// drewGrader is the harness check that the picture a case then asks about
+// was painted at all: without it, the rest of the case grades nothing.
+func drewGrader(mark string) Grader {
+	return Grader{Name: "a picture was painted", Fault: true, Check: func(ev Evidence) (bool, string) {
+		if ev.before(mark).acted("draw") {
+			return true, ""
+		}
+		return false, "no draw before " + mark
+	}}
+}
+
+// show-again: a picture asked for a second time is the one already
+// painted. The gallery is there so the person's image budget is not spent
+// twice on the same whale.
+func showAgainCase() evalCase {
+	return evalCase{
+		Name:  "show-again",
+		Needs: []string{"backend.image"},
+		Drive: rigDrive(rigOptions{Backend: []string{"image"}}, func(r *evalRig) error {
+			if err := r.start(); err != nil {
+				return err
+			}
+			if err := r.sayWait("draw a whale", evalTurn); err != nil {
+				return err
+			}
+			r.mark("again")
+			return r.sayWait("show me the whale again", evalTurn)
+		}),
+		Graders: []Grader{
+			drewGrader("again"),
+			Grader{Name: "went to the gallery", Check: func(ev Evidence) (bool, string) {
+				after := ev.after("again")
+				if after.acted("show") || after.acted("pictures") {
+					return true, ""
+				}
+				return false, "neither show nor pictures called"
+			}},
+			Grader{Name: "did not paint it again", Check: func(ev Evidence) (bool, string) {
+				if args := ev.after("again").actedArgs("draw"); len(args) > 0 {
+					return false, fmt.Sprintf("drew again: %s", oneLine(args[0], 160))
+				}
+				return true, ""
+			}},
+		},
+	}
+}
+
+// change-picture: "make it bluer" is a new picture of the same thing, and
+// the model has to carry the old prompt over rather than start afresh.
+func changePictureCase() evalCase {
+	return evalCase{
+		Name:  "change-picture",
+		Needs: []string{"backend.image"},
+		Drive: rigDrive(rigOptions{Backend: []string{"image"}}, func(r *evalRig) error {
+			if err := r.start(); err != nil {
+				return err
+			}
+			if err := r.sayWait("draw a whale", evalTurn); err != nil {
+				return err
+			}
+			r.mark("bluer")
+			return r.sayWait("make it bluer", evalTurn)
+		}),
+		Graders: []Grader{
+			drewGrader("bluer"),
+			Grader{Name: "painted it again, bluer", Check: func(ev Evidence) (bool, string) {
+				args := ev.after("bluer").actedArgs("draw")
+				if len(args) == 0 {
+					return false, "no second draw"
+				}
+				p := strings.ToLower(argString(args[0], "prompt"))
+				if strings.Contains(p, "whale") && strings.Contains(p, "blue") {
+					return true, ""
+				}
+				return false, fmt.Sprintf("second prompt: %q", p)
+			}},
+		},
+	}
+}
+
+// styleSet is every style call that made a standing change, as its args.
+func styleSet(ev Evidence) []string {
+	var out []string
+	for _, a := range ev.actedArgs("style") {
+		var m struct {
+			Set   string `json:"set"`
+			Reset bool   `json:"reset"`
+		}
+		if err := json.Unmarshal([]byte(a), &m); err != nil {
+			continue
+		}
+		if strings.TrimSpace(m.Set) != "" || m.Reset {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// style-standing: "from now on" is the ghost's look changed for good, not
+// one picture drawn differently.
+func styleStandingCase() evalCase {
+	return evalCase{
+		Name:  "style-standing",
+		Needs: []string{"backend.image"},
+		Drive: rigDrive(rigOptions{Backend: []string{"image"}}, func(r *evalRig) error {
+			if err := r.start(); err != nil {
+				return err
+			}
+			return r.sayWait("from now on draw everything as pixel art", evalTurn)
+		}),
+		Graders: []Grader{
+			Grader{Name: "changed its style", Check: func(ev Evidence) (bool, string) {
+				if len(styleSet(ev)) > 0 {
+					return true, ""
+				}
+				return false, fmt.Sprintf("style calls: %q", ev.actedArgs("style"))
+			}},
+		},
+	}
+}
+
+// style-oneoff: one picture asked for in a look that is not the ghost's
+// leaves the ghost's own look alone.
+func styleOneOffCase() evalCase {
+	return evalCase{
+		Name:  "style-oneoff",
+		Needs: []string{"backend.image"},
+		Drive: rigDrive(rigOptions{Backend: []string{"image"}}, func(r *evalRig) error {
+			if err := r.start(); err != nil {
+				return err
+			}
+			return r.sayWait("draw a cat as pixel art", evalTurn)
+		}),
+		Graders: []Grader{
+			actedGrader("draw"),
+			Grader{Name: "left its style alone", Check: func(ev Evidence) (bool, string) {
+				if set := styleSet(ev); len(set) > 0 {
+					return false, fmt.Sprintf("style changed: %s", oneLine(set[0], 160))
+				}
+				return true, ""
+			}},
 		},
 	}
 }
