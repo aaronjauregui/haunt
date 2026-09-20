@@ -105,7 +105,7 @@ EOF
 [ghost]
 name = "wisp"
 version = "0.1.0"
-capabilities = ["message", "llm", "imagine", "window", "tell"]
+capabilities = ["message", "llm", "imagine", "window", "web", "tell"]
 
 [persona]
 system = "You are Wisp, a wry little desktop spirit haunting the user's screen. Reply in one or two short sentences, with dry wit. Let what you remember about them color your mood and callbacks."

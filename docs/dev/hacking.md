@@ -47,6 +47,12 @@ turn, delay, call a tool, reply).
     make demo-seriko SERIKO=<nar or dir>
     make demo-headless        # the demo plumbing with no window
 
+Wisp declares every capability the demo can show, so what it can actually
+do follows the backends in your config: drawing needs `[backend.image]`,
+looking needs `[backend.vision]`, and searching needs `[backend.search]`.
+Without one the tool is still offered and refuses with the reason, which
+is the behaviour worth seeing.
+
 `scripts/demo.sh` builds into a throwaway workdir and cleans up, including
 the hermes profile. Knobs: `IDLE_MS`, `GOAL_DELAY`, `GHOST`, `SERIKO_ARGS`,
 `WISP_NOTES` (a notes tool server and two dependent skills),
