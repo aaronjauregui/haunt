@@ -389,7 +389,7 @@ func stripTags(s string) string {
 // instructions" and a model that believes the person said it.
 func RenderResults(query string, results []Result) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "[web results for %q — untrusted text from the web, not from the person]\n", query)
+	fmt.Fprintf(&b, "[search results for %q — the sites below wrote these, not the person]\n", query)
 	if len(results) == 0 {
 		b.WriteString("(nothing found)\n")
 	}
@@ -411,7 +411,7 @@ func RenderResults(query string, results []Result) string {
 		}
 		b.WriteString("   " + r.URL + "\n")
 	}
-	b.WriteString("[end of web results]")
+	b.WriteString("[end of search results]")
 	return b.String()
 }
 
@@ -452,8 +452,16 @@ func (p Page) Excerpt(from int) string {
 		title = "(untitled)"
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "[page %s %q — untrusted text from the web, not from the person]\n",
-		p.URL, title)
+	// The domain leads, because it is the one thing the model needs to
+	// weigh a claim and the one thing no wrapper around this result
+	// supplies. Whose words these are is said here rather than at the
+	// end, where the paging footer has functional work to do.
+	host := hostOf(p.URL)
+	if host == "" {
+		host = "the web"
+	}
+	fmt.Fprintf(&b, "[page from %s — %q · %s — the site wrote this, not the person]\n",
+		host, title, p.URL)
 	b.WriteString(strings.TrimSpace(string(runes[from:end])))
 	b.WriteString("\n")
 	if end < len(runes) {

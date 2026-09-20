@@ -452,8 +452,15 @@ func TestExcerptPaging(t *testing.T) {
 	p := Page{Title: "Long", URL: "https://example.com/long", Text: strings.Join(paras, "\n\n")}
 
 	first := p.Excerpt(0)
-	if !strings.HasPrefix(first, `[page https://example.com/long "Long" — untrusted text from the web`) {
+	// The domain leads: it is what the model weighs a claim by, and the
+	// one thing the wrapper hermes puts around every tool result cannot
+	// say, since that one calls the ghost's own reminder list external
+	// too.
+	if !strings.HasPrefix(first, `[page from example.com — "Long"`) {
 		t.Fatalf("envelope = %q", strings.SplitN(first, "\n", 2)[0])
+	}
+	if !strings.Contains(first, "the site wrote this, not the person") {
+		t.Errorf("no attribution:\n%s", strings.SplitN(first, "\n", 2)[0])
 	}
 	if !strings.Contains(first, "[more: read_page with from=") {
 		t.Fatalf("no continuation:\n%s", first)
@@ -496,11 +503,11 @@ func TestRenderResults(t *testing.T) {
 		{Title: "Blue whale", URL: "https://www.example.com/whale", Snippet: "The largest animal.", Age: "3 days ago"},
 	})
 	for _, want := range []string{
-		`[web results for "whales" — untrusted text from the web, not from the person]`,
+		`[search results for "whales" — the sites below wrote these, not the person]`,
 		"1. Blue whale — example.com · 3 days ago",
 		"The largest animal.",
 		"https://www.example.com/whale",
-		"[end of web results]",
+		"[end of search results]",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
