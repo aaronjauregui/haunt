@@ -48,10 +48,20 @@ base_url = ""                   # OpenAI-compatible, e.g. "http://localhost:1143
 model = ""                      # must be vision-capable
 api_key_env = ""
 
+[backend.search]                # optional: lets a ghost with `web` search and read pages
+backend = ""                    # "searxng": your own instance; "brave": the Brave Search API
+base_url = ""                   # the SearXNG instance, e.g. "http://127.0.0.1:8888"; Brave ignores it
+api_key_env = ""                # Brave only; the variable holding the key
+results = 5                     # results a search returns, 1 to 10
+safesearch = "moderate"         # "off", "moderate" or "strict"
+unprompted = "skills"           # when a ghost may search on a turn you did not start: "never", "skills", "any"
+
 [backend.budget]                # per hour, shared across every resident ghost
 image_requests_per_hour = 12
 vision_requests_per_hour = 60
 tool_requests_per_hour = 60
+search_requests_per_hour = 30       # searches and pages read together
+unprompted_search_per_hour = 4      # the slice of that a ghost may spend unwatched
 
 [hermes]                        # the brain; see hermes.md
 command = ["hermes"]
@@ -74,6 +84,66 @@ Any OpenAI-compatible endpoint works for images and vision: Ollama,
 llama.cpp server, vLLM, cloud providers. Cloud keys are named, not
 stored: set `api_key_env` and haunt reads that variable from its own
 environment.
+
+## Searching the web
+
+`[backend.search]` is what a ghost that declares the `web` capability
+searches with. Empty, and there is nothing to search with: the ghost is
+told so, and the capability alone grants nothing.
+
+Two providers. A SearXNG instance is the local-first one — your own
+machine or your own server, no key, and the queries are yours to see:
+
+```toml
+[backend.search]
+backend  = "searxng"
+base_url = "http://127.0.0.1:8888"
+results  = 5
+```
+
+SearXNG serves HTML only until you ask it for JSON. In its
+`settings.yml`:
+
+```yaml
+search:
+  formats: [html, json]
+```
+
+Without it the instance answers a search with 403, and haunt says so.
+
+The Brave Search API needs no server of your own and does need a key.
+The endpoint is fixed; name the variable holding the key, and export it
+where haunt can read it:
+
+```toml
+[backend.search]
+backend     = "brave"
+api_key_env = "BRAVE_API_KEY"
+results     = 5
+```
+
+Brave's free tier allows one request a second. A ghost searching twice in
+a turn is well inside it; if a burst does hit the limit, the ghost is
+told the provider is rate-limiting and says so rather than inventing an
+answer.
+
+`unprompted` decides whether a ghost may search on a turn you did not
+start:
+
+| Value | A ghost searches unasked |
+|---|---|
+| `never` | not at all; it may only look things up when you ask |
+| `skills` | on the turns its skills act on — an occasion, a reminder coming due, a quiet goal, waking up — and never on what it sees in your windows |
+| `any` | on any turn of its own, within the ration |
+
+`search_requests_per_hour` covers searching and reading pages together.
+`unprompted_search_per_hour` is the slice of it a ghost may spend while
+you are not asking, and quiet hours stop unprompted searches outright.
+
+Queries go to the provider you configured; pages are fetched from this
+machine. A page is only ever fetched from a public address: a ghost given
+a link to something on your own machine or your own network refuses it.
+`docs/user/permissions.md` has the rest of what reading the web means.
 
 ## Environment
 
