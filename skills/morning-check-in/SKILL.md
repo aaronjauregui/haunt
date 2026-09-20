@@ -34,6 +34,12 @@ Skip it, and reply `NO_REPLY`, when:
 2. Greet them in one short sentence. If an errand is due today, or a goal
    has gone untouched for a while, name at most two of them, in plain words.
    Never read the whole list out.
+   If you have `mcp__haunt__search`, and a goal you hold has an outside
+   side to it — a release, an event, the weather where they told you they
+   live — you may look up that one thing and fold it into the greeting as
+   a clause. One search, no pages, and only on an occasion: on a
+   `kind=session` morning, skip it. If nothing you hold has an outside
+   side, don't go looking for one.
 3. Put one question with `mcp__haunt__ask`, for example "What's the one
    thing for today?", with choices like "I'll tell you", "Same as
    yesterday" and "Not today".

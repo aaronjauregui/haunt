@@ -11,6 +11,12 @@ menu. What it holds is in its profile for you to read:
 A scripted ghost remembers in its own key-value store, which its brain
 reads at boot and writes as it goes.
 
+The pictures a ghost paints are kept as files beside that store, in
+`pictures/` under its state directory, with the prompt and the caption it
+gave each one. It holds the last hundred; painting the hundred and first
+drops the oldest. A ghost puts one back in its balloon from there when
+you ask to see it again, so showing costs nothing and paints nothing new.
+
 ## Reminders
 
     remind me in 10 minutes to check the build
@@ -47,7 +53,8 @@ aside: still on the books, no longer watched.
 
 A ghost on hermes carries a few routines as **skills**, short procedures
 the model follows when one fits: a morning check-in, a focus session, a
-weekly review, keeping an eye on a goal, drawing on request. A ghost's
+weekly review, keeping an eye on a goal, drawing on request, looking
+something up. A ghost's
 package can add its own, a manifest can ask for a few of hermes's, and the
 ghost may write new ones as it learns how you like things done.
 
@@ -62,7 +69,10 @@ on a `weekly` occasion or on request.
     haunt history                  # the conversation, read back from hermes
     haunt history -why             # per reply: what woke it, what it saw, what it did
     haunt history -json            # the same turns as JSON, one object per line
-    haunt journal                  # what it did: tools run, pictures drawn
+    haunt journal                  # what it did: tools run, pictures drawn,
+                                   #   searches made and pages read
+    haunt journal -style           # the look it paints in, and when that changed
+    haunt journal -style -reset    # back to the look its package came with
 
 `-why` shows whether a line answered you or an event, what window was in
 front of it, which tools it used (hermes's own memory and skill lookups

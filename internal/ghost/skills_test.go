@@ -34,6 +34,7 @@ func TestHauntSkills(t *testing.T) {
 			Metadata    struct {
 				Hermes struct {
 					RequiresToolsets []string `yaml:"requires_toolsets"`
+					RequiresTools    []string `yaml:"requires_tools"`
 				}
 			}
 		}
@@ -56,6 +57,21 @@ func TestHauntSkills(t *testing.T) {
 			if builtinTools[m[1]].call == nil {
 				t.Errorf("%s names mcp__haunt__%s, which is not a ghost tool", e.Name(), m[1])
 			}
+		}
+		// The web tools are offered only by a ghost whose package asked
+		// for them, so a skill that leans on one has to say it needs it —
+		// and then hermes hides the skill where it is missing — or else
+		// phrase it as something to do only if it is there. A skill that
+		// does neither tells some ghosts to call a tool they have not got.
+		for _, tool := range []string{"search", "read_page"} {
+			if !strings.Contains(string(raw), "mcp__haunt__"+tool) {
+				continue
+			}
+			if slices.Contains(fm.Metadata.Hermes.RequiresTools, "mcp__haunt__"+tool) ||
+				strings.Contains(string(raw), "If you have `mcp__haunt__"+tool+"`") {
+				continue
+			}
+			t.Errorf("%s names mcp__haunt__%s without requiring it or making it conditional", e.Name(), tool)
 		}
 	}
 }

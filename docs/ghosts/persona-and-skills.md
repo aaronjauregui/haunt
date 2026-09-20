@@ -78,6 +78,8 @@ The model acts through tools haunt offers it. Their hermes names are
 | `show` | put a picture painted earlier back in the balloon, by its name (`imagine`) |
 | `pictures` | list the pictures painted, newest first, with prompts and captions (`imagine`) |
 | `style` | the house style added to every picture: read it, `set` it, or `reset` it to the package's, and the change only on a turn the person started (`imagine`) |
+| `search` | put a query to the person's search provider and get a handful of results (`web`) |
+| `read_page` | fetch one public http or https page and read its text, a piece at a time (`web`) |
 | `look` | a one-sentence description of the focused window (`screen`) |
 | `intend` | take something on: with `delay_ms` an errand that comes back, without it a goal kept an eye on |
 | `resolve`, `set_aside`, `intentions` | discharge one, stop watching one, list them |
@@ -85,16 +87,18 @@ The model acts through tools haunt offers it. Their hermes names are
 | `<server>__<tool>` | a tool from a declared `[[tool]]` server (`tools`) |
 
 Hermes's own `memory`, `session_search` and skill tools are there too.
-Nothing else is: no shell, files, browser or web.
+Nothing else is: no shell and no files. A ghost that does not declare
+`web` is not offered `search` or `read_page` at all, and reaches nothing
+beyond the machine.
 
 ## Skills
 
 A skill is a Markdown procedure the model loads when one applies, in the
 agentskills format hermes uses. The model sees a one-line index of names
 and descriptions and loads a skill with `skill_view` when it fits. Haunt
-ships five of its own for every ghost (a morning check-in, a focus
-session, a weekly review, keeping an eye on a goal, drawing on request);
-a ghost's package can carry more.
+ships six of its own for every ghost (a morning check-in, a focus
+session, a weekly review, keeping an eye on a goal, drawing on request,
+looking something up); a ghost's package can carry more.
 
 Put each in `skills/<name>/SKILL.md` next to the manifest:
 
