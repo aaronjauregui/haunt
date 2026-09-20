@@ -104,6 +104,12 @@ func Load() (*File, error) {
 	if err := f.Awareness.derive(path); err != nil {
 		return nil, err
 	}
+	// What [backend] points at is checked here rather than on first use,
+	// so that a file it cannot read is named while the person is still
+	// looking at the config that names it.
+	if err := f.Backend.Validate(); err != nil {
+		return nil, fmt.Errorf("in %s: %w", path, err)
+	}
 	return f, nil
 }
 

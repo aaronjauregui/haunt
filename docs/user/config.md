@@ -42,6 +42,7 @@ steps = 0                       # ComfyUI tuning, defaults when zero
 cfg = 0.0
 sampler = ""
 negative = ""
+workflow = ""                   # ComfyUI only: a graph of your own; see below
 
 [backend.vision]                # optional: lets a ghost with `screen` look
 base_url = ""                   # OpenAI-compatible, e.g. "http://localhost:11434/v1"; empty disables looking
@@ -74,6 +75,64 @@ Any OpenAI-compatible endpoint works for images and vision: Ollama,
 llama.cpp server, vLLM, cloud providers. Cloud keys are named, not
 stored: set `api_key_env` and haunt reads that variable from its own
 environment.
+
+## Drawing with your own ComfyUI workflow
+
+`[backend.image] workflow` points at a graph you built in ComfyUI and
+exported with **Save (API format)** — the API export, not the one that
+saves the canvas. Haunt submits that graph for every picture, with the
+parts that vary substituted into it:
+
+| In the graph | Becomes |
+|---|---|
+| `{{prompt}}` | what the ghost is drawing, its style already folded in. Required, at least once. |
+| `{{negative}}` | `negative` above, joined with whatever the ghost's package asks to keep out. |
+| `{{seed}}` | a fresh random seed, recorded with the picture. |
+| `{{width}}`, `{{height}}` | `size`, or 1024 when it is empty. |
+
+`{{prompt}}` and `{{negative}}` are substituted inside a string, so
+`"ugly, {{negative}}"` works. `{{seed}}`, `{{width}}` and `{{height}}`
+must be the whole value, because they become numbers.
+
+A minimal SDXL graph, with only the nodes that matter shown:
+
+```json
+{
+  "4": {"class_type": "CheckpointLoaderSimple",
+        "inputs": {"ckpt_name": "sd_xl_base_1.0.safetensors"}},
+  "6": {"class_type": "CLIPTextEncode",
+        "inputs": {"clip": ["4", 1], "text": "{{prompt}}"}},
+  "7": {"class_type": "CLIPTextEncode",
+        "inputs": {"clip": ["4", 1], "text": "{{negative}}"}},
+  "5": {"class_type": "EmptyLatentImage",
+        "inputs": {"width": "{{width}}", "height": "{{height}}", "batch_size": 1}},
+  "3": {"class_type": "KSampler",
+        "inputs": {"model": ["4", 0], "positive": ["6", 0], "negative": ["7", 0],
+                   "latent_image": ["5", 0], "seed": "{{seed}}", "steps": 25,
+                   "cfg": 7.0, "sampler_name": "dpmpp_2m", "scheduler": "karras",
+                   "denoise": 1.0}},
+  "8": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["4", 2]}},
+  "9": {"class_type": "SaveImage", "inputs": {"images": ["8", 0], "filename_prefix": "haunt"}}
+}
+```
+
+The graph owns how the picture is made, so `model`, `steps`, `cfg` and
+`sampler` are ignored when a workflow is set; haunt says so at startup if
+you have set them anyway. `size` and `negative` still apply, through the
+placeholders. The graph needs at least one `SaveImage` or `PreviewImage`
+node — that is where haunt collects the picture — and if it has several,
+the lowest-numbered one wins.
+
+The file is read and checked when haunt starts. A graph that is the wrong
+export, has nowhere to put the prompt, or hands back no picture is an
+error naming the file, rather than a ghost that says it cannot draw.
+
+**Prompts suit the model.** SD 1.5 and SDXL want comma-separated tags
+(`a whale, underwater, soft light, wide shot`); Flux and the newer models
+want a sentence. That is a property of the checkpoint you chose, so it
+belongs here rather than in a ghost: a ghost's `[imagine] style` is
+appended to whatever it wrote, and writing that style in the shape your
+model likes is what makes the two read as one prompt.
 
 ## Environment
 
