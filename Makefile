@@ -1,6 +1,6 @@
 GO ?= go
 
-.PHONY: build test vet fmt eval eval-baseline demo demo-ai demo-troupe demo-seriko demo-headless install-user clean
+.PHONY: build test vet fmt eval eval-baseline demo demo-ai demo-troupe demo-seriko demo-headless demo-record install-user clean
 
 build:
 	$(GO) build ./...
@@ -78,6 +78,24 @@ demo-seriko:
 # Same, but headless: no visible window, used to smoke-test the demo plumbing.
 demo-headless:
 	WLR_BACKENDS=headless ./scripts/demo.sh
+
+# Record the README's GIF: runs the demo, captures the nested sway window
+# and encodes it. Needs wf-recorder and ffmpeg. Recording starts and stops
+# on Enter, so a hermes ghost's slow wake stays out of the take.
+#   make demo-record GHOST=wisp
+# The capture is kept beside the GIF, so a take is recut without being
+# performed again. CROP keeps the balloon's text at a readable size and
+# SEGMENTS drops the dead time; scripts/record.sh says why for both. The
+# GIF in the README is this take, whose shape is worth keeping: dragged,
+# right-clicked and typed at, answered, asked again from the menu,
+# answered again.
+#   make demo-record RAW=docs/media/demo-raw.mp4 \
+#       CROP=580:300:180:100 \
+#       SEGMENTS=7.90-10.20,11.90-12.80,14.40-15.10,16.30-19.60,\
+#                26.35-29.30,31.38-34.60,41.00-45.40
+# OUT, GIF_WIDTH and GIF_FPS override where it lands and how big it is.
+demo-record:
+	./scripts/record.sh
 
 # Install for daily use: the binary on your PATH and a systemd user unit,
 # so the ghost is there when you log in. See dist/README.md.

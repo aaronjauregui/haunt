@@ -4,3 +4,5 @@
 *.test
 /tmp/
 /.eval/
+# Recording takes; the encoded GIF is what ships.
+*-raw.mp4
