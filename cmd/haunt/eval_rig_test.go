@@ -11,6 +11,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -104,6 +106,13 @@ type rigOptions struct {
 	// Screen declares the screen capability, for the look tool. haunt run
 	// on a ghost's directory grants what it declares, so no prompt comes.
 	Screen bool
+	// Web declares the web capability and points [backend.search] at a
+	// canned SearXNG the trial runs itself, so a case about looking things
+	// up grades what the ghost did with an answer rather than what the
+	// open web happened to say that morning. Search reaches it because a
+	// configured provider is dialled unguarded; read_page could not, which
+	// is why no case here reads a page.
+	Web bool
 	// Neighbour builds testdata/teller as a second ghost, moth, run in the
 	// same troupe as wisp so each sees what the other does in public;
 	// neighbour cues it. A troupe takes no -state, so the ghosts' state is
@@ -192,13 +201,16 @@ func newEvalRig(t *testing.T, opts rigOptions) (*evalRig, error) {
 	if err != nil {
 		return nil, err
 	}
+	if opts.Web {
+		copied += rigSearchTOML(t)
+	}
 	if err := os.WriteFile(filepath.Join(r.hr.CfgDir, "config.toml"), []byte(cfg+copied+"\n"+opts.Config), 0o644); err != nil {
 		return nil, err
 	}
 	if err := rigBuild(r.hr.Bin, "."); err != nil {
 		return nil, err
 	}
-	w := wispOptions{Screen: opts.Screen}
+	w := wispOptions{Screen: opts.Screen, Web: opts.Web}
 	if opts.Notes {
 		r.Notes = filepath.Join(dir, "notes.txt")
 		if opts.NotesSeed != "" {
@@ -1069,6 +1081,8 @@ type wispOptions struct {
 	Occasion, OccasionCron string
 	// Screen declares the screen capability, for look.
 	Screen bool
+	// Web declares the web capability, for search and read_page.
+	Web bool
 }
 
 // wispPersona is wisp's character, as the demo has it. The judged cases
@@ -1085,6 +1099,9 @@ func writeWisp(dir string, o wispOptions) error {
 	caps := `"message", "llm", "imagine", "window", "tell"`
 	if o.Screen {
 		caps += `, "screen"`
+	}
+	if o.Web {
+		caps += `, "web"`
 	}
 	if o.NotesServer != "" {
 		caps += `, "tools"`
@@ -1656,4 +1673,40 @@ func TestRigExtensionsOnFakeHermes(t *testing.T) {
 	if !strings.Contains(ev.Files["notes"], "oat milk") {
 		t.Errorf("notes = %q, want the seed", ev.Files["notes"])
 	}
+}
+
+// cannedAnswer is the fact the canned SearXNG knows and the open web
+// cannot accidentally supply: a case greps the ghost's reply for it, so it
+// has to be a word that could only have come from a search.
+const cannedAnswer = "Ouagadougou"
+
+// rigSearchTOML starts a SearXNG that answers every query the same way and
+// points the trial's config at it. A canned provider is what makes a
+// look-it-up case gradable: the answer is known, so "did it search and
+// then say what the search said" is one check rather than a guess about
+// whatever the live web returned.
+//
+// It answers only the JSON format, as a SearXNG with json in
+// search.formats does. The results point at a page nothing fetches: the
+// page dialler refuses loopback, so a case here grades searching and
+// answering from the snippets, never reading.
+func rigSearchTOML(t *testing.T) string {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("format") != "json" {
+			http.Error(w, "format not enabled", http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"results": []map[string]string{{
+			"title":   "Burkina Faso",
+			"url":     "https://example.invalid/burkina-faso",
+			"content": "The capital of Burkina Faso is " + cannedAnswer + ", which is also its largest city.",
+		}, {
+			"title":   "Ouagadougou",
+			"url":     "https://example.invalid/ouagadougou",
+			"content": cannedAnswer + " has been the capital since 1960.",
+		}}})
+	}))
+	t.Cleanup(srv.Close)
+	return fmt.Sprintf("\n[backend.search]\nbackend = \"searxng\"\nbase_url = %q\nresults = 3\n", srv.URL)
 }
