@@ -7,6 +7,13 @@ Wayland compositor that implements `zwlr_layer_shell_v1`: sway, Hyprland,
 and others in the wlroots family, and KDE. GNOME does not implement it and
 is not supported. There is no X11 path.
 
+A compositor that cannot keep a ghost can still show you one. The demos
+(`make demo`, and the rest in the Makefile) run sway nested inside
+whatever session is already running, which is enough to try a ghost
+without changing compositor; `WLR_BACKENDS=x11 ./scripts/demo.sh` does
+the same from an X11 session. Nothing about that path is suitable for
+daily use: a nested compositor is a window, not a desktop.
+
 Fullscreen detection and window awareness ask the compositor over its own
 IPC. Sway and Hyprland are recognised from the environment. On any other
 compositor the ghost still runs, but assumes nothing is fullscreen and
