@@ -17,6 +17,11 @@ func TestCutPose(t *testing.T) {
 		{"[first boot — face neutral] Well.", "", "Well."},
 		{"[ happy ] Hi", "happy", "Hi"},
 		{"[a] [b] two", "a", "[b] two"},
+		{"… [surprised] First words…", "surprised", "… First words…"},
+		{"... [happy] Oh.", "happy", "... Oh."},
+		{"— [sad] Gone.", "sad", "— Gone."},
+		{`"[happy] Hi"`, "happy", `"Hi"`},
+		{"..........[happy] too much", "", "..........[happy] too much"},
 		{"[happy] NO_REPLY", "happy", "NO_REPLY"},
 		{"plain", "", "plain"},
 	} {
@@ -32,6 +37,7 @@ func TestMaybePose(t *testing.T) {
 	for in, want := range map[string]bool{
 		"": true, " ": true, "[": true, "[hap": true, " [happy": true,
 		"[happy]": false, "[happy] Oh": false, "Oh": false, "[not a": true,
+		"…": true, "… [surpri": true, "… words": false, "...": true,
 		"[" + strings.Repeat("x", 81): false, "[two\nlines": false,
 	} {
 		if got := MaybePose(in); got != want {

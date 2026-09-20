@@ -191,7 +191,9 @@ finished reply. Any short bracketed opening is taken off, a pose the
 shell has or not: told to open with a bracket, a model also opens with
 labels for what it did (`[memory add]`) or stage directions, and none of
 those is for the balloon. One that names no pose falls back to the
-lexicon. The `say`
+lexicon. A little punctuation may come before the bracket, `… [surprised]
+First words`, where the model reads the tag as part of the speech; the
+punctuation is the ghost's and stays in the words. The `say`
 tool reads a tag the same way. Hermes keeps the tag in the session, so
 the client takes it off assistant messages as it reads them, and
 `history` and the evals see the words alone; the evals fail a trial
