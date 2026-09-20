@@ -48,6 +48,10 @@ type Store interface {
 	// makes wants a single named key — the journal, the intentions, where
 	// the ghost is standing.
 	Get(key string) (value string, ok bool, err error)
+	// Delete forgets one key, for the state the driver keeps on the
+	// person's behalf and can be asked to drop again: a picture past the
+	// gallery's limit, a house style reset to the package's.
+	Delete(key string) error
 	// All returns the complete KV map, handed to brains at boot. It is
 	// genuinely a whole-store read and should be treated as one: the
 	// driver does it once per session (see boot).
@@ -270,7 +274,12 @@ type Ghost struct {
 	// expressionMode is [animation] expression_inference (expression.go).
 	expressionMode string
 	cacheDir       string
-	aiMu           sync.Mutex // one AI request at a time per ghost
+	// picturesDir holds the gallery's PNGs (gallery.go); picMu guards the
+	// pictures this turn has shown, which become their caption.
+	picturesDir string
+	picMu       sync.Mutex
+	turnPics    []string
+	aiMu        sync.Mutex // one AI request at a time per ghost
 
 	// Typed input (see input.go).
 	inputMu sync.Mutex
@@ -375,6 +384,9 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	m, err := LoadManifest(dir)
 	if err != nil {
 		return err
+	}
+	for _, w := range m.Warnings() {
+		log.Warn(hlog.Session, "%s: %s", filepath.Join(dir, "ghost.toml"), w)
 	}
 	// Before anything is opened: a config file nobody can parse should fail
 	// on the terminal the person is standing at, not halfway through
@@ -545,6 +557,7 @@ func (g *Ghost) openStore() error {
 		stateDir = filepath.Join(base, "haunt", "ghosts", g.manifest.Ghost.Name)
 	}
 	g.cacheDir = filepath.Join(stateDir, "cache")
+	g.picturesDir = filepath.Join(stateDir, "pictures")
 
 	if g.opts.Store != nil {
 		g.store = g.opts.Store

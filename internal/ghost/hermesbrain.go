@@ -571,6 +571,7 @@ func (b *hermesBrain) run(t hermesTurn) (out turnOutcome) {
 		t.refund = noRefund
 	}
 	userDriven := g.respondingToUser()
+	g.forgetTurnPictures()
 	// A deferred closure, not a deferred call: waiting may be started
 	// below, after the capability check.
 	waiting := t.waiting
@@ -725,6 +726,12 @@ func (b *hermesBrain) run(t hermesTurn) (out turnOutcome) {
 		g.log.Debug(hlog.Brain, "the ghost chose to say nothing")
 		after(false)
 		return
+	}
+	// The words that end a turn are the caption of the picture it showed:
+	// the line a person scrolling the gallery recognizes it by, which the
+	// prompt — written for an image model — never is.
+	if id, ok := g.turnPicture(); ok {
+		g.captionPicture(id, text)
 	}
 	mu.Lock()
 	drewNow, facedNow := drew, faced
@@ -1133,7 +1140,7 @@ func (g *Ghost) hermesPersona() hermes.Persona {
 		}
 	}
 	for _, c := range []struct{ cap, what string }{
-		{"imagine", "paint a picture in your balloon"},
+		{"imagine", "paint a picture in your balloon, and show one you painted before, in a style of your own that they can change"},
 		{"screen", "look at the window they have open"},
 		{"tell", "speak to the other ghosts"},
 		{"tools", "use the tools listed in your schemas to do things for them"},

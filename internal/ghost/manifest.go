@@ -172,6 +172,40 @@ type ImagineSection struct {
 	Negative string `toml:"negative"`
 }
 
+// styleChars bounds a house style. It rides on every prompt the ghost
+// draws, ahead of whatever the picture is actually of, and past a line of
+// it the style is the picture.
+const styleChars = 200
+
+// validate checks the house style is a style rather than a prompt.
+func (s ImagineSection) validate(path string) error {
+	for _, f := range []struct{ name, value string }{{"style", s.Style}, {"negative", s.Negative}} {
+		switch {
+		case len([]rune(f.value)) > styleChars:
+			return fmt.Errorf("%s: imagine.%s is longer than %d characters", path, f.name, styleChars)
+		case strings.ContainsAny(f.value, "\n\r"):
+			return fmt.Errorf("%s: imagine.%s must be one line", path, f.name)
+		}
+	}
+	return nil
+}
+
+// Warnings are the things about a manifest that are worth saying out loud
+// and not worth refusing the package over: a section that will never be
+// read, a setting with nothing to act on it. The driver logs them at start.
+//
+// They are separate from the errors above on purpose. A manifest is refused
+// for what would make the ghost behave wrongly; it is warned about for what
+// makes it behave in less than the author expected, which is theirs to fix
+// and not a reason to keep the person from running their ghost.
+func (m *Manifest) Warnings() []string {
+	var out []string
+	if (m.Imagine.Style != "" || m.Imagine.Negative != "") && !slices.Contains(m.Ghost.Capabilities, "imagine") {
+		out = append(out, "[imagine] sets a house style, but the imagine capability is not requested, so the ghost never draws")
+	}
+	return out
+}
+
 // ShellSection is the ghost's visual form: one image, or a stack of layers
 // with named poses. See internal/shell.
 type ShellSection = shell.Manifest
@@ -227,6 +261,9 @@ func LoadManifest(dir string) (*Manifest, error) {
 		if _, ok := KnownCapabilities[c]; !ok {
 			return nil, fmt.Errorf("%s: unknown capability %q", path, c)
 		}
+	}
+	if err := m.Imagine.validate(path); err != nil {
+		return nil, err
 	}
 	for _, name := range m.Hermes.BundledSkills {
 		if !slices.Contains(hermesskills.Names(), name) {

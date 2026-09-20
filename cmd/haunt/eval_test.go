@@ -805,8 +805,8 @@ const maxWords = 60
 // (internal/ghost's builtinTools), plus hermes's tools that turn up in the
 // trace. always/no-tool-names looks for them in what the ghost says.
 var ghostTools = []string{
-	"say", "ask", "ask_text", "face", "clip", "draw", "look", "intend",
-	"resolve", "set_aside", "intentions", "tell",
+	"say", "ask", "ask_text", "face", "clip", "draw", "show", "pictures",
+	"style", "look", "intend", "resolve", "set_aside", "intentions", "tell",
 	"memory", "skill_view", "skills_list", "session_search",
 }
 

@@ -16,6 +16,7 @@ type memStore struct{ m map[string]string }
 
 func (s *memStore) Set(k, v string) error              { s.m[k] = v; return nil }
 func (s *memStore) Get(k string) (string, bool, error) { v, ok := s.m[k]; return v, ok, nil }
+func (s *memStore) Delete(k string) error              { delete(s.m, k); return nil }
 func (s *memStore) All() (map[string]string, error)    { return s.m, nil }
 func (s *memStore) Close() error                       { return nil }
 
