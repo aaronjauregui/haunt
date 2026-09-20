@@ -18,12 +18,15 @@ import (
 // it did. What a ghost on hermes remembers about the person is hermes
 // memory, readable in the profile's memories/ (and editable by telling the
 // ghost). -skills lists the routines it has on hermes, and which of them it
-// wrote itself.
+// wrote itself. -style is the look its pictures have, and whether the ghost
+// was asked for one of its own.
 func cmdJournal(args []string) error {
 	fs := flag.NewFlagSet("journal", flag.ExitOnError)
 	state := fs.String("state", "", "override state directory")
 	intentions := fs.Bool("intentions", false, "print what it is still meaning to do")
 	skills := fs.Bool("skills", false, "list its hermes skills: the ones it learned, the package's and haunt's")
+	style := fs.Bool("style", false, "the style it draws in, and where that came from")
+	reset := fs.Bool("reset", false, "with -style: go back to the style its package ships")
 	fs.Parse(args)
 
 	stateDir, err := resolveStateDir(*state, fs.Args())
@@ -44,6 +47,13 @@ func cmdJournal(args []string) error {
 		return err
 	}
 	defer s.Close()
+	if *style {
+		name := filepath.Base(stateDir)
+		if len(fs.Args()) == 1 {
+			name = fs.Args()[0]
+		}
+		return styleCmd(s, name, *reset)
+	}
 	if *intentions {
 		return printIntentions(s)
 	}
@@ -111,6 +121,59 @@ func printSkills(name string) error {
 		if n == 0 {
 			fmt.Println("  (none)")
 		}
+	}
+	return nil
+}
+
+// styleCmd prints the style a ghost draws in, or puts it back to its
+// package's.
+//
+// The ghost can be asked for a standing change to its own look, which is
+// the kind of thing a person says once and then lives with for months. So
+// it is readable and undoable from the terminal, without asking the ghost:
+// both what it is drawing in and what its author meant it to draw in, since
+// a package that has been updated since may mean something else by now.
+func styleCmd(s *store.Store, name string, reset bool) error {
+	seed := ""
+	if dir, err := library.PkgDir(name); err == nil {
+		if m, err := ghost.LoadManifest(dir); err == nil {
+			seed = m.Imagine.Style
+		}
+	}
+	if reset {
+		if err := s.Delete(ghost.StyleStoreKey); err != nil {
+			return err
+		}
+		fmt.Println("It draws in its package's style again.")
+	}
+	raw, ok, err := s.Get(ghost.StyleStoreKey)
+	if err != nil {
+		return err
+	}
+	changed, decodeErr := ghost.StyleChange{}, error(nil)
+	if ok {
+		changed, decodeErr = ghost.DecodeStyle(raw)
+		if decodeErr != nil {
+			return fmt.Errorf("the style is corrupt: %w", decodeErr)
+		}
+	}
+	switch {
+	case changed.Style != "":
+		fmt.Printf("Draws in: %s\n", changed.Style)
+		fmt.Printf("  asked for on %s\n", changed.At.Format("2006-01-02 15:04"))
+		switch {
+		case seed == "":
+			fmt.Println("  its package asks for no style of its own")
+		case changed.Seed != seed:
+			fmt.Printf("  its package asked for %q then, and asks for %q now\n", changed.Seed, seed)
+		default:
+			fmt.Printf("  its package asks for %q\n", seed)
+		}
+	case seed != "":
+		fmt.Printf("Draws in: %s\n", seed)
+		fmt.Println("  its package's own style, unchanged")
+	default:
+		fmt.Println("Draws in: nothing in particular")
 	}
 	return nil
 }
