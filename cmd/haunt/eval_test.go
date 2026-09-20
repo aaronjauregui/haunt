@@ -806,7 +806,8 @@ const maxWords = 60
 // trace. always/no-tool-names looks for them in what the ghost says.
 var ghostTools = []string{
 	"say", "ask", "ask_text", "face", "clip", "draw", "show", "pictures",
-	"style", "look", "intend", "resolve", "set_aside", "intentions", "tell",
+	"style", "search", "read_page", "look", "intend", "resolve", "set_aside",
+	"intentions", "tell",
 	"memory", "skill_view", "skills_list", "session_search",
 }
 

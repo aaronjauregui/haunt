@@ -300,13 +300,26 @@ Tools that only speak or read are not marked.
 | `ask` | `text`, `choices[1..9]` | the choice, `""` if dismissed | none; blocks |
 | `ask_text` | `prompt` | typed text | none; blocks |
 | `face`, `clip` | `pose` / `name` | ok | reduced motion, fullscreen |
-| `draw` | `prompt`, `fresh?` | image path | `imagine`, image budget, fullscreen |
+| `draw` | `prompt`, `style?`, `see?` | the picture's name and prompt | `imagine`, image budget, fullscreen |
+| `show` | `id` | the picture's name and prompt | `imagine` |
+| `pictures` | `count?` | the gallery, newest first | `imagine` |
+| `style` | `set?`, `reset?` | the style it draws in | a set or reset only on the person's turn |
+| `search` | `query`, `count?` | results, in the untrusted-content envelope | `web`, declared, search budget, the unprompted policy |
+| `read_page` | `url`, `from?` | a piece of the page, in the same envelope | `web`, declared, search budget, the unprompted policy |
 | `look` | `question?` | description | `screen`, vision backend, ignore list, fullscreen |
 | `intend` | `text`, `delay_ms?`, `name?` | name | none |
 | `resolve`, `set_aside` | `name` | ok | none |
 | `intentions` | | list | none |
 | `tell` | `ghost`, `text` | ok | `tell` |
 | `<server>__<tool>` | the server's schema | the result, cut to 2000 chars | `tools`, per-tool consent, tool budget, marks |
+
+Every verb is listed whatever the manifest declared, and refused when it
+is used, with one exception: a tool with `declared` set in the table
+(`search`, `read_page`) is left out of the list entirely for a ghost whose
+package never asked for the capability. That is what hides `look-it-up`
+from a ghost with no web — hermes filters a skill by the tools its
+`requires_tools` names — rather than having it claim to look things up and
+be refused.
 
 Deliberately absent: `remember` and `note` (hermes memory is the one
 writer of what the model concludes), `move` (nothing a model should
@@ -322,6 +335,39 @@ fit in 64 characters.
 
 The driver's menu on hermes: "What can you do?" (a `help` turn), "Keep
 an eye on what I'm working on" (`watch`), "Nothing, thanks".
+
+## The web
+
+`internal/ghost/web.go` is the tool half of `search` and `read_page`;
+`internal/backend/web.go` is the fetching, the dialer guard and the
+untrusted-content envelopes. The driver owns the tools rather than
+enabling hermes's own `web` toolset, because the key, the ration, the
+consent and the journal are all the driver's, and a toolset hermes
+enables is none of those.
+
+**Unprompted use.** The driver cannot see which skill the model loaded —
+`skill_view` is hermes's, and nothing reports it — so "only where a skill
+says to" is approximated by where a search may happen at all. On a turn
+nobody started, `unprompted` decides:
+
+| Mode | An event turn may search |
+|---|---|
+| `never` | never; refused with "only when the person asks" |
+| `skills` | on `occasion`, `intention_due`, `goal_quiet` and `boot` |
+| `any` | on any kind |
+
+The kinds `skills` leaves out — `session`, `idle`, `observed`, `told`,
+`help` — are the ones whose envelope carries what the person has on
+screen, and a window title is the thing that must never become a query.
+The turn's kind and whether somebody is waiting on it are recorded when
+the turn starts (`startWebTurn`), because a tool call arrives on the
+control socket and cannot see the turn it belongs to. Every unprompted
+call also spends `unprompted_search_per_hour` before the general ration
+and is refused outright during quiet hours; each refusal names its
+reason, so the model says nothing rather than inventing an answer.
+
+The approximation is loose on purpose: an `occasion` turn that loaded no
+skill can still search. The ration and quiet hours are what bound it.
 
 ## Memory
 

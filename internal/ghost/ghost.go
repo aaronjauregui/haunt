@@ -279,7 +279,10 @@ type Ghost struct {
 	picturesDir string
 	picMu       sync.Mutex
 	turnPics    []string
-	aiMu        sync.Mutex // one AI request at a time per ghost
+	// web is what the turn in flight is, and whether anything from the web
+	// has entered it (web.go).
+	web  webState
+	aiMu sync.Mutex // one AI request at a time per ghost
 
 	// Typed input (see input.go).
 	inputMu sync.Mutex

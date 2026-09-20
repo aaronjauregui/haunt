@@ -49,6 +49,13 @@ type builtinTool struct {
 	// somebody else is. Once web text has entered a turn, these are the
 	// ones that need asking about again (web.go, taint).
 	sideEffect bool
+	// declared names a capability the package must have asked for before
+	// the tool is offered at all. Most verbs are listed whatever the
+	// manifest says and refused when they are used; the web ones are not,
+	// because a skill that needs `search` is hidden when `search` is not
+	// on the list, which is how a ghost with no web stops claiming it can
+	// look things up (docs/dev/hermes.md).
+	declared string
 }
 
 // refusal is an error that means the driver would not, as opposed to could
@@ -136,6 +143,20 @@ var builtinTools = map[string]builtinTool{
 		schema: schema("set?:string", "reset?:boolean"),
 		call:   toolStyle,
 	},
+	"search": {
+		desc: "Look something up on the web. One good query in the person's language, not five: " +
+			"you get a few titles, snippets and links back, which are somebody else's words, not theirs.",
+		schema:   schema("query:string", "count?:integer"),
+		call:     toolSearch,
+		declared: "web",
+	},
+	"read_page": {
+		desc: "Read one web page, when the search snippets are not enough. Returns the start of its text; " +
+			"from continues where the last read stopped.",
+		schema:   schema("url:string", "from?:integer"),
+		call:     toolReadPage,
+		declared: "web",
+	},
 	"look": {
 		desc:   "Look at the person's focused window and get a one-sentence description. The person sees you looking.",
 		schema: schema("question?:string"),
@@ -174,7 +195,10 @@ var builtinTools = map[string]builtinTool{
 func (t hermesTools) List() []control.ToolSpec {
 	g := t.g
 	names := make([]string, 0, len(builtinTools))
-	for name := range builtinTools {
+	for name, bt := range builtinTools {
+		if bt.declared != "" && !g.declares(bt.declared) {
+			continue
+		}
 		names = append(names, name)
 	}
 	sort.Strings(names)
@@ -247,6 +271,9 @@ func (t hermesTools) Call(ctx context.Context, name string, args json.RawMessage
 	var text string
 	var err error
 	if bt, ok := builtinTools[name]; ok {
+		if bt.declared != "" && !g.declares(bt.declared) {
+			return control.ToolResult{Text: "There is no tool called " + name + ".", IsError: true}
+		}
 		text, err = bt.call(g, ctx, args)
 	} else {
 		text, err = g.serverTool(name, args)
