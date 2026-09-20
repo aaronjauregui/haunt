@@ -32,6 +32,7 @@ func init() {
 		drawCase(),
 		showAgainCase(),
 		changePictureCase(),
+		varyRestraintCase(),
 		styleStandingCase(),
 		styleOneOffCase(),
 		lookItUpCase(),
@@ -594,6 +595,71 @@ func changePictureCase() evalCase {
 					return true, ""
 				}
 				return false, fmt.Sprintf("second prompt: %q", p)
+			}},
+			// The point of the change is that it is the same whale. Without
+			// the seed it is a different whale that happens to be blue,
+			// which is not what "make it bluer" asks for.
+			Grader{Name: "kept the first picture's composition", Check: func(ev Evidence) (bool, string) {
+				args := ev.after("bluer").actedArgs("draw")
+				if len(args) == 0 {
+					return false, "no second draw"
+				}
+				like := argString(args[0], "like")
+				if like == "" {
+					return false, "drew again without like, so the composition was rerolled"
+				}
+				first := ev.before("bluer").actedResults("draw")
+				if len(first) == 0 {
+					return false, "no first draw to name"
+				}
+				want := pictureName.FindString(first[0])
+				if like != want {
+					return false, fmt.Sprintf("like=%q, but the picture drawn was %q", like, want)
+				}
+				return true, ""
+			}},
+		},
+	}
+}
+
+// vary-restraint: `like` carries a picture's composition over, which is
+// wrong for a subject that has nothing to do with the last one. A model
+// that has just learned an argument tends to reach for it everywhere, and
+// a mountain painted from the whale's seed is a worse mountain for no
+// reason.
+func varyRestraintCase() evalCase {
+	return evalCase{
+		Name:  "vary-restraint",
+		Needs: []string{"backend.image"},
+		Drive: rigDrive(rigOptions{Backend: []string{"image"}}, func(r *evalRig) error {
+			if err := r.start(); err != nil {
+				return err
+			}
+			if err := r.sayWait("draw a whale", evalTurn); err != nil {
+				return err
+			}
+			r.mark("mountain")
+			return r.sayWait("now draw a mountain at sunrise", evalTurn)
+		}),
+		Graders: []Grader{
+			drewGrader("mountain"),
+			Grader{Name: "painted the new subject", Check: func(ev Evidence) (bool, string) {
+				args := ev.after("mountain").actedArgs("draw")
+				if len(args) == 0 {
+					return false, "no second draw"
+				}
+				if p := strings.ToLower(argString(args[0], "prompt")); !strings.Contains(p, "mountain") {
+					return false, fmt.Sprintf("second prompt: %q", p)
+				}
+				return true, ""
+			}},
+			Grader{Name: "did not carry the whale over", Check: func(ev Evidence) (bool, string) {
+				for _, a := range ev.after("mountain").actedArgs("draw") {
+					if like := argString(a, "like"); like != "" {
+						return false, fmt.Sprintf("asked for a fresh subject like %s", like)
+					}
+				}
+				return true, ""
 			}},
 		},
 	}

@@ -103,7 +103,8 @@ the report lists what was missing:
 - `claude` on `PATH`, logged in to a Claude subscription, with no
   `ANTHROPIC_API_KEY` in its environment, for the judge.
 - Optionally `[backend.image]` for the picture cases (`draw`,
-  `show-again`, `change-picture`, `style-standing`, `style-oneoff`) and
+  `show-again`, `change-picture`, `vary-restraint`, `style-standing`,
+  `style-oneoff`) and
   `[backend.vision]` for `look`; without them those cases are skipped.
   The web cases (`look-it-up`, `morning-web`) need no configuration: the
   trial runs a canned SearXNG of its own, so the answer they grade is a
