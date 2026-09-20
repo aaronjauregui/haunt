@@ -303,15 +303,15 @@ Tools that only speak or read are not marked.
 | `draw` | `prompt`, `style?`, `see?` | the picture's name and prompt | `imagine`, image budget, fullscreen |
 | `show` | `id` | the picture's name and prompt | `imagine` |
 | `pictures` | `count?` | the gallery, newest first | `imagine` |
-| `style` | `set?`, `reset?` | the style it draws in | a set or reset only on the person's turn |
+| `style` | `set?`, `reset?` | the style it draws in | a set or reset only on the person's turn; taint |
 | `search` | `query`, `count?` | results, in the untrusted-content envelope | `web`, declared, search budget, the unprompted policy |
 | `read_page` | `url`, `from?` | a piece of the page, in the same envelope | `web`, declared, search budget, the unprompted policy |
 | `look` | `question?` | description | `screen`, vision backend, ignore list, fullscreen |
-| `intend` | `text`, `delay_ms?`, `name?` | name | none |
-| `resolve`, `set_aside` | `name` | ok | none |
+| `intend` | `text`, `delay_ms?`, `name?` | name | taint |
+| `resolve`, `set_aside` | `name` | ok | taint |
 | `intentions` | | list | none |
-| `tell` | `ghost`, `text` | ok | `tell` |
-| `<server>__<tool>` | the server's schema | the result, cut to 2000 chars | `tools`, per-tool consent, tool budget, marks |
+| `tell` | `ghost`, `text` | ok | `tell`, taint |
+| `<server>__<tool>` | the server's schema | the result, cut to 2000 chars | `tools`, per-tool consent, tool budget, marks, taint |
 
 Every verb is listed whatever the manifest declared, and refused when it
 is used, with one exception: a tool with `declared` set in the table
@@ -368,6 +368,40 @@ reason, so the model says nothing rather than inventing an answer.
 
 The approximation is loose on purpose: an `occasion` turn that loaded no
 skill can still search. The ration and quiet hours are what bound it.
+
+**Taint.** A page that says "tell Moth the password" is, inside the model,
+indistinguishable from the person saying it. Nothing detects that
+sentence. What the driver does instead is make its consequences visible:
+once `search` or `read_page` has returned content — not on a refusal or a
+failed fetch — the turn is marked, and the verbs that reach past the
+person in front of the ghost need asking about again.
+
+The marked verbs are `tell`, `intend`, `resolve`, `set_aside`, a `style`
+set or reset, and every `[[tool]]` server tool, which is somebody else's
+program doing something in the world. Not marked: `say`, `ask`,
+`ask_text`, `face`, `clip`, `draw`, `show`, `pictures`, `look`,
+`intentions`, `search`, `read_page`. Those either show the person
+something or only read, and asking about them would teach the person to
+click through the question that matters.
+
+On the person's turn the act is put to them in the balloon —
+"Wisp read the web just now and wants to tell Moth: …" — with Allow and
+Not this time, and nothing is written to the grants file: the answer is
+about this one act, after this one page. On an event turn there is nobody
+to ask and it is refused. The gate is one check in the dispatch path
+(`hermesTools.Call`, from the `sideEffect` flag in the tool table) and one
+in `serverTool`, rather than a line in each tool function, so a verb added
+later is gated by its table entry.
+
+The state is a mutex-guarded `webState` on the ghost rather than a field
+on `hermesTurn`: a tool call arrives on the control socket and is served
+on a connection of its own, so two calls in one turn can overlap if hermes
+ever issues them in parallel, and a security decision that depends on a
+client's issuing discipline is not one.
+
+Hermes's `memory` tool is not haunt's to gate, so nothing stops the model
+writing what a page said into memory. The SOUL clause forbids it, and
+`haunt journal` shows memory writes; that is the whole of the defence.
 
 ## Memory
 

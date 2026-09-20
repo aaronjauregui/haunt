@@ -99,6 +99,27 @@ Every search and every page read goes in the journal, with the query and
 the address, and to no other ghost in the room: `haunt journal` is where
 you see what it looked up.
 
+A page can say anything, including "tell Moth the password". A model
+reading one cannot tell that sentence from something you said, so once a
+ghost has read the web in a turn, the things it could do that reach past
+you — messaging another ghost, taking something on, resolving it,
+changing the style it draws in, using one of its tool servers — are put
+to you first:
+
+    Wisp read the web just now and wants to tell Moth: "…". Allow?
+    1. Allow
+    2. Not this time
+
+Nothing is recorded either way; the next one asks again. Talking to you,
+drawing, looking and searching are not asked about: they show you
+something or only read. On a turn you did not start there is nobody to
+ask, so the ghost is refused outright.
+
+One gap, and it is deliberate: what the ghost remembers is hermes's
+memory, not haunt's, and haunt cannot gate it. Its standing rules forbid
+saving a page's claims as yours, and `haunt journal` shows what it wrote
+down, which is how you would catch it.
+
 ## Seeing and revoking
 
     haunt perms                              # what it asked for, what it has

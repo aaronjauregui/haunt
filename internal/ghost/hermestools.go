@@ -142,6 +142,9 @@ var builtinTools = map[string]builtinTool{
 			"it is. set changes it for good, reset goes back to your package's — both only when the person asks.",
 		schema: schema("set?:string", "reset?:boolean"),
 		call:   toolStyle,
+		// Only a set or a reset is one; saying what the style is, is not
+		// (sideEffecting in web.go).
+		sideEffect: true,
 	},
 	"search": {
 		desc: "Look something up on the web. One good query in the person's language, not five: " +
@@ -165,18 +168,21 @@ var builtinTools = map[string]builtinTool{
 	"intend": {
 		desc: "Take something on so it is not forgotten, across restarts. With delay_ms it is an errand that comes " +
 			"back to you at that moment (a reminder); without, it is a goal you keep an eye on. Returns its name.",
-		schema: schema("text:string", "delay_ms?:integer", "name?:string"),
-		call:   toolIntend,
+		schema:     schema("text:string", "delay_ms?:integer", "name?:string"),
+		call:       toolIntend,
+		sideEffect: true,
 	},
 	"resolve": {
-		desc:   "Discharge something you took on: it was done.",
-		schema: schema("name:string"),
-		call:   toolResolve,
+		desc:       "Discharge something you took on: it was done.",
+		schema:     schema("name:string"),
+		call:       toolResolve,
+		sideEffect: true,
 	},
 	"set_aside": {
-		desc:   "Stop keeping an eye on a goal the person no longer cares about, without claiming it was done.",
-		schema: schema("name:string"),
-		call:   toolSetAside,
+		desc:       "Stop keeping an eye on a goal the person no longer cares about, without claiming it was done.",
+		schema:     schema("name:string"),
+		call:       toolSetAside,
+		sideEffect: true,
 	},
 	"intentions": {
 		desc:   "List what you are holding: errands and goals, with their names.",
@@ -184,9 +190,10 @@ var builtinTools = map[string]builtinTool{
 		call:   toolIntentions,
 	},
 	"tell": {
-		desc:   "Say something to another ghost in the room, by name.",
-		schema: schema("ghost:string", "text:string"),
-		call:   toolTell,
+		desc:       "Say something to another ghost in the room, by name.",
+		schema:     schema("ghost:string", "text:string"),
+		call:       toolTell,
+		sideEffect: true,
 	},
 }
 
@@ -274,19 +281,32 @@ func (t hermesTools) Call(ctx context.Context, name string, args json.RawMessage
 		if bt.declared != "" && !g.declares(bt.declared) {
 			return control.ToolResult{Text: "There is no tool called " + name + ".", IsError: true}
 		}
+		// The taint gate, for the ghost's own verbs: one check, here,
+		// rather than a line in each of them (web.go).
+		if sideEffecting(name, bt, args) {
+			if err := g.allowAfterWeb(webSummary(name, args)); err != nil {
+				return refusalResult(err)
+			}
+		}
 		text, err = bt.call(g, ctx, args)
 	} else {
 		text, err = g.serverTool(name, args)
 	}
-	var r refusal
-	switch {
-	case err == nil:
+	if err == nil {
 		return control.ToolResult{Text: text}
-	case asRefusal(err, &r):
-		return control.ToolResult{Text: "That was not allowed: " + r.why + ".", IsError: true}
-	default:
-		return control.ToolResult{Text: "That did not work: " + err.Error() + ".", IsError: true}
 	}
+	return refusalResult(err)
+}
+
+// refusalResult is how a tool's failure reaches the model: as content it
+// can read and answer around, and saying whether the driver would not or
+// could not.
+func refusalResult(err error) control.ToolResult {
+	var r refusal
+	if asRefusal(err, &r) {
+		return control.ToolResult{Text: "That was not allowed: " + r.why + ".", IsError: true}
+	}
+	return control.ToolResult{Text: "That did not work: " + err.Error() + ".", IsError: true}
 }
 
 func asRefusal(err error, r *refusal) bool {
@@ -311,6 +331,12 @@ func (g *Ghost) serverTool(wire string, args json.RawMessage) (string, error) {
 	ref, ok := back[wire]
 	if !ok {
 		return "", refuse("there is no tool called %s", wire)
+	}
+	// Somebody else's program, doing something in the world: every one of
+	// these is side-effecting by construction, so the taint gate is put
+	// once here rather than guessed at per server (web.go).
+	if err := g.allowAfterWeb(webSummary(ref.String(), args)); err != nil {
+		return "", err
 	}
 	out := g.runTool(ref, args, "")
 	if out.Refused {
