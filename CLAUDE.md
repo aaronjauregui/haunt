@@ -14,6 +14,9 @@ describe what is, in the present tense, never what was done or when. A
 change to user-facing behaviour updates the matching page under `docs/`
 in the same change.
 
+Commit messages carry no `Co-Authored-By` trailer. Tooling is not
+authorship, and the responsibility for a commit is the author's.
+
 Build and test: `make build test` (needs Go 1.25+, `sway`, `grim`,
 `foot`; tests run against a headless sway). Demos: `make demo`,
 `make demo-ai`, `make demo-troupe`.

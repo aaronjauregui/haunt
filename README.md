@@ -15,6 +15,9 @@ Haunt is the body and the conscience: the screen, consent, budgets, quiet
 hours, and the promises it keeps. A ghost is art plus a persona, with no
 code to write; one that wants scripted logic ships a sandboxed WASM brain.
 
+Most of the code here was written by an LLM, under my direction and
+review. The design, the decisions and the mistakes are mine.
+
 ## Try it
 
     make demo         # a scripted ghost, in a nested sway window
@@ -46,3 +49,9 @@ screen. See [Installing](docs/user/install.md).
     make build test
 
 Tests run against a real headless sway, so `sway` is needed for them.
+
+## License
+
+Apache 2.0; see [LICENSE](LICENSE). Copyright 2026 Aaron Jauregui.
+Vendored code under `third_party/` is under its own terms, kept in
+each directory.
