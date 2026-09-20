@@ -107,6 +107,14 @@ func (g *Ghost) allowWeb() error {
 	if g.backend == nil || !g.backend.SearchEnabled() {
 		return refuse("there is no search backend configured")
 	}
+	// The grant comes before the ration. A ghost whose web grant was
+	// refused, or that has nobody to ask just now, would otherwise spend
+	// an unprompted look on every attempt and be turned away anyway —
+	// four quiet turns and the hour's ration is gone with nothing
+	// searched.
+	if !g.ensureCapability("web") {
+		return refuse("the web capability is not granted")
+	}
 	person, kind, _ := g.webTurn()
 	if !person {
 		switch g.backend.Unprompted() {
@@ -121,14 +129,12 @@ func (g *Ghost) allowWeb() error {
 		if muted, why := g.quiet.Active(); muted {
 			return refuse("it is quiet time (%s)", why)
 		}
-		// The smaller ration first: the call charges the general one
-		// itself, so an unprompted look spends both.
+		// The smaller ration last, once nothing else can refuse: the call
+		// charges the general one itself, so an unprompted look spends
+		// both.
 		if err := g.backend.SpendUnpromptedSearch(); err != nil {
 			return refuse("%v", err)
 		}
-	}
-	if !g.ensureCapability("web") {
-		return refuse("the web capability is not granted")
 	}
 	return nil
 }

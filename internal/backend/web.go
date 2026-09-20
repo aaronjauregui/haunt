@@ -86,7 +86,10 @@ func (s *Service) SearchEnabled() bool {
 	case "searxng":
 		return s.cfg.Search.BaseURL != ""
 	case "brave":
-		return true
+		// The endpoint is fixed, so what makes brave usable is the key.
+		// Without it every call would pass the gates, spend the ration
+		// and then fail at the provider.
+		return s.cfg.Search.APIKeyEnv != ""
 	default:
 		return false
 	}
@@ -559,7 +562,14 @@ func (s *Service) ReadPage(ctx context.Context, raw string) (Page, error) {
 	if err != nil {
 		return Page{}, err
 	}
+	// Under both the URL asked for and the one redirects landed on. The
+	// excerpt names the latter, so a model that pages on from the address
+	// it was just shown finds the page already read rather than paying
+	// for it twice.
 	cachePage(u.String(), p)
+	if p.URL != "" && p.URL != u.String() {
+		cachePage(p.URL, p)
+	}
 	s.trace("read page: %q, %d chars", p.Title, len([]rune(p.Text)))
 	return p, nil
 }

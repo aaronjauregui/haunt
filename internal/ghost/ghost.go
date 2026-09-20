@@ -275,7 +275,11 @@ type Ghost struct {
 	expressionMode string
 	cacheDir       string
 	// picturesDir holds the gallery's PNGs (gallery.go); picMu guards the
-	// pictures this turn has shown, which become their caption.
+	// pictures this turn has shown, which become their caption, and the
+	// counter that names a new one. Two draws in one turn can overlap —
+	// tool calls are served a connection each — and two pictures given
+	// the same name would be one picture, the second written over the
+	// first.
 	picturesDir string
 	picMu       sync.Mutex
 	turnPics    []string

@@ -50,7 +50,10 @@ func TestSearchEnabled(t *testing.T) {
 		{SearchConfig{}, false},
 		{SearchConfig{Backend: "searxng"}, false},
 		{SearchConfig{Backend: "searxng", BaseURL: "http://127.0.0.1:8888"}, true},
-		{SearchConfig{Backend: "brave"}, true},
+		// Brave's endpoint is fixed, so the key is what there is to
+		// configure; without one there is nothing to search with.
+		{SearchConfig{Backend: "brave"}, false},
+		{SearchConfig{Backend: "brave", APIKeyEnv: "BRAVE_TEST_KEY"}, true},
 		{SearchConfig{Backend: "tavily", BaseURL: "http://x"}, false},
 	}
 	for _, c := range cases {
@@ -163,8 +166,10 @@ func TestBraveRateLimited(t *testing.T) {
 	}
 }
 
+// A key named but not exported is a runtime failure, and the message
+// names the variable that was empty rather than the config that was fine.
 func TestBraveNeedsAKey(t *testing.T) {
-	s := searchService(t, SearchConfig{Backend: "brave"})
+	s := searchService(t, SearchConfig{Backend: "brave", APIKeyEnv: "HAUNT_TEST_UNSET_KEY"})
 	if _, err := s.Search(context.Background(), "q", 3); err == nil ||
 		!strings.Contains(err.Error(), "api_key_env") {
 		t.Fatalf("err = %v, want a missing-key message", err)

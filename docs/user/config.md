@@ -143,6 +143,7 @@ want a sentence. That is a property of the checkpoint you chose, so it
 belongs here rather than in a ghost: a ghost's `[imagine] style` is
 appended to whatever it wrote, and writing that style in the shape your
 model likes is what makes the two read as one prompt.
+
 ## Searching the web
 
 `[backend.search]` is what a ghost that declares the `web` capability

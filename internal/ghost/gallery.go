@@ -73,17 +73,30 @@ func (g *Ghost) picturePath(id string) string {
 	return filepath.Join(g.picturesDir, id+".png")
 }
 
-// nextPictureID hands out the next short name.
-func (g *Ghost) nextPictureID() string {
+// nextPictureID hands out the next short name, under picMu so that two
+// draws in flight at once cannot be given the same one.
+//
+// A counter that cannot be read is an error rather than a fresh start:
+// beginning again at p1 would hand out a name the gallery already holds,
+// and saving under it would write over a picture the person still has.
+func (g *Ghost) nextPictureID() (string, error) {
+	g.picMu.Lock()
+	defer g.picMu.Unlock()
+	raw, ok, err := g.store.Get(pictureNextKey)
+	if err != nil {
+		return "", fmt.Errorf("numbering a picture: %w", err)
+	}
 	n := 0
-	if raw, ok, err := g.store.Get(pictureNextKey); err == nil && ok {
-		n, _ = strconv.Atoi(raw)
+	if ok {
+		if n, err = strconv.Atoi(raw); err != nil {
+			return "", fmt.Errorf("numbering a picture: %q is not a number", raw)
+		}
 	}
 	n++
 	if err := g.store.Set(pictureNextKey, strconv.Itoa(n)); err != nil {
-		g.log.Warn(hlog.Memory, "numbering a picture: %v", err)
+		return "", fmt.Errorf("numbering a picture: %w", err)
 	}
-	return "p" + strconv.Itoa(n)
+	return "p" + strconv.Itoa(n), nil
 }
 
 // savePicture writes the PNG and its record, and drops the oldest picture

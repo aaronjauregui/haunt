@@ -367,28 +367,35 @@ func (s *Service) Draw(ctx context.Context, req DrawRequest) (Image, error) {
 	if !s.ImageEnabled() {
 		return Image{}, fmt.Errorf("no image backend configured (set [backend.image] base_url in the haunt config)")
 	}
-	if err := s.budgets.image.spend(); err != nil {
-		return Image{}, fmt.Errorf("image budget: %w", err)
-	}
+	// Everything that can be settled without asking the backend is settled
+	// before the ration is touched: an unreadable workflow or a backend
+	// name nobody recognises is a mistake in the config, and charging the
+	// hour's pictures for it would empty the allowance without drawing
+	// anything.
+	var run *comfyRun
 	switch s.cfg.Image.Backend {
 	case "", "openai":
-		s.traceImage(req.Prompt, nil)
-		png, err := generateImage(ctx, &s.cfg.Image, req.Prompt)
-		return Image{PNG: png}, err
 	case "comfyui":
-		run, err := comfyPlan(&s.cfg.Image, req)
-		if err != nil {
+		var err error
+		if run, err = comfyPlan(&s.cfg.Image, req); err != nil {
 			return Image{}, err
 		}
-		s.traceImage(req.Prompt, run)
-		png, err := comfyGenerate(ctx, &s.cfg.Image, run.graph)
-		if err != nil {
-			return Image{}, err
-		}
-		return Image{PNG: png, Seed: run.seed}, nil
 	default:
 		return Image{}, fmt.Errorf("unknown image backend %q (openai or comfyui)", s.cfg.Image.Backend)
 	}
+	if err := s.budgets.image.spend(); err != nil {
+		return Image{}, fmt.Errorf("image budget: %w", err)
+	}
+	s.traceImage(req.Prompt, run)
+	if run == nil {
+		png, err := generateImage(ctx, &s.cfg.Image, req.Prompt)
+		return Image{PNG: png}, err
+	}
+	png, err := comfyGenerate(ctx, &s.cfg.Image, run.graph)
+	if err != nil {
+		return Image{}, err
+	}
+	return Image{PNG: png, Seed: run.seed}, nil
 }
 
 // GenerateImage produces PNG bytes for a prompt, for callers with no use
@@ -415,7 +422,10 @@ func (s *Service) traceImage(prompt string, run *comfyRun) {
 	fmt.Fprintf(&b, "image → %s %s", backend, i.BaseURL)
 	switch {
 	case run != nil && run.workflow != "":
-		fmt.Fprintf(&b, " workflow=%s %dx%d", run.workflow, run.width, run.height)
+		fmt.Fprintf(&b, " workflow=%s", run.workflow)
+		if run.width != 0 {
+			fmt.Fprintf(&b, " %dx%d", run.width, run.height)
+		}
 		if run.seed != 0 {
 			fmt.Fprintf(&b, " seed=%d", run.seed)
 		}

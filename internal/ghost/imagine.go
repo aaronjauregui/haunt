@@ -116,8 +116,12 @@ func (g *Ghost) drawPicture(req drawRequest) (Picture, error) {
 	if _, err := png.Decode(bytes.NewReader(img.PNG)); err != nil {
 		return Picture{}, fmt.Errorf("image backend returned invalid PNG: %w", err)
 	}
+	id, err := g.nextPictureID()
+	if err != nil {
+		return Picture{}, err
+	}
 	p := Picture{
-		ID:     g.nextPictureID(),
+		ID:     id,
 		Prompt: req.prompt,
 		Sent:   sent,
 		Style:  style,

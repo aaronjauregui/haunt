@@ -84,19 +84,25 @@ func comfyPlan(cfg *ImageConfig, req DrawRequest) (*comfyRun, error) {
 		}
 		run := &comfyRun{
 			graph: p.apply(wf.graph).(map[string]any), workflow: wf.path,
-			width: width, height: height, negative: negative,
+			negative: negative,
 		}
 		if p.tookSeed {
 			run.seed = seed
+		}
+		if p.tookSize {
+			run.width, run.height = width, height
 		}
 		return run, nil
 	}
 
 	width, height := parseSize(cfg.Size, comfyDefaultSize)
 	steps, cfgScale, sampler, builtinNegative := comfyDefaults(cfg)
-	if negative != "" {
-		builtinNegative = negative
-	}
+	// comfyDefaults has already settled what the person configured, or the
+	// default standing in for it. What a ghost's package asks to keep out
+	// is added to that rather than put in its place: a package saying
+	// "photorealistic" is saying one more thing, not giving up on the
+	// blur and the watermarks.
+	builtinNegative = joinNonEmpty(", ", builtinNegative, req.Negative)
 	return &comfyRun{
 		graph:    builtinGraph(cfg, req.Prompt, builtinNegative, seed, width, height),
 		width:    width,
@@ -258,8 +264,11 @@ type placeholders struct {
 	seed             int64
 	width, height    int
 	// tookSeed records whether the graph asked for a seed, since only then
-	// is there a seed worth remembering against the picture.
-	tookSeed bool
+	// is there a seed worth remembering against the picture. tookSize is
+	// the same for the dimensions: a graph with its own are drawn at
+	// theirs, and reporting the configured size would be reporting a
+	// number nothing used.
+	tookSeed, tookSize bool
 }
 
 // apply returns v with the placeholders substituted, leaving v untouched:
@@ -295,8 +304,10 @@ func (p *placeholders) applyString(s string) any {
 		p.tookSeed = true
 		return p.seed
 	case phWidth:
+		p.tookSize = true
 		return p.width
 	case phHeight:
+		p.tookSize = true
 		return p.height
 	}
 	s = strings.ReplaceAll(s, phPrompt, p.prompt)

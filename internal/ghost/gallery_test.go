@@ -41,7 +41,11 @@ func drawingGhost(t *testing.T) *Ghost {
 // keep saves a picture with a byte of content, the way a generation would.
 func keep(t *testing.T, g *Ghost, prompt string) Picture {
 	t.Helper()
-	p := Picture{ID: g.nextPictureID(), Prompt: prompt, Sent: prompt, At: time.Now()}
+	id, err := g.nextPictureID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := Picture{ID: id, Prompt: prompt, Sent: prompt, At: time.Now()}
 	if err := g.savePicture(p, []byte("png")); err != nil {
 		t.Fatal(err)
 	}

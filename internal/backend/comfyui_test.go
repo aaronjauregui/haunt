@@ -242,10 +242,28 @@ func TestWorkflowWithoutSeed(t *testing.T) {
 	if run.seed != 0 {
 		t.Errorf("seed = %d, want none reported", run.seed)
 	}
-	// Nothing configured a size, and a workflow is exported for a model
-	// that expects a larger one than the built-in graph is tuned to.
-	if run.width != comfyWorkflowSize {
-		t.Errorf("width = %d, want %d", run.width, comfyWorkflowSize)
+	// This graph carries its own dimensions, so there is no size haunt
+	// chose and none to report: saying 1024 here would name a number
+	// nothing drew at.
+	if run.width != 0 || run.height != 0 {
+		t.Errorf("size = %dx%d, want none reported", run.width, run.height)
+	}
+}
+
+// A workflow that does ask for the dimensions is drawn at the configured
+// size, or at the one a workflow is assumed to want when none is set.
+func TestWorkflowSize(t *testing.T) {
+	body := `{"6": {"class_type": "CLIPTextEncode", "inputs": {"text": "{{prompt}}"}},
+	          "5": {"class_type": "EmptyLatentImage",
+	                "inputs": {"width": "{{width}}", "height": "{{height}}"}},
+	          "9": {"class_type": "PreviewImage", "inputs": {"images": ["8", 0]}}}`
+	cfg := &ImageConfig{Backend: "comfyui", BaseURL: "http://x", Workflow: writeWorkflow(t, body)}
+	run, err := comfyPlan(cfg, DrawRequest{Prompt: "a ghost"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.width != comfyWorkflowSize || run.height != comfyWorkflowSize {
+		t.Errorf("size = %dx%d, want %d square", run.width, run.height, comfyWorkflowSize)
 	}
 }
 
@@ -257,15 +275,29 @@ func TestBuiltinGraphNegative(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.negative != "photorealistic" {
-		t.Errorf("negative = %q", run.negative)
+	// What the package asks to keep out is added to the default, not put
+	// in its place: a ghost that dislikes photographs still wants the
+	// blur and the watermarks kept out.
+	want := "blurry, text, watermark, low quality, photorealistic"
+	if run.negative != want {
+		t.Errorf("negative = %q, want %q", run.negative, want)
 	}
 	if run.seed == 0 {
 		t.Error("the built-in graph always knows its seed")
 	}
 	text := run.graph["3"].(map[string]any)["inputs"].(map[string]any)["text"]
-	if text != "photorealistic" {
+	if text != want {
 		t.Errorf("negative node text = %#v", text)
+	}
+
+	// A negative the person configured is joined the same way.
+	cfg.Negative = "low contrast"
+	run, err = comfyPlan(cfg, DrawRequest{Prompt: "a ghost", Negative: "photorealistic"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "low contrast, photorealistic"; run.negative != want {
+		t.Errorf("negative = %q, want %q", run.negative, want)
 	}
 }
 
