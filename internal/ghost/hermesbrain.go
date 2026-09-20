@@ -92,6 +92,11 @@ type hermesTurn struct {
 	boot bool
 }
 
+// kind is the event kind of a turn nobody started ("occasion", "idle"),
+// and empty for the person's own words. What may be looked up unprompted
+// turns on it (web.go), and it ends the turn-over line.
+func (t hermesTurn) kind() string { return hermes.EnvelopeKind(t.input) }
+
 // deferredTurn is an unprompted turn waiting for the one in flight.
 type deferredTurn struct {
 	// key names what it is about; a newer turn with the same key replaces
@@ -188,7 +193,7 @@ func (b *hermesBrain) work() {
 		if t.person {
 			over = "turn over: person"
 		}
-		if kind := hermes.EnvelopeKind(t.input); kind != "" {
+		if kind := t.kind(); kind != "" {
 			over += " kind=" + kind
 		}
 		b.g.log.Debug(hlog.Brain, "%s%s", over, out)
@@ -572,6 +577,10 @@ func (b *hermesBrain) run(t hermesTurn) (out turnOutcome) {
 	}
 	userDriven := g.respondingToUser()
 	g.forgetTurnPictures()
+	// What the web tools are allowed to do, and what the rest of the turn
+	// may do once they have brought somebody else's words in, both turn on
+	// what this turn is (web.go).
+	g.startWebTurn(t.person, t.kind())
 	// A deferred closure, not a deferred call: waiting may be started
 	// below, after the capability check.
 	waiting := t.waiting
@@ -1144,9 +1153,20 @@ func (g *Ghost) hermesPersona() hermes.Persona {
 		{"screen", "look at the window they have open"},
 		{"tell", "speak to the other ghosts"},
 		{"tools", "use the tools listed in your schemas to do things for them"},
+		{"web", "look things up on the web and read a page"},
 	} {
 		if g.declares(c.cap) {
 			p.Abilities = append(p.Abilities, c.what)
+		}
+	}
+	// The standing rules say a ghost cannot browse the web, because almost
+	// none can; one that can needs the sentence about whose words those
+	// are instead, and the line on when it may go looking by itself.
+	if g.declares("web") {
+		p.Web = true
+		p.Unprompted = "skills"
+		if g.backend != nil {
+			p.Unprompted = g.backend.Unprompted()
 		}
 	}
 	return p

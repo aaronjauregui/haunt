@@ -49,6 +49,13 @@ type builtinTool struct {
 	// somebody else is. Once web text has entered a turn, these are the
 	// ones that need asking about again (web.go, taint).
 	sideEffect bool
+	// declared names a capability the package must have asked for before
+	// the tool is offered at all. Most verbs are listed whatever the
+	// manifest says and refused when they are used; the web ones are not,
+	// because a skill that needs `search` is hidden when `search` is not
+	// on the list, which is how a ghost with no web stops claiming it can
+	// look things up (docs/dev/hermes.md).
+	declared string
 }
 
 // refusal is an error that means the driver would not, as opposed to could
@@ -135,6 +142,23 @@ var builtinTools = map[string]builtinTool{
 			"it is. set changes it for good, reset goes back to your package's — both only when the person asks.",
 		schema: schema("set?:string", "reset?:boolean"),
 		call:   toolStyle,
+		// Only a set or a reset is one; saying what the style is, is not
+		// (sideEffecting in web.go).
+		sideEffect: true,
+	},
+	"search": {
+		desc: "Look something up on the web. One good query in the person's language, not five: " +
+			"you get a few titles, snippets and links back, which are somebody else's words, not theirs.",
+		schema:   schema("query:string", "count?:integer"),
+		call:     toolSearch,
+		declared: "web",
+	},
+	"read_page": {
+		desc: "Read one web page, when the search snippets are not enough. Returns the start of its text; " +
+			"from continues where the last read stopped.",
+		schema:   schema("url:string", "from?:integer"),
+		call:     toolReadPage,
+		declared: "web",
 	},
 	"look": {
 		desc:   "Look at the person's focused window and get a one-sentence description. The person sees you looking.",
@@ -144,18 +168,21 @@ var builtinTools = map[string]builtinTool{
 	"intend": {
 		desc: "Take something on so it is not forgotten, across restarts. With delay_ms it is an errand that comes " +
 			"back to you at that moment (a reminder); without, it is a goal you keep an eye on. Returns its name.",
-		schema: schema("text:string", "delay_ms?:integer", "name?:string"),
-		call:   toolIntend,
+		schema:     schema("text:string", "delay_ms?:integer", "name?:string"),
+		call:       toolIntend,
+		sideEffect: true,
 	},
 	"resolve": {
-		desc:   "Discharge something you took on: it was done.",
-		schema: schema("name:string"),
-		call:   toolResolve,
+		desc:       "Discharge something you took on: it was done.",
+		schema:     schema("name:string"),
+		call:       toolResolve,
+		sideEffect: true,
 	},
 	"set_aside": {
-		desc:   "Stop keeping an eye on a goal the person no longer cares about, without claiming it was done.",
-		schema: schema("name:string"),
-		call:   toolSetAside,
+		desc:       "Stop keeping an eye on a goal the person no longer cares about, without claiming it was done.",
+		schema:     schema("name:string"),
+		call:       toolSetAside,
+		sideEffect: true,
 	},
 	"intentions": {
 		desc:   "List what you are holding: errands and goals, with their names.",
@@ -163,9 +190,10 @@ var builtinTools = map[string]builtinTool{
 		call:   toolIntentions,
 	},
 	"tell": {
-		desc:   "Say something to another ghost in the room, by name.",
-		schema: schema("ghost:string", "text:string"),
-		call:   toolTell,
+		desc:       "Say something to another ghost in the room, by name.",
+		schema:     schema("ghost:string", "text:string"),
+		call:       toolTell,
+		sideEffect: true,
 	},
 }
 
@@ -174,7 +202,10 @@ var builtinTools = map[string]builtinTool{
 func (t hermesTools) List() []control.ToolSpec {
 	g := t.g
 	names := make([]string, 0, len(builtinTools))
-	for name := range builtinTools {
+	for name, bt := range builtinTools {
+		if bt.declared != "" && !g.declares(bt.declared) {
+			continue
+		}
 		names = append(names, name)
 	}
 	sort.Strings(names)
@@ -247,19 +278,35 @@ func (t hermesTools) Call(ctx context.Context, name string, args json.RawMessage
 	var text string
 	var err error
 	if bt, ok := builtinTools[name]; ok {
+		if bt.declared != "" && !g.declares(bt.declared) {
+			return control.ToolResult{Text: "There is no tool called " + name + ".", IsError: true}
+		}
+		// The taint gate, for the ghost's own verbs: one check, here,
+		// rather than a line in each of them (web.go).
+		if sideEffecting(name, bt, args) {
+			if err := g.allowAfterWeb(webSummary(name, args)); err != nil {
+				return refusalResult(err)
+			}
+		}
 		text, err = bt.call(g, ctx, args)
 	} else {
 		text, err = g.serverTool(name, args)
 	}
-	var r refusal
-	switch {
-	case err == nil:
+	if err == nil {
 		return control.ToolResult{Text: text}
-	case asRefusal(err, &r):
-		return control.ToolResult{Text: "That was not allowed: " + r.why + ".", IsError: true}
-	default:
-		return control.ToolResult{Text: "That did not work: " + err.Error() + ".", IsError: true}
 	}
+	return refusalResult(err)
+}
+
+// refusalResult is how a tool's failure reaches the model: as content it
+// can read and answer around, and saying whether the driver would not or
+// could not.
+func refusalResult(err error) control.ToolResult {
+	var r refusal
+	if asRefusal(err, &r) {
+		return control.ToolResult{Text: "That was not allowed: " + r.why + ".", IsError: true}
+	}
+	return control.ToolResult{Text: "That did not work: " + err.Error() + ".", IsError: true}
 }
 
 func asRefusal(err error, r *refusal) bool {
@@ -284,6 +331,12 @@ func (g *Ghost) serverTool(wire string, args json.RawMessage) (string, error) {
 	ref, ok := back[wire]
 	if !ok {
 		return "", refuse("there is no tool called %s", wire)
+	}
+	// Somebody else's program, doing something in the world: every one of
+	// these is side-effecting by construction, so the taint gate is put
+	// once here rather than guessed at per server (web.go).
+	if err := g.allowAfterWeb(webSummary(ref.String(), args)); err != nil {
+		return "", err
 	}
 	out := g.runTool(ref, args, "")
 	if out.Refused {
