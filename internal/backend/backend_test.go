@@ -46,6 +46,35 @@ func TestLookSpendsItsOwnBudget(t *testing.T) {
 	}
 }
 
+// Describing a picture the ghost painted comes out of the same ration as
+// looking at the screen: it is the same model doing the same work.
+func TestDescribeImageSharesTheVisionBudget(t *testing.T) {
+	srv := fakeVision(t)
+	defer srv.Close()
+	s := NewService(&Config{
+		Vision: VisionConfig{BaseURL: srv.URL + "/v1", Model: "fake"},
+		Budget: BudgetConfig{VisionRequestsPerHour: 2},
+	}, nil)
+	got, err := s.DescribeImage(context.Background(), []byte("png"), "what is it?")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "a text editor" {
+		t.Errorf("describe = %q", got)
+	}
+	if _, err := s.Look(context.Background(), "and the screen?", []byte("png")); err != nil {
+		t.Fatalf("the second call of two was refused: %v", err)
+	}
+	if _, err := s.DescribeImage(context.Background(), []byte("png"), "again?"); err == nil {
+		t.Error("a third call went through an allowance of two")
+	}
+
+	unconfigured := NewService(&Config{}, nil)
+	if _, err := unconfigured.DescribeImage(context.Background(), []byte("png"), "?"); err == nil {
+		t.Error("describing without a vision backend should fail")
+	}
+}
+
 func TestBudgetWindowSlides(t *testing.T) {
 	b := newBudget(2)
 	now := time.Now()

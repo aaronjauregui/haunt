@@ -62,6 +62,12 @@ type ImageConfig struct {
 	// replaces the built-in graph, and with it Model, Steps, CFG and
 	// Sampler: the workflow owns them. ComfyUI only.
 	Workflow string `toml:"workflow"`
+
+	// workflow is Workflow parsed and checked, filled in by Validate before
+	// any ghost is drawing. Reading it once means a graph that has been
+	// edited into nonsense is a message at startup rather than a turn that
+	// fails halfway through.
+	workflow *workflow
 }
 
 // SearchConfig points at a web search provider. Empty disables search
@@ -178,6 +184,14 @@ func WithDefaults(cfg Config) *Config {
 	return &cfg
 }
 
+// Validate checks what the config points at while the person is still
+// looking at the config: a workflow file that is the wrong export, or has
+// nowhere to put the prompt, is a startup error naming the file rather
+// than a ghost that says it cannot draw and leaves them guessing.
+func (c *Config) Validate() error {
+	return c.Image.prepare()
+}
+
 func (c *ImageConfig) apiKey() string {
 	if c.APIKeyEnv == "" {
 		return ""
@@ -243,7 +257,35 @@ func NewServiceWith(cfg *Config, log *hlog.Logger, budgets *Budgets) *Service {
 	if budgets == nil {
 		budgets = NewBudgets(cfg.Budget)
 	}
-	return &Service{cfg: cfg, budgets: budgets, log: log}
+	s := &Service{cfg: cfg, budgets: budgets, log: log}
+	if i := &cfg.Image; i.Workflow != "" {
+		if ignored := joinNonEmpty(", ", settingsAWorkflowOwns(i)...); ignored != "" {
+			s.log.Warn(hlog.Backend,
+				"[backend.image] workflow is set, so the graph owns %s; the configured values are ignored",
+				ignored)
+		}
+	}
+	return s
+}
+
+// settingsAWorkflowOwns names the settings a workflow takes over. They are worth a
+// word at startup: someone who set them and then supplied a graph will
+// otherwise spend an afternoon wondering why changing them does nothing.
+func settingsAWorkflowOwns(i *ImageConfig) []string {
+	var named []string
+	if i.Model != "" {
+		named = append(named, "model")
+	}
+	if i.Steps != 0 {
+		named = append(named, "steps")
+	}
+	if i.CFG != 0 {
+		named = append(named, "cfg")
+	}
+	if i.Sampler != "" {
+		named = append(named, "sampler")
+	}
+	return named
 }
 
 // orDefault fills in an unconfigured allowance.
@@ -304,28 +346,70 @@ func (s *Service) ImageCacheKey() string {
 		i.Backend, i.BaseURL, i.Model, i.Size, i.Steps, i.CFG, i.Sampler, i.Negative)
 }
 
-// GenerateImage produces PNG bytes for a prompt.
-func (s *Service) GenerateImage(ctx context.Context, prompt string) ([]byte, error) {
+// DrawRequest is one picture to make. The prompt is whole — the ghost's
+// house style is already part of it, because what the picture is of and
+// what it looks like are one sentence to an image model.
+type DrawRequest struct {
+	Prompt string
+	// Negative names what to keep out. It joins the configured negative
+	// rather than replacing it: the config is the person's standing
+	// dislikes and this is the ghost's. ComfyUI only; an OpenAI-compatible
+	// endpoint has no such notion and ignores it.
+	Negative string
+}
+
+// Image is a finished picture and what the backend can say about how it
+// was made.
+type Image struct {
+	PNG []byte
+	// Seed is the number the picture came out of, when the backend used one
+	// haunt chose, and zero otherwise. Recording it is what makes a picture
+	// something more than a file: it is the difference between "that one"
+	// and "one like that".
+	Seed int64
+}
+
+// Draw makes a picture within the hourly ration.
+func (s *Service) Draw(ctx context.Context, req DrawRequest) (Image, error) {
 	if !s.ImageEnabled() {
-		return nil, fmt.Errorf("no image backend configured (set [backend.image] base_url in the haunt config)")
+		return Image{}, fmt.Errorf("no image backend configured (set [backend.image] base_url in the haunt config)")
 	}
 	if err := s.budgets.image.spend(); err != nil {
-		return nil, fmt.Errorf("image budget: %w", err)
+		return Image{}, fmt.Errorf("image budget: %w", err)
 	}
-	s.traceImage(prompt)
 	switch s.cfg.Image.Backend {
 	case "", "openai":
-		return generateImage(ctx, &s.cfg.Image, prompt)
+		s.traceImage(req.Prompt, nil)
+		png, err := generateImage(ctx, &s.cfg.Image, req.Prompt)
+		return Image{PNG: png}, err
 	case "comfyui":
-		return comfyGenerate(ctx, &s.cfg.Image, prompt)
+		run, err := comfyPlan(&s.cfg.Image, req)
+		if err != nil {
+			return Image{}, err
+		}
+		s.traceImage(req.Prompt, run)
+		png, err := comfyGenerate(ctx, &s.cfg.Image, run.graph)
+		if err != nil {
+			return Image{}, err
+		}
+		return Image{PNG: png, Seed: run.seed}, nil
 	default:
-		return nil, fmt.Errorf("unknown image backend %q (openai or comfyui)", s.cfg.Image.Backend)
+		return Image{}, fmt.Errorf("unknown image backend %q (openai or comfyui)", s.cfg.Image.Backend)
 	}
 }
 
+// GenerateImage produces PNG bytes for a prompt, for callers with no use
+// for the rest of what Draw knows.
+func (s *Service) GenerateImage(ctx context.Context, prompt string) ([]byte, error) {
+	img, err := s.Draw(ctx, DrawRequest{Prompt: prompt})
+	return img.PNG, err
+}
+
 // traceImage renders an image request with the parameters as resolved,
-// since most of them are defaulted rather than configured.
-func (s *Service) traceImage(prompt string) {
+// since most of them are defaulted, or come from a workflow, rather than
+// configured. A ComfyUI request carries its resolved run; anything else
+// passes nil.
+func (s *Service) traceImage(prompt string, run *comfyRun) {
 	if !s.logPrompts() {
 		return
 	}
@@ -335,14 +419,22 @@ func (s *Service) traceImage(prompt string) {
 		backend = "openai"
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "image → %s %s model=%s", backend, i.BaseURL, i.Model)
-	if backend == "comfyui" {
-		w, h := parseSize(i.Size, comfyDefaultSize)
-		steps, cfgScale, sampler, negative := comfyDefaults(i)
-		fmt.Fprintf(&b, " %dx%d steps=%d cfg=%g sampler=%s\n  [negative] %s",
-			w, h, steps, cfgScale, sampler, negative)
-	} else if i.Size != "" {
-		fmt.Fprintf(&b, " size=%s", i.Size)
+	fmt.Fprintf(&b, "image → %s %s", backend, i.BaseURL)
+	switch {
+	case run != nil && run.workflow != "":
+		fmt.Fprintf(&b, " workflow=%s %dx%d", run.workflow, run.width, run.height)
+		if run.seed != 0 {
+			fmt.Fprintf(&b, " seed=%d", run.seed)
+		}
+		fmt.Fprintf(&b, "\n  [negative] %s", run.negative)
+	case run != nil:
+		fmt.Fprintf(&b, " model=%s %dx%d steps=%d cfg=%g sampler=%s seed=%d\n  [negative] %s",
+			i.Model, run.width, run.height, run.steps, run.cfgScale, run.sampler, run.seed, run.negative)
+	default:
+		fmt.Fprintf(&b, " model=%s", i.Model)
+		if i.Size != "" {
+			fmt.Fprintf(&b, " size=%s", i.Size)
+		}
 	}
 	fmt.Fprintf(&b, "\n  [prompt] %s", prompt)
 	s.log.Debug(hlog.Prompt, "%s", b.String())

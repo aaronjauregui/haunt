@@ -16,7 +16,20 @@ import (
 // and the same ration as Look; what differs is that no screen grant is
 // involved, because nothing of the person's is being looked at.
 func (s *Service) DescribeImage(ctx context.Context, png []byte, question string) (string, error) {
-	return "", fmt.Errorf("describe image: not implemented")
+	if !s.VisionEnabled() {
+		return "", errNoVision
+	}
+	if err := s.budgets.vision.spend(); err != nil {
+		return "", fmt.Errorf("vision budget: %w", err)
+	}
+	s.trace("describe → %s model=%s (%d KiB image)\n  [question] %s",
+		s.cfg.Vision.BaseURL, s.cfg.Vision.Model, len(png)/1024, question)
+	answer, err := s.askVision(ctx, question, png)
+	if err != nil {
+		return "", err
+	}
+	s.trace("describe: %s", answer)
+	return answer, nil
 }
 
 // Look shows a PNG to the vision model and returns what it says.
@@ -31,14 +44,30 @@ func (s *Service) DescribeImage(ctx context.Context, png []byte, question string
 // here.
 func (s *Service) Look(ctx context.Context, question string, png []byte) (string, error) {
 	if !s.VisionEnabled() {
-		return "", fmt.Errorf("no vision model configured (set [backend.vision] base_url and model in the haunt config)")
+		return "", errNoVision
 	}
 	if err := s.budgets.vision.spend(); err != nil {
 		return "", fmt.Errorf("vision budget: %w", err)
 	}
 	s.trace("look → %s model=%s (%d KiB image)\n  [question] %s",
 		s.cfg.Vision.BaseURL, s.cfg.Vision.Model, len(png)/1024, question)
+	answer, err := s.askVision(ctx, question, png)
+	if err != nil {
+		return "", err
+	}
+	s.trace("look: %s", answer)
+	return answer, nil
+}
 
+// errNoVision is one message for both callers: what is missing is the same
+// thing, and the person fixes it in the same place.
+var errNoVision = fmt.Errorf("no vision model configured (set [backend.vision] base_url and model in the haunt config)")
+
+// askVision puts one image and one question to the vision model. What a
+// look and a description of the ghost's own picture do differently is who
+// has to have agreed to it and which ration it comes out of; the request
+// itself is the same request, so it is written once.
+func (s *Service) askVision(ctx context.Context, question string, png []byte) (string, error) {
 	// OpenAI-compatible multimodal content: text plus an inline data URI.
 	content := []map[string]any{
 		{"type": "text", "text": question},
@@ -89,7 +118,5 @@ func (s *Service) Look(ctx context.Context, question string, png []byte) (string
 	if len(out.Choices) == 0 || strings.TrimSpace(out.Choices[0].Message.Content) == "" {
 		return "", fmt.Errorf("vision backend returned nothing")
 	}
-	answer := strings.TrimSpace(out.Choices[0].Message.Content)
-	s.trace("look: %s", answer)
-	return answer, nil
+	return strings.TrimSpace(out.Choices[0].Message.Content), nil
 }
