@@ -131,6 +131,20 @@ func (p *Pointer) Release() error {
 	return p.roundtrip()
 }
 
+// Scroll turns the wheel by notches where the pointer is: negative is up.
+// It goes as a distance with no notch count, the way a touchpad scrolls,
+// at the 15 units a notch is worth under libinput.
+func (p *Pointer) Scroll(notches int) error {
+	const axisVertical = 0
+	if err := p.ptr.Axis(p.tick(), axisVertical, float64(notches)*15); err != nil {
+		return err
+	}
+	if err := p.ptr.Frame(); err != nil {
+		return err
+	}
+	return p.roundtrip()
+}
+
 // RightClick presses and releases the right mouse button where the pointer
 // is: the gesture that opens a line to type at the ghost.
 func (p *Pointer) RightClick() error {

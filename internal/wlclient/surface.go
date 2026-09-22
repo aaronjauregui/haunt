@@ -34,6 +34,14 @@ type SpriteSurface struct {
 	// gesture for addressing the ghost directly.
 	OnRightClick func()
 
+	// OnScroll reports the wheel turned over the surface, in notches:
+	// negative is up (away from the user), positive down. A touchpad's
+	// continuous scroll arrives in notch-sized steps. OnHover reports the
+	// pointer arriving on the surface and leaving it. Both are called from
+	// the dispatch goroutine, outside the app lock.
+	OnScroll func(steps int)
+	OnHover  func(inside bool)
+
 	// OnScaleChanged reports the compositor's preferred scale for this
 	// surface (1.0, 1.5, 2.0…), so the caller can redraw its art at that
 	// resolution. Fires on the dispatch goroutine, outside the app lock.
@@ -73,6 +81,8 @@ type SpriteSurface struct {
 	grabX, grabY             float64
 	dragOriginX, dragOriginY int32
 	dragging                 bool
+	// scrollAcc is continuous scroll not yet amounting to a notch.
+	scrollAcc float64
 }
 
 // SurfaceOptions control how a sprite surface behaves.

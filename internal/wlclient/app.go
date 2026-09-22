@@ -356,21 +356,76 @@ func (a *App) initPointer(p *client.Pointer) {
 			return
 		}
 		a.mu.Lock()
-		defer a.mu.Unlock()
-		if s, ok := a.surfaces[e.Surface.ID()]; ok {
+		s, ok := a.surfaces[e.Surface.ID()]
+		var hover func(bool)
+		if ok {
 			a.logEvent("enter surface=%d local=(%.0f,%.0f)", e.Surface.ID(), e.SurfaceX, e.SurfaceY)
 			a.pointerFocus = s
 			s.pointerX, s.pointerY = e.SurfaceX, e.SurfaceY
+			s.scrollAcc = 0
+			hover = s.OnHover
+		}
+		a.mu.Unlock()
+		if hover != nil {
+			hover(true)
 		}
 	})
 	p.SetLeaveHandler(func(e client.PointerLeaveEvent) {
 		a.mu.Lock()
-		defer a.mu.Unlock()
-		if a.pointerFocus != nil {
-			a.pointerFocus.dragging = false
+		var hover func(bool)
+		if s := a.pointerFocus; s != nil {
+			s.dragging = false
+			hover = s.OnHover
 			a.pointerFocus = nil
 		}
+		a.mu.Unlock()
+		if hover != nil {
+			hover(false)
+		}
 	})
+	// A wheel sends both a notch count (axis_discrete) and a distance
+	// (axis) for the same turn, discrete first, in one frame; a touchpad
+	// sends only the distance. So notches are taken as given, and distance
+	// counts only in a frame that had none, at the 15 units a wheel notch
+	// is worth under libinput.
+	const axisVertical, unitsPerNotch = 0, 15
+	discrete := false
+	scroll := func(steps int) {
+		a.mu.Lock()
+		s := a.pointerFocus
+		var cb func(int)
+		if s != nil {
+			cb = s.OnScroll
+		}
+		a.mu.Unlock()
+		a.logEvent("scroll %d", steps)
+		if cb != nil && steps != 0 {
+			cb(steps)
+		}
+	}
+	p.SetAxisDiscreteHandler(func(e client.PointerAxisDiscreteEvent) {
+		if e.Axis != axisVertical {
+			return
+		}
+		discrete = true
+		scroll(int(e.Discrete))
+	})
+	p.SetAxisHandler(func(e client.PointerAxisEvent) {
+		if e.Axis != axisVertical || discrete {
+			return
+		}
+		a.mu.Lock()
+		s := a.pointerFocus
+		steps := 0
+		if s != nil {
+			s.scrollAcc += e.Value
+			steps = int(s.scrollAcc / unitsPerNotch)
+			s.scrollAcc -= float64(steps) * unitsPerNotch
+		}
+		a.mu.Unlock()
+		scroll(steps)
+	})
+	p.SetFrameHandler(func(client.PointerFrameEvent) { discrete = false })
 	p.SetMotionHandler(func(e client.PointerMotionEvent) {
 		var fire func()
 		a.mu.Lock()

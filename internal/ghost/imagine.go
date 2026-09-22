@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"image"
 	"image/png"
 	"os"
 	"strings"
@@ -139,18 +140,28 @@ func (g *Ghost) drawPicture(req drawRequest) (Picture, error) {
 	return p, g.showPicture(p, req.lingerMS)
 }
 
-// showPicture hangs a picture in the balloon, whether it was just painted
-// or asked for by name.
-func (g *Ghost) showPicture(p Picture, lingerMS int) error {
-	data, err := os.ReadFile(g.picturePath(p.ID))
+// loadPicture reads a picture back from the gallery.
+func (g *Ghost) loadPicture(id string) (image.Image, error) {
+	data, err := os.ReadFile(g.picturePath(id))
 	if err != nil {
-		return fmt.Errorf("that picture is gone")
+		return nil, fmt.Errorf("that picture is gone")
 	}
 	img, err := png.Decode(bytes.NewReader(data))
 	if err != nil {
-		return fmt.Errorf("that picture will not open: %w", err)
+		return nil, fmt.Errorf("that picture will not open: %w", err)
+	}
+	return img, nil
+}
+
+// showPicture hangs a picture in the balloon, whether it was just painted
+// or asked for by name.
+func (g *Ghost) showPicture(p Picture, lingerMS int) error {
+	img, err := g.loadPicture(p.ID)
+	if err != nil {
+		return err
 	}
 	if g.showImageBalloon(img) {
+		g.remember(recalled{picture: p.ID, gen: g.balloonGen()})
 		// What the picture is of, to the ghosts who can see it hanging
 		// there. The prompt is the honest description: a picture of a cat
 		// visibly contains a cat, and the rewrite that produced it is not

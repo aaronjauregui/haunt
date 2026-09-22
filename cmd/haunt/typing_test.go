@@ -50,7 +50,7 @@ wasm = "brain.wasm"
 	record := filepath.Join(dir, "session.jsonl")
 	cmd := exec.Command(bin, "run", "-x", "200", "-y", "200",
 		"-state", filepath.Join(dir, "state"), "-record", record, gDir)
-	cmd.Env = append(c.Env(), "HAUNT_RUNTIME_DIR="+rt, "HAUNT_DEBUG=input")
+	cmd.Env = append(c.Env(), "HAUNT_RUNTIME_DIR="+rt, "HAUNT_DEBUG=input,balloon")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -137,6 +137,24 @@ wasm = "brain.wasm"
 	}
 	typeLine("new thought", keyEnter)
 	waitRecordContains(t, record, `"text":"new thought"`)
+
+	// The wheel over the ghost goes back through what was said, once the
+	// reply has gone, and taking the pointer off it puts the past away
+	// again.
+	waitBalloon(t, c, dir, spriteX, spriteY, false)
+	if err := ptr.MoveTo(spriteX+80, spriteY+80); err != nil {
+		t.Fatal(err)
+	}
+	if err := ptr.Scroll(-2); err != nil {
+		t.Fatal(err)
+	}
+	waitLog(t, stderr, "recall: line")
+	waitBalloon(t, c, dir, spriteX, spriteY, true)
+	if err := ptr.MoveTo(10, 10); err != nil {
+		t.Fatal(err)
+	}
+	waitLog(t, stderr, "recall: put away")
+	waitBalloon(t, c, dir, spriteX, spriteY, false)
 }
 
 // Scancodes the test drives directly rather than through a character.

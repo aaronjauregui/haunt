@@ -241,6 +241,7 @@ func (g *Ghost) onKey(code uint32, down bool) {
 		}
 		g.closeInput()
 		if !empty {
+			g.remember(recalled{you: true, text: text})
 			g.publish(proto.Event{Type: proto.EventMessage, Text: text})
 		}
 		return

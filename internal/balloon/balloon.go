@@ -123,6 +123,12 @@ func (r *Renderer) Render(text string) *sprite.Sprite {
 
 // renderLines paints laid-out lines into a panel sized to them.
 func (r *Renderer) renderLines(lines []string, lineHeight int) *sprite.Sprite {
+	return r.renderLinesFooted(lines, lineHeight, false)
+}
+
+// renderLinesFooted is renderLines with the last line dimmed when footed:
+// a marker about the line, which should read as one at a glance.
+func (r *Renderer) renderLinesFooted(lines []string, lineHeight int, footed bool) *sprite.Sprite {
 	t := r.theme
 	metrics := r.face.Metrics()
 
@@ -144,7 +150,10 @@ func (r *Renderer) renderLines(lines []string, lineHeight int) *sprite.Sprite {
 		Face: r.face,
 	}
 	y := t.Padding + metrics.Ascent.Ceil()
-	for _, l := range lines {
+	for i, l := range lines {
+		if footed && i == len(lines)-1 {
+			d.Src = image.NewUniform(r.dim())
+		}
 		d.Dot = fixed.P(t.Padding, y)
 		d.DrawString(l)
 		y += lineHeight
@@ -162,16 +171,49 @@ func (r *Renderer) renderLines(lines []string, lineHeight int) *sprite.Sprite {
 // that makes a long reply readable at all — without it the opening scrolls
 // away and there is no way back to it at any speed.
 func (r *Renderer) RenderPage(text string, page int) (sp *sprite.Sprite, pages int) {
+	return r.renderPage(text, page, func(page, pages int) string {
+		if pages < 2 {
+			return ""
+		}
+		// A quiet marker, so a reader knows there is more and that
+		// clicking will bring it.
+		return fmt.Sprintf("— %d/%d —", page+1, pages)
+	})
+}
+
+// RenderRecalled paints one page of a line from earlier in the
+// conversation, with footer(page, pages) as its last line in place of the
+// page marker: where the line sits in what was said, and when. Pages are
+// counted exactly as RenderPage counts them, so a page of a line on screen
+// is the same page when it is recalled.
+func (r *Renderer) RenderRecalled(text string, page int, footer func(page, pages int) string) (sp *sprite.Sprite, pages int) {
+	return r.renderPage(text, page, footer)
+}
+
+// Pages is how many pages RenderPage and RenderRecalled split text into.
+func (r *Renderer) Pages(text string) int {
+	lines := r.wrap(text, r.theme.MaxWidth-2*r.theme.Padding)
+	per := r.linesPerPage(r.lineHeight())
+	if pages := (len(lines) + per - 1) / per; pages > 1 {
+		return pages
+	}
+	return 1
+}
+
+func (r *Renderer) lineHeight() int {
+	metrics := r.face.Metrics()
+	return (metrics.Ascent + metrics.Descent).Ceil() + 2
+}
+
+// renderPage lays out one page of text, ending with marker's line unless
+// it is empty. Page numbers past the end clamp to the last.
+func (r *Renderer) renderPage(text string, page int, marker func(page, pages int) string) (sp *sprite.Sprite, pages int) {
 	t := r.theme
 	lines := r.wrap(text, t.MaxWidth-2*t.Padding)
-	metrics := r.face.Metrics()
-	lineHeight := (metrics.Ascent + metrics.Descent).Ceil() + 2
+	lineHeight := r.lineHeight()
 
 	per := r.linesPerPage(lineHeight)
-	pages = (len(lines) + per - 1) / per
-	if pages < 1 {
-		pages = 1
-	}
+	pages = r.Pages(text)
 	if page >= pages {
 		page = pages - 1
 	}
@@ -185,12 +227,19 @@ func (r *Renderer) RenderPage(text string, page int) (sp *sprite.Sprite, pages i
 		end = len(lines)
 	}
 	shown := append([]string{}, lines[start:end]...)
-	if pages > 1 {
-		// A quiet marker, so a reader knows there is more and that
-		// clicking will bring it.
-		shown = append(shown, fmt.Sprintf("— %d/%d —", page+1, pages))
+	m := marker(page, pages)
+	if m != "" {
+		shown = append(shown, m)
 	}
-	return r.renderLines(shown, lineHeight), pages
+	return r.renderLinesFooted(shown, lineHeight, m != ""), pages
+}
+
+// dim is the panel's text colour faded, for the lines about a balloon
+// rather than in it: the page marker, and where a recalled line sits.
+func (r *Renderer) dim() color.NRGBA {
+	c := r.theme.Text
+	c.A = 140
+	return c
 }
 
 // linesPerPage is how many lines fit, leaving room for the page marker.
@@ -324,6 +373,13 @@ func fillDot(img *image.NRGBA, cx, cy, rad int, c color.NRGBA) {
 // RenderImage paints an image inside a balloon panel, scaled down to fit
 // MaxWidth if needed (nearest-neighbor; panels are small).
 func (r *Renderer) RenderImage(src image.Image) *sprite.Sprite {
+	return r.RenderRecalledImage(src, "")
+}
+
+// RenderRecalledImage is RenderImage with a caption line beneath the
+// picture — the footer a recalled line carries, for a recalled picture.
+// An empty caption is no caption.
+func (r *Renderer) RenderRecalledImage(src image.Image, caption string) *sprite.Sprite {
 	t := r.theme
 	b := src.Bounds()
 	w, h := b.Dx(), b.Dy()
@@ -332,7 +388,14 @@ func (r *Renderer) RenderImage(src image.Image) *sprite.Sprite {
 		h = h * maxInner / w
 		w = maxInner
 	}
-	panel := image.NewNRGBA(image.Rect(0, 0, w+2*t.Padding, h+2*t.Padding))
+	inner, below := w, 0
+	if caption != "" {
+		below = r.lineHeight()
+		if cw := font.MeasureString(r.face, caption).Ceil(); cw > inner {
+			inner = cw
+		}
+	}
+	panel := image.NewNRGBA(image.Rect(0, 0, inner+2*t.Padding, h+below+2*t.Padding))
 	paintPanel(panel, t)
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
@@ -340,6 +403,11 @@ func (r *Renderer) RenderImage(src image.Image) *sprite.Sprite {
 			sy := b.Min.Y + y*b.Dy()/h
 			panel.Set(t.Padding+x, t.Padding+y, src.At(sx, sy))
 		}
+	}
+	if caption != "" {
+		d := &font.Drawer{Dst: panel, Src: image.NewUniform(r.dim()), Face: r.face}
+		d.Dot = fixed.P(t.Padding, t.Padding+h+r.face.Metrics().Ascent.Ceil()+2)
+		d.DrawString(caption)
 	}
 	return &sprite.Sprite{Img: panel}
 }

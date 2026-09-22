@@ -51,6 +51,7 @@ func (g *Ghost) showPaged(text string) {
 	g.pageMu.Unlock()
 
 	g.showBalloonSprite(sp)
+	g.remember(recalled{text: text, gen: g.balloonGen()})
 }
 
 // turnPage advances a paged balloon, reporting whether it consumed the
@@ -76,7 +77,9 @@ func (g *Ghost) turnPage() bool {
 		return true
 	}
 	sp, _ := g.renderer().RenderPage(text, page)
+	was := g.balloonGen()
 	g.showBalloonSprite(sp)
+	g.recallMoved(was, g.balloonGen())
 	return true
 }
 

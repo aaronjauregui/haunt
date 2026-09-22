@@ -57,6 +57,14 @@ resident set is who `haunt run` and the service start.
   the compositor's rate (sway's `repeat_rate` and `repeat_delay`).
   Anything the ghost finishes saying while you type is shown when the
   line closes.
+- **Scroll** over it to go back through what was said this session: its
+  lines, the pictures it showed and what you typed, a page at a time,
+  each marked with who said it, how long ago and where it sits. Scrolling
+  down comes forward again, and past the newest line the balloon goes.
+  A long reply on screen pages with the wheel as well as with clicks.
+  Taking the pointer off the ghost, or clicking it, puts the past away;
+  anything new the ghost says replaces it. The last 50 are kept; the
+  whole conversation is `haunt history` ([memory](memory.md)).
 - **From a script**, `haunt say "text"`. With several ghosts resident and
   no `-ghost`, it goes to the one you last interacted with.
 

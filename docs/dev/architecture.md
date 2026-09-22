@@ -177,5 +177,7 @@ The balloon streams text, pages long replies, draws its own waiting
 indicator on its own delay, renders choices answerable by mouse or
 keyboard, and hosts the input line. A line's lifetime is the driver's
 (`linger_ms`), because a brain cannot know how long a model will take.
-Wayland leaves key repeat to clients, so `wlclient` repeats held keys at
-the compositor's `repeat_info` rate.
+What reaches the balloon is kept for the session, and the wheel over the
+ghost steps back through it (`internal/ghost/recall.go`). Wayland leaves
+key repeat to clients, so `wlclient` repeats held keys at the
+compositor's `repeat_info` rate.

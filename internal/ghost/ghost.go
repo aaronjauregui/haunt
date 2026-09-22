@@ -208,6 +208,11 @@ type Ghost struct {
 	pageMu sync.Mutex
 	paged  *paged
 
+	// recall is what has been said, for scrolling back through (see
+	// recall.go).
+	recallMu sync.Mutex
+	recall   recallState
+
 	anim          *animator
 	reducedMotion bool
 	blnTheme      balloon.Theme
@@ -768,6 +773,11 @@ func (g *Ghost) wireInput() {
 			g.dismissChoices()
 			return
 		}
+		// A line scrolled back to is put away by a click, like a page
+		// that has been read.
+		if g.endRecall() {
+			return
+		}
 		// A balloon with more to read has first claim on the click.
 		if g.turnPage() {
 			return
@@ -783,6 +793,10 @@ func (g *Ghost) wireInput() {
 	g.surface.OnRightClick = g.openInput
 	g.surface.OnKey = g.onKey
 	g.surface.KeyRepeats = g.keyRepeats
+	// The wheel over the ghost goes back through what was said, and
+	// moving off it puts the past away again (see recall.go).
+	g.surface.OnScroll = g.onScroll
+	g.surface.OnHover = g.onHover
 	// The compositor giving the keyboard away means the user's attention
 	// has moved on, so the half-typed line goes with it — but only if the
 	// line ever had focus in the first place (see onKeyboardFocus).
