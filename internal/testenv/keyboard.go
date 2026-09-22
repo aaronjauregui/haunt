@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/rajveermalviya/go-wayland/wayland/client"
 	"golang.org/x/sys/unix"
@@ -130,6 +131,23 @@ func (k *Keyboard) Key(code uint32) error {
 	if err := k.kb.Key(k.tick(), code, statePressed); err != nil {
 		return err
 	}
+	if err := k.kb.Key(k.tick(), code, stateReleased); err != nil {
+		return err
+	}
+	return k.roundtrip()
+}
+
+// Hold presses a key, keeps it down for d, and releases it — long enough,
+// past the compositor's repeat delay, for the client to repeat it.
+func (k *Keyboard) Hold(code uint32, d time.Duration) error {
+	if err := k.kb.Key(k.tick(), code, statePressed); err != nil {
+		return err
+	}
+	if err := k.roundtrip(); err != nil {
+		return err
+	}
+	time.Sleep(d)
+	k.timeMS += uint32(d.Milliseconds())
 	if err := k.kb.Key(k.tick(), code, stateReleased); err != nil {
 		return err
 	}

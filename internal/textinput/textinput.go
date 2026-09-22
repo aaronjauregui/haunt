@@ -100,6 +100,17 @@ func IsShift(code uint32) bool {
 	return code == KeyLeftShift || code == KeyRightShift
 }
 
+// Repeats reports whether holding a key should repeat it: Backspace and
+// every key that types a character. Enter and Escape do not — a held Enter
+// would send one line and then start on the next.
+func Repeats(code uint32) bool {
+	if code == KeyBackspace {
+		return true
+	}
+	_, ok := usLayout[code]
+	return ok
+}
+
 // Action is what a key press means to the editor beyond inserting text.
 type Action int
 

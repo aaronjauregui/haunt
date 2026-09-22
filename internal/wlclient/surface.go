@@ -46,6 +46,11 @@ type SpriteSurface struct {
 	OnKey           func(code uint32, down bool)
 	OnKeyboardFocus func(focused bool)
 
+	// KeyRepeats says whether holding a key repeats it, at the rate the
+	// compositor asks for; repeated presses arrive through OnKey, from
+	// another goroutine. Nil means no key repeats.
+	KeyRepeats func(code uint32) bool
+
 	app          *App
 	wlSurface    *client.Surface
 	layerSurface *layershell.LayerSurface

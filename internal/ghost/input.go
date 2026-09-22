@@ -248,6 +248,16 @@ func (g *Ghost) onKey(code uint32, down bool) {
 	g.drawInput()
 }
 
+// keyRepeats says which held keys repeat. In a menu only the arrows do: a
+// held digit picks its row once, and must not go on to type into whatever
+// the answer opens next. In a line, Backspace and anything that types.
+func (g *Ghost) keyRepeats(code uint32) bool {
+	if g.choiceOpen() {
+		return code == keyUp || code == keyDown
+	}
+	return g.inputOpen() && textinput.Repeats(code)
+}
+
 // drawInput repaints the input balloon from current state.
 func (g *Ghost) drawInput() {
 	g.inputMu.Lock()

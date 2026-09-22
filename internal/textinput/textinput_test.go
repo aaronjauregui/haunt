@@ -115,3 +115,18 @@ func TestEmptyAndReset(t *testing.T) {
 		t.Errorf("after reset with shift held, typed %q, want %q", got, "A")
 	}
 }
+
+func TestRepeats(t *testing.T) {
+	for code, want := range map[uint32]bool{
+		KeyBackspace: true,
+		30:           true, // a
+		KeySpace:     true,
+		KeyEnter:     false,
+		KeyEsc:       false,
+		KeyLeftShift: false,
+	} {
+		if got := Repeats(code); got != want {
+			t.Errorf("Repeats(%d) = %v, want %v", code, got, want)
+		}
+	}
+}

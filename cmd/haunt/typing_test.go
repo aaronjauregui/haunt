@@ -123,12 +123,27 @@ wasm = "brain.wasm"
 	rightClick()
 	typeLine("still listening", keyEnter)
 	waitRecordContains(t, record, `"text":"still listening"`)
+
+	// A held Backspace keeps deleting. Wayland leaves key repeat to the
+	// client, and a driver that never implemented it deleted one
+	// character however long the key was held. Held past the repeat delay
+	// for long enough to eat the whole line, so only what follows is sent.
+	rightClick()
+	if err := kb.Type("scratch that"); err != nil {
+		t.Fatal(err)
+	}
+	if err := kb.Hold(keyBackspace, 2*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	typeLine("new thought", keyEnter)
+	waitRecordContains(t, record, `"text":"new thought"`)
 }
 
 // Scancodes the test drives directly rather than through a character.
 const (
-	keyEsc   = 1
-	keyEnter = 28
+	keyEsc       = 1
+	keyBackspace = 14
+	keyEnter     = 28
 )
 
 // The ghost holds the keyboard only while a line is open. Nothing else may

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/rajveermalviya/go-wayland/wayland/client"
 	"github.com/rajveermalviya/go-wayland/wayland/stable/viewporter"
@@ -64,6 +65,14 @@ type App struct {
 	surfaces      map[uint32]*SpriteSurface
 	pointerFocus  *SpriteSurface
 	keyboardFocus *SpriteSurface
+
+	// repeatRate (keys per second) and repeatDelay are the compositor's
+	// key repeat settings, from wl_keyboard.repeat_info. repeatGen names
+	// the key currently repeating: bumping it stops that repeat, and a
+	// repeat that finds it moved on delivers nothing more.
+	repeatRate  int32
+	repeatDelay time.Duration
+	repeatGen   uint64
 
 	// EventLog, when set, receives a line per input or surface event. The
 	// driver points it at its own log's wayland topic; the PoC uses it to
@@ -477,10 +486,18 @@ func (a *App) initKeyboard(k *client.Keyboard) {
 			s.OnKeyboardFocus(true)
 		}
 	})
+	k.SetRepeatInfoHandler(func(e client.KeyboardRepeatInfoEvent) {
+		a.mu.Lock()
+		a.repeatRate = e.Rate
+		a.repeatDelay = time.Duration(e.Delay) * time.Millisecond
+		a.mu.Unlock()
+		a.logEvent("key repeat rate=%d delay=%dms", e.Rate, e.Delay)
+	})
 	k.SetLeaveHandler(func(e client.KeyboardLeaveEvent) {
 		a.mu.Lock()
 		s := a.keyboardFocus
 		a.keyboardFocus = nil
+		a.repeatGen++
 		a.mu.Unlock()
 		a.logEvent("keyboard leave surface=%d", e.Surface.ID())
 		if s != nil && s.OnKeyboardFocus != nil {
@@ -488,15 +505,56 @@ func (a *App) initKeyboard(k *client.Keyboard) {
 		}
 	})
 	k.SetKeyHandler(func(e client.KeyboardKeyEvent) {
+		const statePressed = 1
+		down := e.State == statePressed
 		a.mu.Lock()
 		s := a.keyboardFocus
+		// Any key event ends the current repeat: a release of the held key
+		// obviously, and a press of another because the newest key is the
+		// one that repeats, as everywhere else on the desktop.
+		a.repeatGen++
+		gen := a.repeatGen
+		rate, delay := a.repeatRate, a.repeatDelay
 		a.mu.Unlock()
-		const statePressed = 1
 		a.logEvent("key %d state=%d", e.Key, e.State)
-		if s != nil && s.OnKey != nil {
-			s.OnKey(e.Key, e.State == statePressed)
+		if s == nil || s.OnKey == nil {
+			return
+		}
+		// Asked before the press is delivered, while the surface is in the
+		// state the key was pressed in: a key that closes a menu must not
+		// go on repeating into whatever opens after it.
+		repeats := down && rate > 0 && s.KeyRepeats != nil && s.KeyRepeats(e.Key)
+		s.OnKey(e.Key, down)
+		if repeats {
+			go a.repeatKey(s, e.Key, gen, rate, delay)
 		}
 	})
+}
+
+// repeatKey delivers further presses of a held key until something ends
+// the repeat. Wayland leaves key repeat to the client — the compositor
+// sends one press and one release, and the rate and delay to repeat at in
+// between — so without this a held Backspace deletes one character.
+//
+// The repeats arrive from this goroutine rather than the dispatch one, so
+// OnKey must be safe to call from either. A release racing the last tick
+// can let one repeat land after it, the same as any client that repeats
+// on a timer. Which keys repeat is the
+// surface's call (KeyRepeats): that belongs to the keymap, which this
+// package does not read.
+func (a *App) repeatKey(s *SpriteSurface, code uint32, gen uint64, rate int32, delay time.Duration) {
+	live := func() bool {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		return a.repeatGen == gen && a.keyboardFocus == s && !s.destroyed
+	}
+	time.Sleep(delay)
+	t := time.NewTicker(time.Second / time.Duration(rate))
+	defer t.Stop()
+	for live() {
+		s.OnKey(code, true)
+		<-t.C
+	}
 }
 
 // TakeKeyboard asks the compositor to send keys to s, or to stop.

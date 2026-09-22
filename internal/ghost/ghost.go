@@ -782,6 +782,7 @@ func (g *Ghost) wireInput() {
 	// quip on being poked must not be traded away for an input box.
 	g.surface.OnRightClick = g.openInput
 	g.surface.OnKey = g.onKey
+	g.surface.KeyRepeats = g.keyRepeats
 	// The compositor giving the keyboard away means the user's attention
 	// has moved on, so the half-typed line goes with it — but only if the
 	// line ever had focus in the first place (see onKeyboardFocus).
