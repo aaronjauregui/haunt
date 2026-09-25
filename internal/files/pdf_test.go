@@ -76,8 +76,8 @@ func TestATwoColumnPDFIsReadAColumnAtATime(t *testing.T) {
 
 func TestAPDFWithSimpleFontsKeepsItsLines(t *testing.T) {
 	b := writePDF([]string{
-		textPage("Shopping list", "Eggs, flour and milk.", "Ask about the (cheap) oranges."),
-		textPage("Page two"),
+		pdfTextPage("Shopping list", "Eggs, flour and milk.", "Ask about the (cheap) oranges."),
+		pdfTextPage("Page two"),
 	}, false)
 	text, pages, err := extract(t, b)
 	if err != nil {
@@ -110,7 +110,7 @@ func TestABrokenPDFIsAnErrorNotAPanic(t *testing.T) {
 		"header only":              []byte("%PDF-1.7\n"),
 		"garbage":                  append([]byte("%PDF-1.4\n"), bytes.Repeat([]byte{0xff, 0x00, '('}, 3000)...),
 		"scribbled":                scribbled,
-		"no page count":            []byte(strings.Replace(string(writePDF([]string{textPage("x")}, false)), "/Count 1", "/Count 0", 1)),
+		"no page count":            []byte(strings.Replace(string(writePDF([]string{pdfTextPage("x")}, false)), "/Count 1", "/Count 0", 1)),
 		"bad operator":             writePDF([]string{"BT /F1 12 Tf 72 720 Tm (x) Tj ET"}, false),
 		"no cross-reference table": []byte("%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 1 0 R >> endobj\nxref\n0 2\n0000000000 65535 f \n0000000009 00000 n \ntrailer << /Size 2 /Root 1 0 R >>\nstartxref\n62\n%%EOF\n"),
 	}
@@ -132,7 +132,7 @@ func TestABrokenPDFIsAnErrorNotAPanic(t *testing.T) {
 }
 
 func TestABrokenPageIsMarkedAndTheRestRead(t *testing.T) {
-	b := writePDF([]string{textPage("First"), "BT /F1 12 Tf 72 720 Tm (x) Tj ET", textPage("Third")}, false)
+	b := writePDF([]string{pdfTextPage("First"), "BT /F1 12 Tf 72 720 Tm (x) Tj ET", pdfTextPage("Third")}, false)
 	text, pages, err := extract(t, b)
 	if err != nil {
 		t.Fatal(err)
@@ -196,7 +196,7 @@ func TestAPDFOverTheSizeCapIsNotRead(t *testing.T) {
 func TestAPDFOverThePageCapIsRefused(t *testing.T) {
 	var pages []string
 	for i := range pdfMaxPages + 1 {
-		pages = append(pages, textPage(fmt.Sprintf("Page %d", i+1)))
+		pages = append(pages, pdfTextPage(fmt.Sprintf("Page %d", i+1)))
 	}
 	_, n, err := extract(t, writePDF(pages, false))
 	if !errors.Is(err, errPDFTooLong) {
@@ -212,9 +212,9 @@ func TestAPDFOverThePageCapIsRefused(t *testing.T) {
 	}
 }
 
-// textPage is a content stream with one line of Helvetica per line, drawn
+// pdfTextPage is a content stream with one line of Helvetica per line, drawn
 // the way simple generators do: one text object, a Td down each line.
-func textPage(lines ...string) string {
+func pdfTextPage(lines ...string) string {
 	var b strings.Builder
 	b.WriteString("BT /F1 12 Tf 72 720 Td\n")
 	for i, l := range lines {
