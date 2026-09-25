@@ -1176,11 +1176,10 @@ func (g *Ghost) hermesPersona() hermes.Persona {
 			p.Unprompted = g.backend.Unprompted()
 		}
 	}
-	// The same for files, with the folders by name — never their host
-	// paths, which would put the person's username in SOUL.md.
+	// The same for files. The folders go unnamed: SOUL.md is in every
+	// turn, and list_files names them when the model needs them.
 	if shares {
 		p.Files = true
-		p.FileRoots = g.filesCfg.RootNames()
 		p.FilesUnprompted = g.filesCfg.UnpromptedMode()
 	}
 	return p

@@ -455,18 +455,18 @@ func TestReadFileJournals(t *testing.T) {
 }
 
 // SOUL.md is told the ghost can read files only when there is something
-// to read, and is told the folders by name, never where they are.
-func TestThePersonaNamesTheFoldersNotTheirPaths(t *testing.T) {
+// to read, and is told neither the folders' names nor where they are.
+func TestThePersonaNamesNoFolders(t *testing.T) {
 	g, dir := readingGhost(t, "skills", backend.BudgetConfig{}, "")
 	p := g.hermesPersona()
-	if !p.Files || !slices.Equal(p.FileRoots, []string{"notes"}) || p.FilesUnprompted != "skills" {
-		t.Errorf("persona files = %v %q %q", p.Files, p.FileRoots, p.FilesUnprompted)
+	if !p.Files || p.FilesUnprompted != "skills" {
+		t.Errorf("persona files = %v %q", p.Files, p.FilesUnprompted)
 	}
 	if !slices.Contains(p.Abilities, "read the files in folders they have shared with you") {
 		t.Errorf("abilities %q do not include reading files", p.Abilities)
 	}
-	if strings.Contains(fmt.Sprint(p), dir) {
-		t.Error("the persona carries a host path")
+	if s := fmt.Sprint(p); strings.Contains(s, dir) || strings.Contains(s, "notes") {
+		t.Error("the persona names a shared folder or its host path")
 	}
 
 	shareFolders(t, g, config.FilesConfig{})

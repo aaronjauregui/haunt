@@ -459,8 +459,9 @@ the same gate: what files exist is already personal.
 
 Every call that succeeds writes a journal line (`read notes/todo.md`,
 `looked at notes/cat.png`, `listed notes/2026`, `searched files for
-"invoice" (7 matches)`), and standing rule 5 names the folders and says
-file text is not the person speaking.
+"invoice" (7 matches)`), and standing rule 5 says file text is not the
+person speaking. It does not name the folders: SOUL.md is in every turn,
+and `list_files` names them when the model needs them.
 
 ## Taint
 
