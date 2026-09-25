@@ -118,6 +118,13 @@ type rigOptions struct {
 	// neighbour cues it. A troupe takes no -state, so the ghosts' state is
 	// under the trial's own data dir.
 	Neighbour bool
+	// Files declares the files capability and shares a folder of the
+	// trial's own as the root notes, holding these files (a path under
+	// the folder, with forward slashes, to its contents).
+	Files map[string][]byte
+	// FilesUnprompted is [files] unprompted for the trial; empty keeps
+	// the default, "never".
+	FilesUnprompted string
 }
 
 // evalRig is one trial's running wisp and the means to drive it.
@@ -204,13 +211,23 @@ func newEvalRig(t *testing.T, opts rigOptions) (*evalRig, error) {
 	if opts.Web {
 		copied += rigSearchTOML(t)
 	}
+	if opts.Files != nil {
+		shared, err := rigSeedFiles(filepath.Join(dir, "shared"), opts.Files)
+		if err != nil {
+			return nil, err
+		}
+		copied += shared
+		if opts.FilesUnprompted != "" {
+			copied += fmt.Sprintf("\n[files]\nunprompted = %q\n", opts.FilesUnprompted)
+		}
+	}
 	if err := os.WriteFile(filepath.Join(r.hr.CfgDir, "config.toml"), []byte(cfg+copied+"\n"+opts.Config), 0o644); err != nil {
 		return nil, err
 	}
 	if err := rigBuild(r.hr.Bin, "."); err != nil {
 		return nil, err
 	}
-	w := wispOptions{Screen: opts.Screen, Web: opts.Web}
+	w := r.wisp()
 	if opts.Notes {
 		r.Notes = filepath.Join(dir, "notes.txt")
 		if opts.NotesSeed != "" {
@@ -218,7 +235,6 @@ func newEvalRig(t *testing.T, opts rigOptions) (*evalRig, error) {
 				return nil, err
 			}
 		}
-		w.NotesServer = filepath.Join(dir, "notes-server")
 		if err := rigBuild(w.NotesServer, "./testdata/toolserver"); err != nil {
 			return nil, err
 		}
@@ -276,14 +292,9 @@ func (r *evalRig) start() error {
 	}
 	if r.opts.Occasion != "" && r.cmd == nil {
 		r.occasionAt = time.Now().Add(occasionLead).Truncate(time.Minute).Add(time.Minute)
-		w := wispOptions{
-			Screen:       r.opts.Screen,
-			Occasion:     r.opts.Occasion,
-			OccasionCron: fmt.Sprintf("%d %d * * *", r.occasionAt.Minute(), r.occasionAt.Hour()),
-		}
-		if r.opts.Notes {
-			w.NotesServer = filepath.Join(r.Dir, "notes-server")
-		}
+		w := r.wisp()
+		w.Occasion = r.opts.Occasion
+		w.OccasionCron = fmt.Sprintf("%d %d * * *", r.occasionAt.Minute(), r.occasionAt.Hour())
 		if err := writeWisp(r.Ghost, w); err != nil {
 			return err
 		}
@@ -330,6 +341,54 @@ func (r *evalRig) start() error {
 		r.ups = strings.Count(log, "hermes is up for wisp")
 		return r.ups > before
 	})
+}
+
+// wisp is what writeWisp is given for the trial's options, the occasion
+// aside: start adds that once it knows the minute.
+func (r *evalRig) wisp() wispOptions {
+	w := wispOptions{Screen: r.opts.Screen, Web: r.opts.Web, Files: r.opts.Files != nil}
+	if r.opts.Notes {
+		w.NotesServer = filepath.Join(r.Dir, "notes-server")
+	}
+	return w
+}
+
+// rigSeedFiles writes files under dir and returns the config that shares
+// dir as the root notes.
+func rigSeedFiles(dir string, files map[string][]byte) (string, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	for rel, data := range files {
+		p := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(p, data, 0o644); err != nil {
+			return "", err
+		}
+	}
+	return fmt.Sprintf("\n[files.roots]\nnotes = %q\n", dir), nil
+}
+
+// snapMemories keeps what hermes has saved to the profile's memories/ so
+// far as Evidence.Files[name], every file one after another.
+func (r *evalRig) snapMemories(name string) error {
+	dir := filepath.Join(r.Profile, "memories")
+	entries, err := os.ReadDir(dir)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	var b strings.Builder
+	for _, e := range entries {
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			continue
+		}
+		fmt.Fprintf(&b, "== %s\n%s\n", e.Name(), data)
+	}
+	r.files[name] = b.String()
+	return nil
 }
 
 // running reports whether haunt run is up for wisp.
@@ -1083,6 +1142,9 @@ type wispOptions struct {
 	Screen bool
 	// Web declares the web capability, for search and read_page.
 	Web bool
+	// Files declares the files capability, for list_files, read_file and
+	// search_files.
+	Files bool
 }
 
 // wispPersona is wisp's character, as the demo has it. The judged cases
@@ -1102,6 +1164,9 @@ func writeWisp(dir string, o wispOptions) error {
 	}
 	if o.Web {
 		caps += `, "web"`
+	}
+	if o.Files {
+		caps += `, "files"`
 	}
 	if o.NotesServer != "" {
 		caps += `, "tools"`
@@ -1409,6 +1474,42 @@ func TestRigWisp(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(plain, "skills", "shopping-list")); !os.IsNotExist(err) {
 		t.Errorf("plain wisp has the shopping-list skill (%v)", err)
+	}
+}
+
+// A trial's shared folder is seeded where the config says it is, and a
+// wisp asked for files declares them: a case about files that loaded
+// neither would grade a ghost with nothing to read.
+func TestRigFiles(t *testing.T) {
+	shared := filepath.Join(t.TempDir(), "shared")
+	text, err := rigSeedFiles(shared, map[string][]byte{"2026/todo.md": []byte("buy oat milk\n")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, err := os.ReadFile(filepath.Join(shared, "2026", "todo.md")); err != nil || string(b) != "buy oat milk\n" {
+		t.Errorf("seeded file = %q, %v", b, err)
+	}
+	trial := t.TempDir()
+	os.WriteFile(filepath.Join(trial, "config.toml"), []byte(text+"\n[files]\nunprompted = \"skills\"\n"), 0o644)
+	t.Setenv("HAUNT_CONFIG_DIR", trial)
+	got, err := config.Load()
+	if err != nil {
+		t.Fatalf("the trial's config does not load: %v\n%s", err, text)
+	}
+	if got.Files.Roots["notes"] != shared || got.Files.UnpromptedMode() != "skills" {
+		t.Errorf("[files] = %+v, want notes at %s under skills", got.Files, shared)
+	}
+
+	dir := filepath.Join(t.TempDir(), "wisp")
+	if err := writeWisp(dir, wispOptions{Files: true, Web: true, Occasion: "morning", OccasionCron: "7 9 * * *"}); err != nil {
+		t.Fatal(err)
+	}
+	m, err := ghost.LoadManifest(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(m.Ghost.Capabilities, "files") || !slices.Contains(m.Ghost.Capabilities, "web") {
+		t.Errorf("capabilities = %v, want files and web beside the occasion", m.Ghost.Capabilities)
 	}
 }
 
