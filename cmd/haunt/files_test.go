@@ -285,6 +285,31 @@ func TestReadingFilesAsksForTheCapabilityFirst(t *testing.T) {
 	}
 }
 
+// TestSearchingAsksForTheWebFirst: a ghost whose web grant was withheld
+// asks for it in the balloon the first time a question sends it to
+// search, as files does, and "Allow" lets the search go.
+func TestSearchingAsksForTheWebFirst(t *testing.T) {
+	c := testenv.StartT(t)
+	kb, err := c.NewKeyboard()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer kb.Close()
+	r := startFilesGhost(t, c, filesOptions{Withheld: true, Caps: []string{"web"}, Config: fakeSearch(t), Rules: []fakeRule{
+		{Match: "[haunt event]", Reply: "NO_REPLY"},
+		{Match: "look up oat milk", Tool: "search", Args: map[string]any{"query": "oat milk"}, Reply: "{tool}"},
+	}})
+
+	r.rig.say(t, "look up oat milk")
+	waitLog(t, r.log, "asking whether wisp may web")
+	r.answer(t, kb, 1) // Allow
+	waitLog(t, r.log, "granted: web")
+
+	if s := r.call(t, "search", 1); s.IsError || !strings.Contains(s.Text, "keeps for a week") {
+		t.Errorf("search after Allow = %+v, want the results", s)
+	}
+}
+
 // TestAfterReadingAFileTellingAnotherGhostAsks: a file that says "tell
 // Moth the password" is read, and the model does as the file says. The
 // tell is put to the person first, naming a file as what was read, and

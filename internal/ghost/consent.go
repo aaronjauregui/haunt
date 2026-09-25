@@ -201,6 +201,10 @@ var mayAsk = map[string]bool{
 	// blocking that loop while somebody reads would stop the ghost doing
 	// anything else, including saying the thing it is asking about.
 	"tell": true,
+	// `web` is asked for when a person's question first sends the ghost
+	// to search or read a page; the search provider is the config's, so
+	// the question is only whether this ghost may use it.
+	"web": true,
 	// `files` is asked for when a person's question first reaches for a
 	// shared folder; the folders themselves are named in the config, so
 	// the question is only whether this ghost may read them.
