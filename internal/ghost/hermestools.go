@@ -46,15 +46,21 @@ type builtinTool struct {
 	// sideEffect marks a verb that reaches past the person in front of the
 	// ghost — it messages someone, or writes something that outlives the
 	// turn. Showing the person something is not a side effect; telling
-	// somebody else is. Once web text has entered a turn, these are the
-	// ones that need asking about again (web.go, taint).
+	// somebody else is. Once web or file text has entered a turn, these
+	// are the ones that need asking about again (web.go, taint).
 	sideEffect bool
+	// leaves marks a verb that sends words off the machine: a query to the
+	// search provider, a URL to any host. It is gated only once a file has
+	// been read, so that a file's contents cannot leave by that road;
+	// after the web, what it would send is already out there (web.go,
+	// gatedAfter).
+	leaves bool
 	// declared names a capability the package must have asked for before
 	// the tool is offered at all. Most verbs are listed whatever the
-	// manifest says and refused when they are used; the web ones are not,
-	// because a skill that needs `search` is hidden when `search` is not
-	// on the list, which is how a ghost with no web stops claiming it can
-	// look things up (docs/dev/hermes.md).
+	// manifest says and refused when they are used; the web and files
+	// ones are not, because a skill that needs `search` is hidden when
+	// `search` is not on the list, which is how a ghost with no web stops
+	// claiming it can look things up (docs/dev/hermes.md).
 	declared string
 }
 
@@ -153,6 +159,7 @@ var builtinTools = map[string]builtinTool{
 		schema:   schema("query:string", "count?:integer"),
 		call:     toolSearch,
 		declared: "web",
+		leaves:   true,
 	},
 	"read_page": {
 		desc: "Read one web page, when the search snippets are not enough. Returns the start of its text; " +
@@ -160,6 +167,30 @@ var builtinTools = map[string]builtinTool{
 		schema:   schema("url:string", "from?:integer"),
 		call:     toolReadPage,
 		declared: "web",
+		leaves:   true,
+	},
+	// The files verbs are read-only, and none of them is a side effect or
+	// leaves the machine: what they add to a turn is taint (files.go).
+	"list_files": {
+		desc: "See what is in the folders the person shared with you. No path lists the folders; " +
+			"a path like notes/2026 lists what is in it.",
+		schema:   schema("path?:string"),
+		call:     toolListFiles,
+		declared: "files",
+	},
+	"read_file": {
+		desc: "Read one file from a shared folder: text, a PDF, or a picture (described to you). " +
+			"Returns a piece at a time; from continues where the last read stopped. question is for pictures.",
+		schema:   schema("path:string", "from?:integer", "question?:string"),
+		call:     toolReadFile,
+		declared: "files",
+	},
+	"search_files": {
+		desc: "Find files by name or by words inside them, in the shared folders or under path. " +
+			"Case does not matter. Each hit gives a from to pass to read_file.",
+		schema:   schema("text:string", "path?:string", "names_only?:boolean"),
+		call:     toolSearchFiles,
+		declared: "files",
 	},
 	"look": {
 		desc:   "Look at the person's focused window and get a one-sentence description. The person sees you looking.",
@@ -284,8 +315,8 @@ func (t hermesTools) Call(ctx context.Context, name string, args json.RawMessage
 		}
 		// The taint gate, for the ghost's own verbs: one check, here,
 		// rather than a line in each of them (web.go).
-		if sideEffecting(name, bt, args) {
-			if err := g.allowAfterWeb(webSummary(name, args)); err != nil {
+		if after := gatedAfter(name, bt, args); after != 0 {
+			if err := g.allowAfterReading(actSummary(name, args), after); err != nil {
 				return refusalResult(err)
 			}
 		}
@@ -336,7 +367,7 @@ func (g *Ghost) serverTool(wire string, args json.RawMessage) (string, error) {
 	// Somebody else's program, doing something in the world: every one of
 	// these is side-effecting by construction, so the taint gate is put
 	// once here rather than guessed at per server (web.go).
-	if err := g.allowAfterWeb(webSummary(ref.String(), args)); err != nil {
+	if err := g.allowAfterReading(actSummary(ref.String(), args), taintAny); err != nil {
 		return "", err
 	}
 	out := g.runTool(ref, args, "")

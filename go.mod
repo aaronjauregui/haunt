@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/BurntSushi/toml v1.6.0
+	github.com/ledongthuc/pdf v0.0.0-20260907135840-6c8c28e0e8a0
 	github.com/rajveermalviya/go-wayland/wayland v0.0.0-20230130181619-0ad78d1310b2
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/tetratelabs/wazero v1.12.0

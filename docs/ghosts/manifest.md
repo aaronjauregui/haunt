@@ -69,6 +69,7 @@ The capabilities:
 | `tools` | acting through the declared tool servers | any `[[tool]]`; the manifest is refused without it |
 | `tell` | messaging other resident ghosts | the `tell` tool or intent |
 | `web` | searching the web and reading a page | the `search` and `read_page` tools |
+| `files` | reading, never changing, the folders the person shares in their config | the `list_files`, `read_file` and `search_files` tools |
 | `native-brain` | running `brain.command` as a process | `brain.command` |
 
 Ask only for what the ghost uses. Every capability is a question put to

@@ -142,6 +142,12 @@ type BudgetConfig struct {
 	// spend on turns the person did not start. Looking things up while
 	// nobody is watching is the part worth keeping small.
 	UnpromptedSearchPerHour int `toml:"unprompted_search_per_hour"`
+	// UnpromptedFilePerHour caps reads of the person's shared folders on
+	// turns they did not start. Reads they ask for are not metered: a
+	// local file costs tokens, not money. The ones nobody asked for are
+	// the part worth keeping small, and files are more personal than the
+	// web.
+	UnpromptedFilePerHour int `toml:"unprompted_file_per_hour"`
 }
 
 const (
@@ -157,6 +163,9 @@ const (
 	// looking things up unwatched should be an occasional touch, not a
 	// habit.
 	defaultUnpromptedSearchPerHour = 4
+	// defaultUnpromptedFilePerHour is a handful for the same reason: a
+	// ghost leafing through the person's folders unwatched should be rare.
+	defaultUnpromptedFilePerHour = 4
 
 	// defaultToolTimeout is long enough for a build or a slow network call
 	// and short enough that a wedged server is noticed the same afternoon.
@@ -181,6 +190,9 @@ func WithDefaults(cfg Config) *Config {
 	}
 	if cfg.Budget.UnpromptedSearchPerHour == 0 {
 		cfg.Budget.UnpromptedSearchPerHour = defaultUnpromptedSearchPerHour
+	}
+	if cfg.Budget.UnpromptedFilePerHour == 0 {
+		cfg.Budget.UnpromptedFilePerHour = defaultUnpromptedFilePerHour
 	}
 	return &cfg
 }
@@ -215,6 +227,10 @@ type Budgets struct {
 	// call spends both.
 	search     *budget
 	unprompted *budget
+	// files rations reads of the shared folders on turns the person did
+	// not start. There is no general file ration for it to be a part of:
+	// reads the person asks for are not metered.
+	files *budget
 }
 
 // NewBudgets builds an hourly ration from config. Defaults are filled in
@@ -229,6 +245,8 @@ func NewBudgets(cfg BudgetConfig) *Budgets {
 		search: newBudget(orDefault(cfg.SearchRequestsPerHour, defaultSearchPerHour)),
 		unprompted: newBudget(orDefault(cfg.UnpromptedSearchPerHour,
 			defaultUnpromptedSearchPerHour)),
+		files: newBudget(orDefault(cfg.UnpromptedFilePerHour,
+			defaultUnpromptedFilePerHour)),
 	}
 }
 

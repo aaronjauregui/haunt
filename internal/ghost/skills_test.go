@@ -53,22 +53,32 @@ func TestHauntSkills(t *testing.T) {
 			t.Errorf("%s: requires_toolsets = %v, want [mcp-haunt]", e.Name(), fm.Metadata.Hermes.RequiresToolsets)
 		}
 		// Every tool it names is one the ghost has.
+		named := map[string]bool{}
 		for _, m := range regexp.MustCompile(`mcp__haunt__([a-z_]+)`).FindAllStringSubmatch(string(raw), -1) {
+			named[m[1]] = true
 			if builtinTools[m[1]].call == nil {
 				t.Errorf("%s names mcp__haunt__%s, which is not a ghost tool", e.Name(), m[1])
 			}
 		}
-		// The web tools are offered only by a ghost whose package asked
-		// for them, so a skill that leans on one has to say it needs it —
-		// and then hermes hides the skill where it is missing — or else
-		// phrase it as something to do only if it is there. A skill that
-		// does neither tells some ghosts to call a tool they have not got.
-		for _, tool := range []string{"search", "read_page"} {
-			if !strings.Contains(string(raw), "mcp__haunt__"+tool) {
+		// The web and files tools are offered only by a ghost whose
+		// package asked for them, so a skill that leans on one has to say
+		// it needs it — or another tool of the same capability, which
+		// comes and goes with it — and then hermes hides the skill where
+		// it is missing, or else phrase it as something to do only if it
+		// is there. A skill that does neither tells some ghosts to call a
+		// tool they have not got.
+		for tool := range named {
+			declared := builtinTools[tool].declared
+			if declared == "" {
 				continue
 			}
-			if slices.Contains(fm.Metadata.Hermes.RequiresTools, "mcp__haunt__"+tool) ||
-				strings.Contains(string(raw), "If you have `mcp__haunt__"+tool+"`") {
+			required := false
+			for _, req := range fm.Metadata.Hermes.RequiresTools {
+				if bt, ok := builtinTools[strings.TrimPrefix(req, "mcp__haunt__")]; ok && bt.declared == declared {
+					required = true
+				}
+			}
+			if required || strings.Contains(string(raw), "If you have `mcp__haunt__"+tool+"`") {
 				continue
 			}
 			t.Errorf("%s names mcp__haunt__%s without requiring it or making it conditional", e.Name(), tool)

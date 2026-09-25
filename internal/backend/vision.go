@@ -11,10 +11,12 @@ import (
 	"strings"
 )
 
-// DescribeImage shows the vision model a picture the ghost made, rather
-// than the person's screen, and returns what it says. It is the same model
-// and the same ration as Look; what differs is that no screen grant is
-// involved, because nothing of the person's is being looked at.
+// DescribeImage shows the vision model a picture that is not the person's
+// screen — one the ghost painted, or one in a folder the person shared —
+// and returns what it says. It is the same model and the same ration as
+// Look; what differs is that no screen grant is involved, because nothing
+// on the screen is being looked at. A picture from a shared folder is
+// covered by the files grant instead, which the caller checks.
 func (s *Service) DescribeImage(ctx context.Context, png []byte, question string) (string, error) {
 	if !s.VisionEnabled() {
 		return "", errNoVision

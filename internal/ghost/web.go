@@ -14,11 +14,10 @@ import (
 
 // The web, as a ghost reaches it: two tools, and the rules around them.
 //
-// Looking something up is the one thing a companion does that brings words
-// into the turn which nobody in the room wrote. Everything here follows
-// from that. The backend fetches and renders (internal/backend/web.go);
-// this file decides whether the call may happen at all, and what the rest
-// of the turn may do afterwards.
+// Looking something up brings words into the turn which nobody in the room
+// wrote. Everything here follows from that. The backend fetches and
+// renders (internal/backend/web.go); this file decides whether the call
+// may happen at all, and what the rest of the turn may do afterwards.
 //
 // Three gates, in order:
 //
@@ -40,47 +39,84 @@ import (
 // visible. So the effect is put to the person in the balloon, in their own
 // words, before it happens — and on a turn nobody is watching, it simply
 // does not happen.
+//
+// The web is not the only way in: a file in a folder the person shared is
+// a stranger's words as much as a page is. So the turn records where what
+// it read came from (turnState), and the gate asks by source. After a
+// file, the web verbs themselves are gated too, since a query or a URL is
+// a way for a file's contents to leave the machine.
 
-// webState is what the web tools need to know about the turn in flight.
+// turnState is what the reading tools need to know about the turn in
+// flight: who started it, and what it has read.
 //
 // The tools do not run on the turn's goroutine: each call arrives over the
 // control socket and is served on a connection of its own, so two calls in
 // one turn can overlap if hermes ever issues them in parallel. Hence the
 // mutex rather than a plain field — taint is a security decision, and one
 // that depends on the client's issuing discipline is not one.
-type webState struct {
+type turnState struct {
 	mu sync.Mutex
 	// person is whether somebody is waiting on this turn, and kind is the
 	// event kind of one they are not ("occasion", "idle", ""). Both are
 	// recorded when the turn starts, because a tool call cannot see the
-	// turn it belongs to.
+	// turn it belongs to. The web gate and the file gate both read them.
 	person bool
 	kind   string
-	// tainted is whether web text has already entered this turn.
-	tainted bool
+	// tainted is where the text nobody in the room wrote came from, if
+	// any has entered this turn.
+	tainted taintSource
 }
 
-// startWebTurn records what the turn is, and that nothing from the web has
-// entered it yet.
-func (g *Ghost) startWebTurn(person bool, kind string) {
-	g.web.mu.Lock()
-	defer g.web.mu.Unlock()
-	g.web.person, g.web.kind, g.web.tainted = person, kind, false
+// taintSource is a set of the places a turn has read from. The source
+// matters as well as the fact: what may leave the machine afterwards
+// depends on what came in (hermestools.go, leaves).
+type taintSource uint8
+
+const (
+	// taintWeb is a search result list or a page.
+	taintWeb taintSource = 1 << iota
+	// taintFile is text from a file in a folder the person shared.
+	taintFile
+
+	// taintAny is every source: the verbs that reach past the person are
+	// gated whatever was read.
+	taintAny = taintWeb | taintFile
+)
+
+// what is the source as the object of "read", in the words the person is
+// asked in: "the web", "a file", or "the web and a file".
+func (s taintSource) what() string {
+	switch {
+	case s&taintWeb != 0 && s&taintFile != 0:
+		return "the web and a file"
+	case s&taintFile != 0:
+		return "a file"
+	default:
+		return "the web"
+	}
 }
 
-// taint marks the turn as carrying text from the web. Only content does
-// it: a refusal or a failed fetch brought nothing in.
-func (g *Ghost) taint() {
-	g.web.mu.Lock()
-	defer g.web.mu.Unlock()
-	g.web.tainted = true
+// startTurn records what the turn is, and that nothing it did not write
+// has entered it yet.
+func (g *Ghost) startTurn(person bool, kind string) {
+	g.turn.mu.Lock()
+	defer g.turn.mu.Unlock()
+	g.turn.person, g.turn.kind, g.turn.tainted = person, kind, 0
 }
 
-// webTurn reads the three facts back.
-func (g *Ghost) webTurn() (person bool, kind string, tainted bool) {
-	g.web.mu.Lock()
-	defer g.web.mu.Unlock()
-	return g.web.person, g.web.kind, g.web.tainted
+// taint marks the turn as carrying text from src. Only content does it: a
+// refusal or a failed read brought nothing in.
+func (g *Ghost) taint(src taintSource) {
+	g.turn.mu.Lock()
+	defer g.turn.mu.Unlock()
+	g.turn.tainted |= src
+}
+
+// thisTurn reads the three facts back.
+func (g *Ghost) thisTurn() (person bool, kind string, tainted taintSource) {
+	g.turn.mu.Lock()
+	defer g.turn.mu.Unlock()
+	return g.turn.person, g.turn.kind, g.turn.tainted
 }
 
 // unpromptedKinds are the events a ghost may look something up about
@@ -115,7 +151,7 @@ func (g *Ghost) allowWeb() error {
 	if !g.ensureCapability("web") {
 		return refuse("the web capability is not granted")
 	}
-	person, kind, _ := g.webTurn()
+	person, kind, _ := g.thisTurn()
 	if !person {
 		switch g.backend.Unprompted() {
 		case "never":
@@ -165,7 +201,7 @@ func toolSearch(g *Ghost, ctx context.Context, args json.RawMessage) (string, er
 	// where the person can see it, and to no other ghost in the room.
 	g.execNote(fmt.Sprintf("searched %q (%d results)", clip(a.Query, 120), len(results)))
 	g.log.Info(hlog.Tool, "searched %q: %d results", clip(a.Query, 120), len(results))
-	g.taint()
+	g.taint(taintWeb)
 	return g.readable(webRef("search"), backend.RenderResults(a.Query, results)), nil
 }
 
@@ -189,16 +225,32 @@ func toolReadPage(g *Ghost, ctx context.Context, args json.RawMessage) (string, 
 	}
 	g.execNote("read " + clip(a.URL, 200))
 	g.log.Info(hlog.Tool, "read %s", clip(a.URL, 200))
-	g.taint()
+	g.taint(taintWeb)
 	return g.readable(webRef("read_page"), page.Excerpt(a.From)), nil
 }
 
 // Taint, applied.
 //
-// sideEffecting is the whole of the rule, in one place rather than in
-// fifteen tool functions: a verb marked in the table reaches past the
-// person, and `style` is one only when it is being changed rather than
-// read.
+// gatedAfter is the whole of the rule, in one place rather than in fifteen
+// tool functions: which sources, once read, put this call to the person.
+// A verb that reaches past the person is gated after anything was read,
+// and `style` is one only when it is being changed rather than read. A
+// verb that leaves the machine is gated after a file, so that what a file
+// said cannot become a query or a URL sent to somebody else's server; it
+// stays free after the web, because a search built from a search result
+// sends nothing that was not already out there.
+func gatedAfter(name string, bt builtinTool, args json.RawMessage) taintSource {
+	switch {
+	case sideEffecting(name, bt, args):
+		return taintAny
+	case bt.leaves:
+		return taintFile
+	}
+	return 0
+}
+
+// sideEffecting reports whether a call reaches past the person: a verb
+// marked in the table, with `style` counting only as a set or a reset.
 func sideEffecting(name string, bt builtinTool, args json.RawMessage) bool {
 	if !bt.sideEffect {
 		return false
@@ -224,46 +276,51 @@ func styleChanges(args json.RawMessage) bool {
 	return strings.TrimSpace(a.Set) != "" || a.Reset
 }
 
-// allowAfterWeb is the gate a side-effecting verb passes once the web has
-// spoken in this turn. Before it has, it is not a gate at all.
+// allowAfterReading is the gate a call passes once the turn has read
+// something from one of the sources in after. Until it has, it is not a
+// gate at all.
 //
 // On a person's turn the effect is put to them, in the balloon, in the
-// words of what is about to happen. Nothing is recorded either way: this
-// is not a grant, it is one answer about one act, and the next one asks
-// again. On a turn nobody started there is nobody to ask, and the act is
-// simply refused — a background loop that has just read a web page is the
-// worst possible moment to take somebody's word for anything.
-func (g *Ghost) allowAfterWeb(what string) error {
-	person, _, tainted := g.webTurn()
-	if !tainted {
+// words of what is about to happen and of what was read. Nothing is
+// recorded either way: this is not a grant, it is one answer about one
+// act, and the next one asks again. On a turn nobody started there is
+// nobody to ask, and the act is simply refused — a background loop that
+// has just read somebody else's words is the worst possible moment to take
+// somebody's word for anything.
+func (g *Ghost) allowAfterReading(what string, after taintSource) error {
+	person, _, tainted := g.thisTurn()
+	if tainted&after == 0 {
 		return nil
 	}
+	read := tainted.what()
 	if !person {
-		return refuse("not after reading the web on your own; ask them first")
+		return refuse("not after reading %s on your own; ask them first", read)
 	}
 	if !g.canAskNow() {
-		return refuse("not after reading the web, without asking them first")
+		return refuse("not after reading %s, without asking them first", read)
 	}
-	g.log.Info(hlog.Session, "asking whether %s may %s after reading the web", g.manifest.Ghost.Name, what)
-	answer := g.ask(g.manifest.Ghost.Name+" read the web just now and wants to "+what+". Allow?",
+	g.log.Info(hlog.Session, "asking whether %s may %s after reading %s", g.manifest.Ghost.Name, what, read)
+	answer := g.ask(g.manifest.Ghost.Name+" read "+read+" just now and wants to "+what+". Allow?",
 		consentAllow, consentNotThisTime)
 	if answer != consentAllow {
-		g.log.Info(hlog.Session, "not allowed after reading the web: %s", what)
+		g.log.Info(hlog.Session, "not allowed after reading %s: %s", read, what)
 		return refuse("they did not want that after what you read")
 	}
 	return nil
 }
 
 // consentNotThisTime is the refusing half of the taint question. It is not
-// "never ask again": the answer is about this act, after this page, and
+// "never ask again": the answer is about this act, after this reading, and
 // there is nothing standing to remember.
 const consentNotThisTime = "Not this time"
 
-// webSummary is the one line the person is asked about: what the ghost is
+// actSummary is the one line the person is asked about: what the ghost is
 // about to do, in the shape they would say it, from the arguments it
 // called with.
-func webSummary(name string, args json.RawMessage) string {
+func actSummary(name string, args json.RawMessage) string {
 	var a struct {
+		Query string `json:"query"`
+		URL   string `json:"url"`
 		Ghost string `json:"ghost"`
 		Text  string `json:"text"`
 		Name  string `json:"name"`
@@ -272,6 +329,10 @@ func webSummary(name string, args json.RawMessage) string {
 	}
 	json.Unmarshal(args, &a)
 	switch name {
+	case "search":
+		return fmt.Sprintf("search the web for %q", clip(a.Query, 120))
+	case "read_page":
+		return "open " + clip(a.URL, 200)
 	case "tell":
 		return fmt.Sprintf("tell %s: %q", a.Ghost, clip(a.Text, 120))
 	case "intend":

@@ -44,7 +44,7 @@ sampler = ""
 negative = ""
 workflow = ""                   # ComfyUI only: a graph of your own; see below
 
-[backend.vision]                # optional: lets a ghost with `screen` look
+[backend.vision]                # optional: lets a ghost with `screen` look, and one with `files` read pictures
 base_url = ""                   # OpenAI-compatible, e.g. "http://localhost:11434/v1"; empty disables looking
 model = ""                      # must be vision-capable
 api_key_env = ""
@@ -63,6 +63,14 @@ vision_requests_per_hour = 60
 tool_requests_per_hour = 60
 search_requests_per_hour = 30       # searches and pages read together
 unprompted_search_per_hour = 4      # the slice of that a ghost may spend unwatched
+unprompted_file_per_hour = 4        # reads of shared folders on turns you did not start; yours are not rationed
+
+[files]                         # what a ghost with `files` may read; see below
+unprompted = "never"            # when a ghost may read on a turn you did not start: "never", "skills", "any"
+
+[files.roots]                   # name = folder; the name is all a ghost ever sees. None by default
+# notes   = "~/notes"
+# recipes = "~/Documents/recipes"
 
 [hermes]                        # the brain; see hermes.md
 command = ["hermes"]
@@ -203,6 +211,74 @@ Queries go to the provider you configured; pages are fetched from this
 machine. A page is only ever fetched from a public address: a ghost given
 a link to something on your own machine or your own network refuses it.
 `docs/user/permissions.md` has the rest of what reading the web means.
+
+## Sharing folders
+
+`[files.roots]` is the folders a ghost that declares the `files`
+capability may read. Empty, and nothing is shared: the ghost is told so,
+and the capability alone grants nothing.
+
+```toml
+[files]
+unprompted = "never"
+
+[files.roots]
+notes   = "~/notes"
+recipes = "~/Documents/recipes"
+```
+
+Each key is the folder's name, and it is the only thing a ghost sees: it
+reads `notes/2026/todo.md`, never the path on your disk. A name is 1 to
+32 lowercase letters, digits, `-` or `_`, starting with a letter or
+digit. A folder is an absolute path or starts with `~/`. A bad name, a
+relative path or a repeated name is an error at startup naming the
+config file. A folder that is missing, such as a drive that is not
+mounted, is a warning in the log, not an error: the ghost sees it as
+unavailable, and it is tried again the next time it is asked for.
+
+Share specific folders, not your home. A ghost reads anything inside a
+shared folder, hidden files included, and a search stops after 5,000
+files, so a search of `~` would hit that limit every time and find less
+than a search of `~/notes`.
+
+`unprompted` decides whether a ghost may read on a turn you did not
+start. The values mean what they mean for `[backend.search]`, and the
+default is `never`, because your files are more personal than the web:
+
+| Value | A ghost reads your files unasked |
+|---|---|
+| `never` | not at all; only when you ask |
+| `skills` | on the turns its skills act on — an occasion, a reminder coming due, a quiet goal, waking up |
+| `any` | on any turn of its own, within the ration |
+
+Reads you ask for are not rationed. `unprompted_file_per_hour` is how
+many a ghost may make unasked, and quiet hours stop them outright. A
+picture is described by the `[backend.vision]` model and spends from
+`vision_requests_per_hour` as well; with no vision model, pictures cannot
+be read.
+
+The sizes are fixed, not settings. They keep a huge log or a hostile
+picture from hurting haunt, and they are what a ghost runs into:
+
+| Limit | Value |
+|---|---|
+| a piece of a text file or a PDF's text, per read | 1,500 bytes |
+| what a file's kind is judged from | its first 8 KiB |
+| a PDF | 50 MB and 300 pages, its text extracted within 10 s |
+| a PDF's text, kept for paging on | 10 minutes |
+| a picture | 20 MB and 40 megapixels |
+| a picture's long edge, as the vision model sees it | 1568 px |
+| a search | 5,000 files, 50 MB read, 100 matches, 5 s |
+| a file whose contents a search skips | over 5 MB (its name still matches) |
+| a matched line, as shown | 160 characters |
+| a folder listing | 200 entries, then how many more |
+
+A search that stops at a limit says which one, and the ghost searches a
+narrower folder rather than deciding there is nothing. Search matches
+the words as written, ignoring case, and skips `.git` and
+`node_modules`. PDFs and pictures match by name only; a scanned PDF with
+no text layer has nothing to read. `docs/user/permissions.md` has the
+rest of what sharing a folder means.
 
 ## Environment
 

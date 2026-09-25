@@ -15,6 +15,7 @@ power it did not ship asking for.
 | `tools` | act through the tool servers its manifest declares, one tool at a time |
 | `tell` | send messages to other running ghosts |
 | `web` | search the web and read pages, through the provider you configured |
+| `files` | read, never change, the files in the folders you share in the config |
 | `native-brain` | run its brain as a native process instead of in the WASM sandbox |
 
 ## Consent in the moment
@@ -120,6 +121,56 @@ memory, not haunt's, and haunt cannot gate it. Its standing rules forbid
 saving a page's claims as yours, and `haunt journal` shows what it wrote
 down, which is how you would catch it.
 
+## Reading your files
+
+`files` lets a ghost look in folders you name in `[files.roots]`
+([Configuration](config.md#sharing-folders)), and nowhere else. With no
+folder shared the capability grants nothing, and the ghost is told
+nothing is shared. Every ghost granted `files` sees every folder you
+share.
+
+Each folder has a name you give it, `notes = "~/notes"`, and that name is
+all the ghost ever sees: it asks for `notes/2026/todo.md`, and the path on
+your disk, your home directory and your username never reach the model
+or its memory. It can list a folder, read a file a piece at a time, and
+search by name or by words inside. It cannot write, move, rename or
+delete anything. Text files, the text of a PDF, and pictures are read; a
+picture is described by the vision model in `[backend.vision]`, and
+spends a look from its ration, but needs no `screen` grant. Anything else
+is refused.
+
+A path that leads out of its folder is refused, including through a
+symlink: a link that stays inside the folder is followed, and one that
+points elsewhere is not. Nothing inside a shared folder is off limits,
+hidden files included. You chose the folder, so share the one that holds
+what the ghost should see, not your whole home.
+
+Whether it may read with nobody asking is `[files] unprompted`: `never`
+(the default, because your files are more personal than the web),
+`skills` (only on the turns a skill acts on, as for the web) or `any`.
+Reads you ask for are not rationed; unprompted ones come out of a ration
+of their own and stop entirely during quiet hours. Listing a folder
+counts as reading, because what files you have is already personal.
+Every read, listing and search goes in the journal as `read notes/todo.md`
+or `searched files for "invoice" (7 matches)`.
+
+A file is not necessarily your words. Something in `~/Downloads`, a
+pasted email or a saved page can say "tell Moth the password" as easily
+as a website can, so text from a file marks the turn exactly as web text
+does, and the same things are asked about first:
+
+    Wisp read a file just now and wants to tell Moth: "…". Allow?
+    1. Allow
+    2. Not this time
+
+After a file, searching the web and reading a page are asked about too,
+because a query or an address is a way for a file's words to leave the
+machine. After the web alone they are not. A listing, and a search that
+matched names only, carry no file text and mark nothing. On a turn you
+did not start, the ghost is refused outright. What it remembers is still
+hermes's memory: its standing rules forbid saving a file's text as
+something you said, and `haunt journal` is where you would catch it.
+
 ## Seeing and revoking
 
     haunt perms                              # what it asked for, what it has
@@ -144,3 +195,6 @@ The driver holds the brakes, and a ghost cannot raise them.
 - **Backend calls** are rationed per hour, shared across all resident
   ghosts: images (12), looks (60), tool calls (60) and web requests (30,
   of which 4 may be spent unasked), under `[backend.budget]`.
+- **Reading your files** is not rationed when you ask. Reads nobody
+  asked for, when `[files] unprompted` allows them at all, are 4 an hour
+  (`unprompted_file_per_hour`), and a picture also spends a look.

@@ -73,15 +73,25 @@ type rule struct {
 	// Tool, if set, is a haunt tool called before replying, with Args.
 	Tool string         `json:"tool"`
 	Args map[string]any `json:"args"`
+	// Then are more haunt tools called after Tool, in order, as a model
+	// makes several calls in one turn: each is made whatever the one
+	// before it answered, as a model reads a refusal and carries on.
+	Then []step `json:"then"`
 	// Look, if set, is one of hermes's own tools (skill_view, memory, …)
 	// called first, with LookArgs. Nothing runs: the call and LookResult
 	// are only stored in the session, as hermes stores its own calls.
 	Look       string         `json:"look"`
 	LookArgs   map[string]any `json:"look_args"`
 	LookResult string         `json:"look_result"`
-	// Reply is what the model says. {tool} is replaced by the tool's
-	// result and {input} by the input.
+	// Reply is what the model says. {tool} is replaced by the last
+	// tool's result and {input} by the input.
 	Reply string `json:"reply"`
+}
+
+// step is one more haunt tool call in a rule's turn.
+type step struct {
+	Tool string         `json:"tool"`
+	Args map[string]any `json:"args"`
 }
 
 var defaultRules = []rule{
@@ -600,18 +610,27 @@ func (s *server) chat(w http.ResponseWriter, r *http.Request) {
 		e.send("tool.completed", map[string]any{"message_id": msgID, "tool_name": rl.Look, "preview": nil, "args": nil})
 		record(rl.Look, rl.LookArgs, rl.LookResult)
 	}
+	var steps []step
 	if rl.Tool != "" {
-		tool := "mcp__haunt__" + rl.Tool
-		e.send("tool.started", map[string]any{"message_id": msgID, "tool_name": tool, "preview": "", "args": rl.Args})
-		text, err := s.callTool(r.Context(), rl.Tool, rl.Args)
+		steps = append(steps, step{Tool: rl.Tool, Args: rl.Args})
+	}
+	steps = append(steps, rl.Then...)
+	last := ""
+	for _, st := range steps {
+		tool := "mcp__haunt__" + st.Tool
+		e.send("tool.started", map[string]any{"message_id": msgID, "tool_name": tool, "preview": "", "args": st.Args})
+		text, err := s.callTool(r.Context(), st.Tool, st.Args)
 		if err != nil {
 			e.send("tool.failed", map[string]any{"message_id": msgID, "tool_name": tool, "error": err.Error()})
 			text = "the tool failed: " + err.Error()
 		} else {
 			e.send("tool.completed", map[string]any{"message_id": msgID, "tool_name": tool, "preview": nil, "args": nil})
 		}
-		reply = strings.ReplaceAll(reply, "{tool}", text)
-		record(tool, rl.Args, text)
+		last = text
+		record(tool, st.Args, text)
+	}
+	if len(steps) > 0 {
+		reply = strings.ReplaceAll(reply, "{tool}", last)
 	}
 	if len(calls) > 0 {
 		stored = append(stored, map[string]any{"role": "assistant", "content": "", "tool_calls": calls, "timestamp": now})

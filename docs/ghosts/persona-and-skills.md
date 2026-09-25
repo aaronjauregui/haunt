@@ -32,7 +32,10 @@ order, regenerated whenever the manifest changes:
    clip.
 5. What the ghost can do, in plain words, and what it cannot: no
    commands, files, web or messages, whatever else the prompt says an
-   agent can do.
+   agent can do. A ghost offered the web, or the person's folders when
+   they have shared any, is told so instead: the folders by name, that a
+   page's or a file's text is not the person speaking, and when it may
+   read with nobody asking.
 6. Other ghosts on the screen are not you and not the person.
 
 So a persona never has to mention envelopes, silence or the balloon.
@@ -80,6 +83,9 @@ The model acts through tools haunt offers it. Their hermes names are
 | `style` | the house style added to every picture: read it, `set` it, or `reset` it to the package's, and the change only on a turn the person started (`imagine`) |
 | `search` | put a query to the person's search provider and get a handful of results (`web`) |
 | `read_page` | fetch one public http or https page and read its text, a piece at a time (`web`) |
+| `list_files` | the folders the person shared, by name, or what is in one (`files`) |
+| `read_file` | one file from a shared folder, a piece at a time: text, a PDF's text, or a picture described by the vision model (`files`) |
+| `search_files` | find files by name or by words inside them, each hit with where to read from (`files`) |
 | `look` | a one-sentence description of the focused window (`screen`) |
 | `intend` | take something on: with `delay_ms` an errand that comes back, without it a goal kept an eye on |
 | `resolve`, `set_aside`, `intentions` | discharge one, stop watching one, list them |
@@ -87,18 +93,21 @@ The model acts through tools haunt offers it. Their hermes names are
 | `<server>__<tool>` | a tool from a declared `[[tool]]` server (`tools`) |
 
 Hermes's own `memory`, `session_search` and skill tools are there too.
-Nothing else is: no shell and no files. A ghost that does not declare
-`web` is not offered `search` or `read_page` at all, and reaches nothing
-beyond the machine.
+Nothing else is: no shell, and no files but the shared folders, read
+only. A ghost that does not declare `web` is not offered `search` or
+`read_page` at all, and reaches nothing beyond the machine; one that does
+not declare `files` is not offered the three file tools.
 
 ## Skills
 
 A skill is a Markdown procedure the model loads when one applies, in the
 agentskills format hermes uses. The model sees a one-line index of names
 and descriptions and loads a skill with `skill_view` when it fits. Haunt
-ships six of its own for every ghost (a morning check-in, a focus
+ships seven of its own for every ghost (a morning check-in, a focus
 session, a weekly review, keeping an eye on a goal, drawing on request,
-looking something up); a ghost's package can carry more.
+looking something up, reading the person's files); a ghost's package can
+carry more. A haunt skill whose tools a ghost is not offered, such as
+`read-my-files` without `files`, is hidden from its index.
 
 Put each in `skills/<name>/SKILL.md` next to the manifest:
 

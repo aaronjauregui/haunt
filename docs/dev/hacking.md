@@ -37,7 +37,7 @@ Where the tests are:
 The hermes tests need no hermes: the fake in `testdata/fakehermes`
 speaks the gateway's HTTP and SSE, spawns `haunt mcp-serve` the way
 hermes does, and follows a script given in `FAKEHERMES_SCRIPT` (match a
-turn, delay, call a tool, reply).
+turn, delay, call a tool or several in turn, reply).
 
 ## Demos
 
@@ -105,13 +105,17 @@ the report lists what was missing:
 - Optionally `[backend.image]` for the picture cases (`draw`,
   `show-again`, `change-picture`, `vary-restraint`, `style-standing`,
   `style-oneoff`) and
-  `[backend.vision]` for `look`; without them those cases are skipped.
+  `[backend.vision]` for `look` and `files-picture`; without them those
+  cases are skipped.
   The web cases (`look-it-up`, `morning-web`) need no configuration: the
   trial runs a canned SearXNG of its own, so the answer they grade is a
   known one. Nothing in the suite reads a page — the page dialler refuses
   loopback, which is the point of it — so `read_page` and what a tainted
   turn may do are covered by the unit tests in `internal/backend` and
   `internal/ghost` instead.
+  The files cases (`files-find`, `files-injection`, `files-restraint`,
+  `files-picture`) share a folder the trial seeds for itself, as the
+  root `notes`, so they need no folder of yours.
 
 ### What a case is
 
