@@ -78,7 +78,11 @@ func (rs *Roots) list(p string) (string, error) {
 	})
 
 	const moreRoom = 80
-	l := newLines(fmt.Sprintf("[folder %s · %d entries]\n", display(t.shown()), len(es)), moreRoom)
+	noun := "entries"
+	if len(es) == 1 {
+		noun = "entry"
+	}
+	l := newLines(fmt.Sprintf("[folder %s · %d %s]\n", display(t.shown()), len(es), noun), moreRoom)
 	if len(es) == 0 {
 		l.add("(empty)")
 	}
