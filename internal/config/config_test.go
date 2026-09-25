@@ -126,3 +126,113 @@ func TestAnImpossibleLateHourIsRefused(t *testing.T) {
 		t.Fatal("late_hour = 3 was accepted")
 	}
 }
+
+// Shared folders come out absolute and clean, with ~ expanded, so nothing
+// downstream has to know the person wrote them by hand.
+func TestSharedFoldersAreExpanded(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	write(t, `
+[files]
+unprompted = "skills"
+
+[files.roots]
+notes = "~/notes"
+home = "~"
+recipes = "/srv/recipes/../recipes/"
+`)
+	f, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"notes":   filepath.Join(home, "notes"),
+		"home":    home,
+		"recipes": "/srv/recipes",
+	}
+	for name, dir := range want {
+		if got := f.Files.Roots[name]; got != dir {
+			t.Errorf("root %s = %q, want %q", name, got, dir)
+		}
+	}
+	if got := strings.Join(f.Files.RootNames(), " "); got != "home notes recipes" {
+		t.Errorf("root names = %q, want them sorted", got)
+	}
+	if got := f.Files.UnpromptedMode(); got != FilesSkills {
+		t.Errorf("unprompted = %q, want skills", got)
+	}
+}
+
+// Files start closed: with nothing set, no folder is shared and a ghost
+// may not read on a turn the person did not start.
+func TestFilesDefaultToNothingAndNever(t *testing.T) {
+	t.Setenv("HAUNT_CONFIG_DIR", t.TempDir())
+	f, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Files.Roots) != 0 {
+		t.Errorf("roots = %v, want none", f.Files.Roots)
+	}
+	if got := f.Files.UnpromptedMode(); got != FilesNever {
+		t.Errorf("unprompted = %q, want never", got)
+	}
+	if f.Backend.Budget.UnpromptedFilePerHour != 4 {
+		t.Errorf("unprompted_file_per_hour = %d, want the default 4",
+			f.Backend.Budget.UnpromptedFilePerHour)
+	}
+}
+
+// A folder that is not there, like an unmounted drive, is not a mistake in
+// the config: it may be there tomorrow.
+func TestAMissingFolderIsNotAConfigError(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "not-mounted")
+	write(t, "[files.roots]\nusb = \""+missing+"\"\n")
+	f, err := Load()
+	if err != nil {
+		t.Fatalf("a missing folder was refused: %v", err)
+	}
+	if f.Files.Roots["usb"] != missing {
+		t.Errorf("root usb = %q, want %q", f.Files.Roots["usb"], missing)
+	}
+}
+
+// Each mistake in [files] is a startup error naming the file, rather than
+// a ghost that cannot find a folder the person thinks they shared.
+func TestABadFilesSectionNamesItself(t *testing.T) {
+	for name, body := range map[string]string{
+		"a capital in a name":    "[files.roots]\nNotes = \"/srv/notes\"\n",
+		"a slash in a name":      "[files.roots]\n\"a/b\" = \"/srv/notes\"\n",
+		"a leading dash":         "[files.roots]\n-notes = \"/srv/notes\"\n",
+		"a name too long":        "[files.roots]\n" + strings.Repeat("a", 33) + " = \"/srv/notes\"\n",
+		"an empty name":          "[files.roots]\n\"\" = \"/srv/notes\"\n",
+		"a relative path":        "[files.roots]\nnotes = \"notes\"\n",
+		"someone else's home":    "[files.roots]\nnotes = \"~bob/notes\"\n",
+		"an empty path":          "[files.roots]\nnotes = \"\"\n",
+		"a duplicate root":       "[files.roots]\nnotes = \"/srv/a\"\nnotes = \"/srv/b\"\n",
+		"a bad unprompted value": "[files]\nunprompted = \"sometimes\"\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			write(t, body)
+			_, err := Load()
+			if err == nil {
+				t.Fatal("accepted")
+			}
+			if !strings.Contains(err.Error(), "config.toml") {
+				t.Errorf("error does not name the file: %v", err)
+			}
+		})
+	}
+}
+
+// A FilesConfig built by hand, without Load, still reads as closed.
+func TestUnpromptedFilesDefaultToNever(t *testing.T) {
+	for set, want := range map[string]string{
+		"": FilesNever, "nonsense": FilesNever,
+		"never": FilesNever, "skills": FilesSkills, "any": FilesAny,
+	} {
+		if got := (FilesConfig{Unprompted: set}).UnpromptedMode(); got != want {
+			t.Errorf("unprompted %q = %q, want %q", set, got, want)
+		}
+	}
+}

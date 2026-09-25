@@ -219,6 +219,60 @@ func TestSearchSpendsItsBudget(t *testing.T) {
 	}
 }
 
+// The unprompted file ration is its own: spending it leaves the search
+// ration alone, and it runs out at the configured number.
+func TestUnpromptedFileReadsSpendTheirOwnRation(t *testing.T) {
+	s := NewService(&Config{
+		Budget: BudgetConfig{UnpromptedSearchPerHour: 1, UnpromptedFilePerHour: 2},
+	}, nil)
+	for i := range 2 {
+		if err := s.SpendUnpromptedFile(); err != nil {
+			t.Fatalf("read %d: %v", i+1, err)
+		}
+	}
+	if err := s.SpendUnpromptedFile(); err == nil ||
+		!strings.Contains(err.Error(), "unprompted file budget") {
+		t.Fatalf("third read: err = %v, want an unprompted file budget refusal", err)
+	}
+	if err := s.SpendUnpromptedSearch(); err != nil {
+		t.Fatalf("file reads spent the search ration: %v", err)
+	}
+}
+
+func TestUnpromptedFileRationDefaultsToFour(t *testing.T) {
+	if got := WithDefaults(Config{}).Budget.UnpromptedFilePerHour; got != 4 {
+		t.Errorf("default unprompted_file_per_hour = %d, want 4", got)
+	}
+	s := NewService(&Config{}, nil)
+	for i := range 4 {
+		if err := s.SpendUnpromptedFile(); err != nil {
+			t.Fatalf("read %d: %v", i+1, err)
+		}
+	}
+	if err := s.SpendUnpromptedFile(); err == nil {
+		t.Fatal("a Config built directly got more than the default ration")
+	}
+}
+
+// A troupe shares one Budgets, so two ghosts reading unwatched draw on one
+// ration between them rather than one each.
+func TestTheFileRationIsSharedAcrossATroupe(t *testing.T) {
+	cfg := &Config{Budget: BudgetConfig{UnpromptedFilePerHour: 1}}
+	shared := NewBudgets(cfg.Budget)
+	a := NewServiceWith(cfg, nil, shared)
+	b := NewServiceWith(cfg, nil, shared)
+	if err := a.SpendUnpromptedFile(); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SpendUnpromptedFile(); err == nil {
+		t.Fatal("a second ghost read on a ration the first had spent")
+	}
+	// A ghost running alone has its own.
+	if err := NewService(cfg, nil).SpendUnpromptedFile(); err != nil {
+		t.Fatalf("a ghost alone was refused: %v", err)
+	}
+}
+
 func TestUnpromptedDefaultsToSkills(t *testing.T) {
 	for cfg, want := range map[string]string{"": "skills", "nonsense": "skills", "any": "any", "never": "never"} {
 		s := searchService(t, SearchConfig{Backend: "brave", Unprompted: cfg})
