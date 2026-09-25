@@ -64,11 +64,14 @@ session search, skills, and haunt's own verbs offered as tools through
 `haunt mcp-serve` (speak, ask, wear a face, draw, show a picture again,
 list its pictures, change the style it draws in, look, hold a reminder,
 tell another ghost, and whatever tool servers the manifest declares). A
-ghost that declares `web` is also offered search and page reading; one
-that does not is not told they exist. No shell, no files, no browser, and
-hermes's own web toolset stays off whatever the ghost may look up. Every
-verb goes through the same consent, budgets and quiet rules as anything
-else the ghost does.
+ghost that declares `web` is also offered search and page reading, and
+one that declares `files` is offered listing, reading and searching the
+folders you share; one that does not is not told they exist. Your files
+are read by haunt and handed over a piece at a time: hermes never sees
+the folders themselves, and its own file toolset stays off. No shell, no
+writing files, no browser, and hermes's own web toolset stays off
+whatever the ghost may look up. Every verb goes through the same
+consent, budgets and quiet rules as anything else the ghost does.
 
 What hermes holds about you is in the profile, in plain text:
 `memories/MEMORY.md` and `memories/USER.md`.

@@ -40,6 +40,8 @@ internal/
   mcp                a small MCP stdio client: start a server, list its tools, call one
   backend            the models and services the driver calls itself, for drawing, looking,
                      searching the web and reading a page, and the hourly budgets
+  files              the folders the person shares, read only: named roots, os.Root confinement,
+                     paging text and PDFs, preparing pictures, search
   shell              the shell format: layers, variants, poses, clips, transforms, hit regions
   sprite             decoded art: premultiplied buffers and alpha input regions
   artimport          OpenRaster drawing to shell

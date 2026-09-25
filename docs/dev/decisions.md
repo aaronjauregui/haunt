@@ -106,6 +106,19 @@ constraint on changes, not a history.
   in the balloon, and refused outright on a turn the person did not
   start. Showing them something is not one of those verbs; telling
   somebody else is.
+- **Files are the driver's to read, not a toolset handed to hermes.**
+  The grant, the unprompted policy, the ration, the journal and the taint
+  all need the driver to see the read. Hermes's file toolset cannot be
+  split from its writing tools, native hermes would have no confinement,
+  and a read through a bind mount is one the driver never sees. So the
+  person names folders in the config, the model sees only their names,
+  and the driver reads through an `os.Root` per folder.
+- **Taint records its source.** A file is a stranger's words as much as
+  a page is, and marks the turn the same way. What differs is what may
+  leave afterwards: after a file, a search query or a page's address is
+  asked about too, since either could carry the file's text off the
+  machine; after the web alone they stay free, because they send nothing
+  that was not already out there.
 
 ## The shell
 
