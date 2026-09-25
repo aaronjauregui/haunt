@@ -57,10 +57,10 @@ type builtinTool struct {
 	leaves bool
 	// declared names a capability the package must have asked for before
 	// the tool is offered at all. Most verbs are listed whatever the
-	// manifest says and refused when they are used; the web ones are not,
-	// because a skill that needs `search` is hidden when `search` is not
-	// on the list, which is how a ghost with no web stops claiming it can
-	// look things up (docs/dev/hermes.md).
+	// manifest says and refused when they are used; the web and files
+	// ones are not, because a skill that needs `search` is hidden when
+	// `search` is not on the list, which is how a ghost with no web stops
+	// claiming it can look things up (docs/dev/hermes.md).
 	declared string
 }
 
@@ -168,6 +168,29 @@ var builtinTools = map[string]builtinTool{
 		call:     toolReadPage,
 		declared: "web",
 		leaves:   true,
+	},
+	// The files verbs are read-only, and none of them is a side effect or
+	// leaves the machine: what they add to a turn is taint (files.go).
+	"list_files": {
+		desc: "See what is in the folders the person shared with you. No path lists the folders; " +
+			"a path like notes/2026 lists what is in it.",
+		schema:   schema("path?:string"),
+		call:     toolListFiles,
+		declared: "files",
+	},
+	"read_file": {
+		desc: "Read one file from a shared folder: text, a PDF, or a picture (described to you). " +
+			"Returns a piece at a time; from continues where the last read stopped. question is for pictures.",
+		schema:   schema("path:string", "from?:integer", "question?:string"),
+		call:     toolReadFile,
+		declared: "files",
+	},
+	"search_files": {
+		desc: "Find files by name or by words inside them, in the shared folders or under path. " +
+			"Case does not matter. Each hit gives a from to pass to read_file.",
+		schema:   schema("text:string", "path?:string", "names_only?:boolean"),
+		call:     toolSearchFiles,
+		declared: "files",
 	},
 	"look": {
 		desc:   "Look at the person's focused window and get a one-sentence description. The person sees you looking.",

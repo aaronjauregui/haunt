@@ -807,7 +807,7 @@ const maxWords = 60
 var ghostTools = []string{
 	"say", "ask", "ask_text", "face", "clip", "draw", "show", "pictures",
 	"style", "search", "read_page", "look", "intend", "resolve", "set_aside",
-	"intentions", "tell",
+	"intentions", "tell", "list_files", "read_file", "search_files",
 	"memory", "skill_view", "skills_list", "session_search",
 }
 

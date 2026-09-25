@@ -1148,14 +1148,21 @@ func (g *Ghost) hermesPersona() hermes.Persona {
 			p.Clips = append(p.Clips, c.Name)
 		}
 	}
-	for _, c := range []struct{ cap, what string }{
-		{"imagine", "paint a picture in your balloon, and show one you painted before, in a style of your own that they can change"},
-		{"screen", "look at the window they have open"},
-		{"tell", "speak to the other ghosts"},
-		{"tools", "use the tools listed in your schemas to do things for them"},
-		{"web", "look things up on the web and read a page"},
+	// Files need a folder shared as well as the package asking: a ghost
+	// with nothing to read has nothing to say it can read.
+	shares := g.declares("files") && len(g.filesCfg.Roots) > 0
+	for _, c := range []struct {
+		on   bool
+		what string
+	}{
+		{shares, "read the files in folders they have shared with you"},
+		{g.declares("imagine"), "paint a picture in your balloon, and show one you painted before, in a style of your own that they can change"},
+		{g.declares("screen"), "look at the window they have open"},
+		{g.declares("tell"), "speak to the other ghosts"},
+		{g.declares("tools"), "use the tools listed in your schemas to do things for them"},
+		{g.declares("web"), "look things up on the web and read a page"},
 	} {
-		if g.declares(c.cap) {
+		if c.on {
 			p.Abilities = append(p.Abilities, c.what)
 		}
 	}
@@ -1168,6 +1175,13 @@ func (g *Ghost) hermesPersona() hermes.Persona {
 		if g.backend != nil {
 			p.Unprompted = g.backend.Unprompted()
 		}
+	}
+	// The same for files, with the folders by name — never their host
+	// paths, which would put the person's username in SOUL.md.
+	if shares {
+		p.Files = true
+		p.FileRoots = g.filesCfg.RootNames()
+		p.FilesUnprompted = g.filesCfg.UnpromptedMode()
 	}
 	return p
 }

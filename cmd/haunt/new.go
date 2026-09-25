@@ -62,8 +62,9 @@ author = ""
 # Capabilities the ghost asks the user to grant. Declaring one only means
 # it may *ask*: llm is what lets it talk, "window" lets it offer to notice
 # what you are working on (from its menu, and only if you say yes). Add
-# "imagine" for pictures, "screen" to let it look at them, and "web" to let
-# it search and read a page.
+# "imagine" for pictures, "screen" to let it look at them, "web" to let it
+# search and read a page, and "files" to let it read the folders you share
+# in haunt's config.
 capabilities = ["message", "llm", "window"]
 
 [shell]

@@ -147,6 +147,9 @@ var KnownCapabilities = map[string]string{
 	"tools":  "do things through the tool servers it declares, one tool at a time",
 	"screen": "take pictures of the focused window and show them to a vision model",
 	"web":    "search the web and read pages, sending your words and its queries to your search provider",
+	// The folders are the person's consent, in the config; this is which
+	// ghosts may use them. Every ghost granted it sees every folder.
+	"files": "read (never change) the files in the folders you list in haunt's config",
 }
 
 type GhostSection struct {

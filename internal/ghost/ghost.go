@@ -25,6 +25,7 @@ import (
 	"github.com/aaronjauregui/haunt/internal/config"
 	"github.com/aaronjauregui/haunt/internal/control"
 	"github.com/aaronjauregui/haunt/internal/desktop"
+	"github.com/aaronjauregui/haunt/internal/files"
 	"github.com/aaronjauregui/haunt/internal/hermes"
 	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/mcp"
@@ -306,6 +307,11 @@ type Ghost struct {
 	// it is started (see awareness.go).
 	awareness config.AwarenessConfig
 	watching  atomic.Bool
+	// files are the folders the person shared in the config, opened for
+	// reading, and filesCfg the [files] section they came from, for its
+	// unprompted policy (files.go). Nil until the settings are applied.
+	files    *files.Roots
+	filesCfg config.FilesConfig
 	// sess is the session model the watch loop is feeding, reachable from
 	// here so teardown can write its state out while the store is still
 	// open. The loop owns Observe; sessMu is what lets anyone else read it.
@@ -445,6 +451,7 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	if err := g.applySettings(cfg); err != nil {
 		return err
 	}
+	defer g.files.Close()
 
 	if err := g.startBrain(ctx); err != nil {
 		return err
@@ -716,6 +723,17 @@ func (g *Ghost) applySettings(cfg *config.File) error {
 	// capabilities error out when used).
 	g.backend = backend.NewServiceWith(cfg.Backend, g.log, g.opts.Budgets)
 	g.hermesCfg = cfg.Hermes
+
+	// The folders the person shared. One that cannot be opened (a drive
+	// not mounted) is a warning, not a failure: it is listed as
+	// unavailable and tried again when asked for. The warnings name host
+	// paths, which belong in the person's log and nowhere the model reads.
+	g.filesCfg = cfg.Files
+	var warnings []error
+	g.files, warnings = files.Open(cfg.Files.Roots)
+	for _, w := range warnings {
+		g.log.Warn(hlog.Session, "%v", w)
+	}
 	return nil
 }
 
