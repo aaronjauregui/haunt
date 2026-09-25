@@ -577,10 +577,10 @@ func (b *hermesBrain) run(t hermesTurn) (out turnOutcome) {
 	}
 	userDriven := g.respondingToUser()
 	g.forgetTurnPictures()
-	// What the web tools are allowed to do, and what the rest of the turn
-	// may do once they have brought somebody else's words in, both turn on
-	// what this turn is (web.go).
-	g.startWebTurn(t.person, t.kind())
+	// What the reading tools are allowed to do, and what the rest of the
+	// turn may do once they have brought somebody else's words in, both
+	// turn on what this turn is (web.go).
+	g.startTurn(t.person, t.kind())
 	// A deferred closure, not a deferred call: waiting may be started
 	// below, after the capability check.
 	waiting := t.waiting

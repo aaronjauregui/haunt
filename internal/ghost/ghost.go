@@ -288,9 +288,9 @@ type Ghost struct {
 	picturesDir string
 	picMu       sync.Mutex
 	turnPics    []string
-	// web is what the turn in flight is, and whether anything from the web
-	// has entered it (web.go).
-	web  webState
+	// turn is what the turn in flight is, and what it has read that
+	// nobody in the room wrote (web.go).
+	turn turnState
 	aiMu sync.Mutex // one AI request at a time per ghost
 
 	// Typed input (see input.go).

@@ -379,7 +379,7 @@ The kinds `skills` leaves out — `session`, `idle`, `observed`, `told`,
 `help` — are the ones whose envelope carries what the person has on
 screen, and a window title is the thing that must never become a query.
 The turn's kind and whether somebody is waiting on it are recorded when
-the turn starts (`startWebTurn`), because a tool call arrives on the
+the turn starts (`startTurn`), because a tool call arrives on the
 control socket and cannot see the turn it belongs to. Every unprompted
 call also spends `unprompted_search_per_hour` before the general ration
 and is refused outright during quiet hours; each refusal names its
@@ -412,7 +412,7 @@ to ask and it is refused. The gate is one check in the dispatch path
 in `serverTool`, rather than a line in each tool function, so a verb added
 later is gated by its table entry.
 
-The state is a mutex-guarded `webState` on the ghost rather than a field
+The state is a mutex-guarded `turnState` on the ghost rather than a field
 on `hermesTurn`: a tool call arrives on the control socket and is served
 on a connection of its own, so two calls in one turn can overlap if hermes
 ever issues them in parallel, and a security decision that depends on a
