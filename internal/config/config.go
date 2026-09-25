@@ -18,6 +18,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -42,6 +45,7 @@ type File struct {
 	Animation AnimationConfig
 	Awareness AwarenessConfig
 	Curiosity CuriosityConfig
+	Files     FilesConfig
 	// Hermes is where the ghosts' brain lives (docs/dev/hermes.md).
 	Hermes hermes.Config
 }
@@ -54,6 +58,7 @@ type root struct {
 	Animation AnimationConfig `toml:"animation"`
 	Awareness AwarenessConfig `toml:"awareness"`
 	Curiosity CuriosityConfig `toml:"curiosity"`
+	Files     FilesConfig     `toml:"files"`
 	Hermes    hermes.Config   `toml:"hermes"`
 }
 
@@ -99,9 +104,13 @@ func Load() (*File, error) {
 		Animation: r.Animation,
 		Awareness: r.Awareness,
 		Curiosity: r.Curiosity,
+		Files:     r.Files,
 		Hermes:    r.Hermes,
 	}
 	if err := f.Awareness.derive(path); err != nil {
+		return nil, err
+	}
+	if err := f.Files.derive(path); err != nil {
 		return nil, err
 	}
 	// What [backend] points at is checked here rather than on first use,
@@ -206,6 +215,98 @@ func (c *AwarenessConfig) derive(path string) error {
 				path, h, session.EarliestLateHour)
 		}
 		c.Session.LateHour = h
+	}
+	return nil
+}
+
+// FilesConfig is the [files] portion of the user config: the folders a
+// ghost granted the files capability may read. The config is the person's
+// consent to the folders; the capability decides which ghosts use them.
+// It is read at startup and not editable at runtime.
+type FilesConfig struct {
+	// Roots names each shared folder: `notes = "~/notes"` lets a ghost read
+	// notes/2026/todo.md. The model only ever sees the name, so neither the
+	// host path nor the username reaches it. After load the paths are
+	// absolute and clean, with a leading ~ expanded. Empty shares nothing,
+	// the same as an empty [backend.search].
+	Roots map[string]string `toml:"roots"`
+	// Unprompted says when a ghost may read files on a turn the person did
+	// not start: "never" (default), "skills" or "any". The default is
+	// closed, unlike search, because files are more personal than the web.
+	Unprompted string `toml:"unprompted"`
+}
+
+// Unprompted modes for [files], the same three as [backend.search].
+const (
+	FilesNever  = "never"
+	FilesSkills = "skills"
+	FilesAny    = "any"
+)
+
+// rootName is what a root may be called. It is the first segment of every
+// path the model writes, so it is kept to something a small model spells
+// right and that can never be mistaken for a path of its own.
+var rootName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
+
+// UnpromptedMode is Unprompted with its default: never. Load refuses
+// anything else, so the default only covers a FilesConfig built by hand.
+func (c FilesConfig) UnpromptedMode() string {
+	switch c.Unprompted {
+	case FilesSkills, FilesAny:
+		return c.Unprompted
+	default:
+		return FilesNever
+	}
+}
+
+// RootNames is the shared folders' names, sorted, so that listing them
+// reads the same every time.
+func (c FilesConfig) RootNames() []string {
+	names := make([]string, 0, len(c.Roots))
+	for name := range c.Roots {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
+}
+
+// derive checks the roots and expands ~ in their paths. A mistake here is
+// a startup error naming the file, because a folder the person meant to
+// share and did not is worth hearing about at once. A root whose directory
+// is missing is not a mistake: an unmounted drive comes back, so that is
+// left to whoever opens the roots to report. path is only for error
+// messages.
+func (c *FilesConfig) derive(path string) error {
+	switch c.Unprompted {
+	case "", FilesNever, FilesSkills, FilesAny:
+	default:
+		return fmt.Errorf("parsing %s: [files] unprompted %q: use %q, %q or %q",
+			path, c.Unprompted, FilesNever, FilesSkills, FilesAny)
+	}
+	// Two roots cannot share a name: TOML refuses a repeated key, so that
+	// arrives here as a parse error that already names the file.
+	var home string
+	for _, name := range c.RootNames() {
+		if !rootName.MatchString(name) {
+			return fmt.Errorf("parsing %s: [files.roots] %q: a name is 1-32 lowercase letters, "+
+				"digits, - or _, starting with a letter or digit", path, name)
+		}
+		dir := c.Roots[name]
+		if dir == "~" || strings.HasPrefix(dir, "~/") {
+			if home == "" {
+				h, err := os.UserHomeDir()
+				if err != nil {
+					return fmt.Errorf("parsing %s: [files.roots] %s = %q: %w", path, name, dir, err)
+				}
+				home = h
+			}
+			dir = filepath.Join(home, dir[1:])
+		}
+		if !filepath.IsAbs(dir) {
+			return fmt.Errorf("parsing %s: [files.roots] %s = %q: the path must be absolute or start with ~/",
+				path, name, c.Roots[name])
+		}
+		c.Roots[name] = filepath.Clean(dir)
 	}
 	return nil
 }

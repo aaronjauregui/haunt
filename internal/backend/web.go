@@ -118,6 +118,18 @@ func (s *Service) SpendUnpromptedSearch() error {
 	return nil
 }
 
+// SpendUnpromptedFile charges the ration a ghost may spend reading the
+// person's shared folders while nobody is watching. It is the only charge
+// on a file read: reads on the person's turn are not metered, since a
+// local file costs tokens rather than money. A picture also spends the
+// vision budget, which DescribeImage charges itself.
+func (s *Service) SpendUnpromptedFile() error {
+	if err := s.budgets.files.spend(); err != nil {
+		return fmt.Errorf("unprompted file budget: %w", err)
+	}
+	return nil
+}
+
 // Search asks the configured provider for n results. The text that comes
 // back is the web's, not the person's: callers hand it to a model inside an
 // envelope that says so.
