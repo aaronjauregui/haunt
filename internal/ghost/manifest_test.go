@@ -317,3 +317,70 @@ func TestManifestWebCapability(t *testing.T) {
 		t.Error("web has no description to ask the person with")
 	}
 }
+
+// Every file the shell names stays inside the ghost directory, not only
+// the sprite: a layer image, a variant or a mask outside it would be read
+// from wherever the author pointed, on the machine of whoever installed
+// the ghost.
+func TestManifestShellPathsStayInside(t *testing.T) {
+	const head = `[ghost]
+name = "wisp"
+capabilities = ["message", "llm"]
+
+`
+	for _, tc := range []struct{ name, shell, bad string }{{
+		name: "sprite",
+		shell: `[shell]
+sprite = "../outside.png"
+`,
+		bad: "../outside.png",
+	}, {
+		name: "layer image",
+		shell: `[[shell.layer]]
+name = "body"
+image = "../body.png"
+`,
+		bad: "../body.png",
+	}, {
+		name: "variant",
+		shell: `[[shell.layer]]
+name = "mouth"
+default = "closed"
+[shell.layer.variants]
+closed = "mouth.png"
+open = "art/../../mouth-open.png"
+`,
+		bad: "art/../../mouth-open.png",
+	}, {
+		name: "mask",
+		shell: `[shell.masks]
+silhouette = "../silhouette.png"
+
+[[shell.layer]]
+name = "body"
+image = "body.png"
+`,
+		bad: "../silhouette.png",
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := writeManifest(t, head+tc.shell)
+			_, err := LoadManifest(dir)
+			want := "path \"" + tc.bad + "\" must be relative and stay inside the ghost directory"
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("err = %v, want %q", err, want)
+			}
+		})
+	}
+
+	// And a shell whose files are all inside loads.
+	dir := writeManifest(t, head+`[shell.masks]
+silhouette = "masks/silhouette.png"
+
+[[shell.layer]]
+name = "body"
+image = "art/body.png"
+`)
+	if _, err := LoadManifest(dir); err != nil {
+		t.Fatalf("a shell inside its directory: %v", err)
+	}
+}

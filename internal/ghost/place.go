@@ -62,13 +62,14 @@ func (g *Ghost) savePlace(x, y int) {
 
 // startingPlace decides where a ghost opens: an explicit -x/-y wins, then
 // the remembered spot if its screen is still there, then a default corner
-// of the first screen.
-func (g *Ghost) startingPlace(app *wlclient.App, optX, optY int, explicit bool) (output string, x, y int) {
-	return g.startingPlaceOn(app.Outputs(), optX, optY, explicit)
+// of the first screen. w and h are the sprite's size, which the corner
+// needs so that the whole ghost fits in it.
+func (g *Ghost) startingPlace(app *wlclient.App, optX, optY int, explicit bool, w, h int) (output string, x, y int) {
+	return g.startingPlaceOn(app.Outputs(), optX, optY, explicit, w, h)
 }
 
 // startingPlaceOn is startingPlace against a known set of screens.
-func (g *Ghost) startingPlaceOn(outs []wlclient.Output, optX, optY int, explicit bool) (output string, x, y int) {
+func (g *Ghost) startingPlaceOn(outs []wlclient.Output, optX, optY int, explicit bool, w, h int) (output string, x, y int) {
 	if explicit {
 		// An explicit position still needs a screen to be relative to.
 		if len(outs) > 0 {
@@ -96,16 +97,19 @@ func (g *Ghost) startingPlaceOn(outs []wlclient.Output, optX, optY int, explicit
 		return "", optX, optY
 	}
 	o := outs[0]
-	x, y = defaultSpot(o)
+	x, y = defaultSpot(o, w, h)
 	return o.Name, x, y
 }
 
 // defaultSpot is the lower-right of a screen, inset a little: out of the
-// way of most windows, and where a desktop mascot conventionally sits.
-func defaultSpot(o wlclient.Output) (x, y int) {
+// way of most windows, and where a desktop mascot conventionally sits. w
+// and h are the sprite's size, so that a large ghost's first appearance is
+// on the screen rather than hanging off its edge; one larger than the
+// screen is pinned to the top-left corner, which shows as much as fits.
+func defaultSpot(o wlclient.Output, w, h int) (x, y int) {
 	const inset = 48
-	x = int(o.W) - 160 - inset
-	y = int(o.H) - 160 - inset
+	x = int(o.W) - w - inset
+	y = int(o.H) - h - inset
 	if x < 0 {
 		x = 0
 	}

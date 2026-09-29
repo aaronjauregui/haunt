@@ -236,3 +236,84 @@ func TestUnpromptedFilesDefaultToNever(t *testing.T) {
 		}
 	}
 }
+
+// Without [appearance], every ghost is drawn at its own scale.
+func TestAppearanceDefaultsToOne(t *testing.T) {
+	t.Setenv("HAUNT_CONFIG_DIR", t.TempDir())
+	f, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.ShellScale("wisp"); got != 1 {
+		t.Errorf("ShellScale with no config = %v, want 1", got)
+	}
+}
+
+// A ghost's own entry replaces the global factor rather than multiplying
+// it; the other ghosts keep the global one, and a ghost entry that leaves
+// scale out falls back to it too.
+func TestAppearancePerGhostReplacesGlobal(t *testing.T) {
+	write(t, `
+[appearance]
+scale = 1.5
+
+[appearance.ghost.wisp]
+scale = 0.8
+
+[appearance.ghost."my ghost"]
+scale = 2
+
+[appearance.ghost.quiet]
+`)
+	f, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for ghost, want := range map[string]float64{
+		"wisp":     0.8,
+		"my ghost": 2,
+		"quiet":    1.5,
+		"other":    1.5,
+	} {
+		if got := f.ShellScale(ghost); got != want {
+			t.Errorf("ShellScale(%q) = %v, want %v", ghost, got, want)
+		}
+	}
+}
+
+// A per-ghost entry works without a global one.
+func TestAppearancePerGhostAlone(t *testing.T) {
+	write(t, "[appearance.ghost.wisp]\nscale = 0.5\n")
+	f, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.ShellScale("wisp"); got != 0.5 {
+		t.Errorf("ShellScale(wisp) = %v, want 0.5", got)
+	}
+	if got := f.ShellScale("other"); got != 1 {
+		t.Errorf("ShellScale(other) = %v, want 1", got)
+	}
+}
+
+// An explicit scale of zero or less is refused, naming the file and the
+// table, with a quoted name written the way the person has to write it.
+func TestAnImpossibleScaleIsRefused(t *testing.T) {
+	for _, tc := range []struct{ body, want string }{
+		{"[appearance]\nscale = 0\n", "[appearance] scale 0"},
+		{"[appearance]\nscale = -1\n", "[appearance] scale -1"},
+		{"[appearance.ghost.wisp]\nscale = 0\n", "[appearance.ghost.wisp] scale 0"},
+		{"[appearance.ghost.\"my ghost\"]\nscale = -0.5\n", `[appearance.ghost."my ghost"] scale -0.5`},
+	} {
+		write(t, tc.body)
+		_, err := Load()
+		if err == nil {
+			t.Errorf("%q loaded", tc.body)
+			continue
+		}
+		path, _ := Path()
+		if !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%q: error %q does not name %s and %s", tc.body, err, path, tc.want)
+		}
+	}
+}

@@ -16,10 +16,12 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -47,19 +49,21 @@ type File struct {
 	Curiosity CuriosityConfig
 	Files     FilesConfig
 	// Hermes is where the ghosts' brain lives (docs/dev/hermes.md).
-	Hermes hermes.Config
+	Hermes     hermes.Config
+	Appearance AppearanceConfig
 }
 
 // root is the on-disk shape. Separate from File so that File can carry
 // derived fields without them looking like things a user may set.
 type root struct {
-	Quiet     quiet.Config    `toml:"quiet"`
-	Backend   backend.Config  `toml:"backend"`
-	Animation AnimationConfig `toml:"animation"`
-	Awareness AwarenessConfig `toml:"awareness"`
-	Curiosity CuriosityConfig `toml:"curiosity"`
-	Files     FilesConfig     `toml:"files"`
-	Hermes    hermes.Config   `toml:"hermes"`
+	Quiet      quiet.Config     `toml:"quiet"`
+	Backend    backend.Config   `toml:"backend"`
+	Animation  AnimationConfig  `toml:"animation"`
+	Awareness  AwarenessConfig  `toml:"awareness"`
+	Curiosity  CuriosityConfig  `toml:"curiosity"`
+	Files      FilesConfig      `toml:"files"`
+	Hermes     hermes.Config    `toml:"hermes"`
+	Appearance AppearanceConfig `toml:"appearance"`
 }
 
 // Path returns the user config file location. HAUNT_CONFIG_DIR overrides
@@ -98,19 +102,23 @@ func Load() (*File, error) {
 		}
 	}
 	f := &File{
-		Path:      path,
-		Quiet:     r.Quiet,
-		Backend:   backend.WithDefaults(r.Backend),
-		Animation: r.Animation,
-		Awareness: r.Awareness,
-		Curiosity: r.Curiosity,
-		Files:     r.Files,
-		Hermes:    r.Hermes,
+		Path:       path,
+		Quiet:      r.Quiet,
+		Backend:    backend.WithDefaults(r.Backend),
+		Animation:  r.Animation,
+		Awareness:  r.Awareness,
+		Curiosity:  r.Curiosity,
+		Files:      r.Files,
+		Hermes:     r.Hermes,
+		Appearance: r.Appearance,
 	}
 	if err := f.Awareness.derive(path); err != nil {
 		return nil, err
 	}
 	if err := f.Files.derive(path); err != nil {
+		return nil, err
+	}
+	if err := f.Appearance.validate(path); err != nil {
 		return nil, err
 	}
 	// What [backend] points at is checked here rather than on first use,
@@ -372,4 +380,65 @@ func (f *File) ObligationsPerDay() int {
 		return DefaultObligationsPerDay
 	}
 	return *f.Curiosity.ObligationsPerDay
+}
+
+// AppearanceConfig is the [appearance] portion of the user config: how
+// large the person wants their ghosts drawn.
+type AppearanceConfig struct {
+	// Scale multiplies every ghost's own scale. Absent means 1.
+	Scale *float64 `toml:"scale"`
+	// Ghost holds per-ghost settings, keyed by [ghost] name; a ghost's
+	// entry replaces the global one.
+	Ghost map[string]GhostAppearance `toml:"ghost"`
+}
+
+// GhostAppearance is one ghost's [appearance.ghost.<name>] table.
+type GhostAppearance struct {
+	Scale *float64 `toml:"scale"`
+}
+
+// validate refuses a scale of zero or less. Omitting a scale is how to ask
+// for the default, so an explicit zero is more likely a slip than a wish,
+// and a negative size means nothing at all. path is only for error
+// messages.
+func (c *AppearanceConfig) validate(path string) error {
+	if c.Scale != nil && *c.Scale <= 0 {
+		return fmt.Errorf("parsing %s: [appearance] scale %v: use a number above 0, or leave it out for 1",
+			path, *c.Scale)
+	}
+	for _, name := range slices.Sorted(maps.Keys(c.Ghost)) {
+		if s := c.Ghost[name].Scale; s != nil && *s <= 0 {
+			return fmt.Errorf("parsing %s: [appearance.ghost.%s] scale %v: use a number above 0, or leave it out for 1",
+				path, tomlKey(name), *s)
+		}
+	}
+	return nil
+}
+
+// tomlKey writes a table key as the person would have typed it: bare when
+// TOML allows, quoted when the name has spaces or anything else in it.
+func tomlKey(name string) string {
+	if name == "" {
+		return `""`
+	}
+	for _, r := range name {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-') {
+			return strconv.Quote(name)
+		}
+	}
+	return name
+}
+
+// ShellScale is the factor the person wants the ghost drawn at, relative to
+// its shell's own scale: its own entry, else the global one, else 1. The
+// ghost's entry replaces the global factor rather than multiplying it, so
+// that "wisp at 0.8" means the same whatever the global setting is.
+func (f *File) ShellScale(ghost string) float64 {
+	if g, ok := f.Appearance.Ghost[ghost]; ok && g.Scale != nil {
+		return *g.Scale
+	}
+	if f.Appearance.Scale != nil {
+		return *f.Appearance.Scale
+	}
+	return 1
 }

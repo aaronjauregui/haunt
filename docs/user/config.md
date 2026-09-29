@@ -15,6 +15,12 @@ hours = []                      # "HH:MM-HH:MM" windows; overnight allowed, "22:
 reduced_motion = false          # stop idle animation and the face at rest
 expression_inference = "lexicon"   # "lexicon": a face from the words of a scripted line; "off": leave the face alone
 
+[appearance]                    # how large ghosts are drawn; see below
+scale = 1.0                     # a factor on every ghost's own size
+
+# [appearance.ghost.wisp]       # one ghost, by its [ghost] name; replaces the factor above
+# scale = 0.8
+
 [awareness]                     # what a ghost with `window` may notice
 ignore = ["1password", "bitwarden", "keepass", "gnome-keyring", "seahorse",
           "polkit", "pinentry", "gnome-disks", "banking"]
@@ -279,6 +285,26 @@ the words as written, ignoring case, and skips `.git` and
 `node_modules`. PDFs and pictures match by name only; a scanned PDF with
 no text layer has nothing to read. `docs/user/permissions.md` has the
 rest of what sharing a folder means.
+
+## A ghost's size
+
+Each ghost's shell sets the size it is drawn at
+([The shell](../ghosts/shell.md#scale)); `[appearance]` adjusts that for
+your screen. `scale` is a factor on every ghost's own size: `0.5` draws
+them all at half. An `[appearance.ghost.<name>]` table sets one ghost's
+factor in place of that one, keyed by the `name` in its manifest; quote a
+name with anything but letters, digits, `-` and `_` in it:
+
+```toml
+[appearance.ghost."my ghost"]
+scale = 1.5
+```
+
+A factor must be above 0; zero or less is refused when the config loads.
+A ghost is never drawn at more than four times its art's own pixel size,
+whatever the factor, and the log says when a factor was cut short. A
+ghost keeps its place when its size changes: its top-left corner stays
+where it was left.
 
 ## Environment
 

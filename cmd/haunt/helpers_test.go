@@ -286,6 +286,19 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	builds.dir = dir
+	// Every haunt a test launches reads an empty config unless the test
+	// points it somewhere itself: a developer's own [appearance] or quiet
+	// hours would otherwise move pixels and silence ghosts in tests that
+	// never meant to read them. A test's own HAUNT_CONFIG_DIR is appended
+	// after this one, and the last entry wins.
+	if os.Getenv("HAUNT_CONFIG_DIR") == "" {
+		cfgDir := filepath.Join(dir, "config")
+		if err := os.Mkdir(cfgDir, 0o700); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Setenv("HAUNT_CONFIG_DIR", cfgDir)
+	}
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)

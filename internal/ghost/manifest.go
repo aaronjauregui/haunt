@@ -323,7 +323,10 @@ func LoadManifest(dir string) (*Manifest, error) {
 				path, tr.Name, tr.Tool, server)
 		}
 	}
-	rels := []string{m.Brain.Wasm, m.Shell.Sprite}
+	// Every file the shell names, not only the sprite: a layer image or a
+	// mask is read from disk just the same, and a ghost is a package that
+	// may come from someone else.
+	rels := append([]string{m.Brain.Wasm}, m.Shell.Files()...)
 	if hasCmd {
 		rels = append(rels, m.Brain.Command[0])
 	}

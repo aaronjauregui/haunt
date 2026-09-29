@@ -20,6 +20,10 @@ public key's fingerprint is what `haunt install` shows as the author.
 fails here rather than on the person's machine. For a scripted ghost the
 brain module named in the manifest must already be built.
 
+`pack` and `install` both refuse a manifest whose shell names a file
+outside the ghost directory, but neither opens the art, so a shell that
+will not load still packs.
+
 What goes in: every regular file under the directory, sorted, with fixed
 metadata so the same directory always packs to the same bytes. Skipped:
 dot-directories (`.git`) and a directory named `brain`, since the shipped

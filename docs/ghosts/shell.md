@@ -144,6 +144,14 @@ the desktop at 256 while the full-resolution art stays in the ghost
 directory. A clip's `rotate`, `scale` and `opacity` have no unit and are
 used as written.
 
+The person running the ghost can make it larger or smaller with
+`[appearance]` in their [configuration](../user/config.md#a-ghosts-size),
+as a factor of this scale; the result is held to at most 4. A ghost with
+no sprite and no layers wears the built-in placeholder, 160 pixels across
+at scale 1, which follows `scale` too: it is drawn at its size rather
+than resampled, and never smaller than 16 pixels, so a manifest may say
+`[shell] scale` and nothing else.
+
 ### Poses
 
 `[shell.pose.<name>]` maps layer names to variants. Layers not mentioned

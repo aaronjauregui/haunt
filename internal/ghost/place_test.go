@@ -92,7 +92,7 @@ func TestStartingPlace(t *testing.T) {
 				g.outputName = tc.saved.Output
 				g.savePlace(tc.saved.X, tc.saved.Y)
 			}
-			out, x, y := g.startingPlaceOn(tc.outputs, 42, 43, tc.explicit)
+			out, x, y := g.startingPlaceOn(tc.outputs, 42, 43, tc.explicit, 160, 160)
 			if out != tc.wantOut || x != tc.wantX || y != tc.wantY {
 				t.Errorf("placed at %s (%d,%d), want %s (%d,%d)",
 					out, x, y, tc.wantOut, tc.wantX, tc.wantY)
@@ -105,8 +105,38 @@ func TestStartingPlace(t *testing.T) {
 // stop the ghost from starting.
 func TestNoOutputsYet(t *testing.T) {
 	g := placeGhost(t)
-	out, x, y := g.startingPlaceOn(nil, 10, 20, false)
+	out, x, y := g.startingPlaceOn(nil, 10, 20, false, 160, 160)
 	if out != "" || x != 10 || y != 20 {
 		t.Errorf("placed at %s (%d,%d) with no screens, want the given position", out, x, y)
+	}
+}
+
+// TestDefaultSpotFitsTheSprite: the corner is measured from the sprite's
+// own size, so a ghost drawn large still opens wholly on the screen, and
+// one larger than the screen starts at its top-left rather than off it.
+func TestDefaultSpotFitsTheSprite(t *testing.T) {
+	o := wlclient.Output{Name: "DP-1", W: 1920, H: 1080}
+	for _, tc := range []struct {
+		w, h, wantX, wantY int
+	}{
+		{160, 160, 1920 - 160 - 48, 1080 - 160 - 48},
+		{320, 480, 1920 - 320 - 48, 1080 - 480 - 48},
+		{80, 80, 1920 - 80 - 48, 1080 - 80 - 48},
+		{2000, 1200, 0, 0},
+	} {
+		x, y := defaultSpot(o, tc.w, tc.h)
+		if x != tc.wantX || y != tc.wantY {
+			t.Errorf("a %dx%d sprite opens at (%d,%d), want (%d,%d)", tc.w, tc.h, x, y, tc.wantX, tc.wantY)
+		}
+		if tc.w <= int(o.W) && (x+tc.w > int(o.W) || y+tc.h > int(o.H)) {
+			t.Errorf("a %dx%d sprite at (%d,%d) runs off a %dx%d screen", tc.w, tc.h, x, y, o.W, o.H)
+		}
+	}
+
+	// And through startingPlaceOn, which is how a first run gets there.
+	g := placeGhost(t)
+	out, x, y := g.startingPlaceOn([]wlclient.Output{o}, 0, 0, false, 320, 320)
+	if out != "DP-1" || x != 1920-320-48 || y != 1080-320-48 {
+		t.Errorf("a 320px ghost's first run opens at %s (%d,%d)", out, x, y)
 	}
 }

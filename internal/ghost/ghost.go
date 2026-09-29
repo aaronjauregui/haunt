@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -430,7 +431,7 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	}
 	defer g.store.Close()
 
-	if err := g.openScreen(); err != nil {
+	if err := g.openScreen(cfg.ShellScale(m.Ghost.Name)); err != nil {
 		return err
 	}
 	defer g.app.Close()
@@ -592,21 +593,23 @@ func (g *Ghost) openStore() error {
 
 // openScreen loads the shell, connects to the compositor, decides where the
 // ghost opens, and gets it there with a balloon renderer at the right
-// scale. On success the caller owns g.app and, if there is a room to be
+// scale. factor is the person's [appearance] scale for this ghost, passed
+// in because the shell is loaded before the rest of the config is applied.
+// On success the caller owns g.app and, if there is a room to be
 // arbitrated, the claimed spot.
-func (g *Ghost) openScreen() error {
+func (g *Ghost) openScreen(factor float64) error {
 	opts, log := g.opts, g.log
 	m := g.manifest
 
 	// Shell: a layer stack with named poses, or a single image, or the
 	// built-in placeholder — all three arrive here as the same thing.
 	var err error
-	if m.Shell.Sprite == "" && len(m.Shell.Layers) == 0 {
-		g.shell = shell.Builtin(160)
-	} else if g.shell, err = shell.Load(g.dir, m.Shell); err != nil {
+	if g.shell, err = loadShell(g.dir, m.Shell, factor); err != nil {
 		return err
 	}
+	g.logShellScale(m.Shell, factor)
 	sp := g.shell.Sprite()
+	spriteW, spriteH := sp.Size()
 
 	// Renderer.
 	if g.app, err = wlclient.Connect(); err != nil {
@@ -620,11 +623,11 @@ func (g *Ghost) openScreen() error {
 		g.app.EventLog = func(line string) { log.Debug(hlog.Wayland, "%s", line) }
 	}
 	// Where it sits: an explicit position, or wherever it was left.
-	outName, startX, startY := g.startingPlace(g.app, opts.X, opts.Y, opts.Placed)
+	outName, startX, startY := g.startingPlace(g.app, opts.X, opts.Y, opts.Placed, spriteW, spriteH)
 	if opts.Output != "" {
 		outName = opts.Output
 		if o, ok := g.app.OutputNamed(outName); ok && !opts.Placed {
-			startX, startY = defaultSpot(o)
+			startX, startY = defaultSpot(o, spriteW, spriteH)
 		}
 	}
 	g.outputName = outName
@@ -632,7 +635,7 @@ func (g *Ghost) openScreen() error {
 	// corner is the ordinary case, not the unlucky one: the corner is
 	// computed the same way for both.
 	if opts.Spots != nil {
-		w, h := sp.Size()
+		w, h := spriteW, spriteH
 		// The balloon's widest, which is fixed by the theme rather than by
 		// this screen — the height cap below depends on the display, the
 		// width does not.
@@ -689,6 +692,35 @@ func (g *Ghost) openScreen() error {
 		g.blnMu.Unlock()
 	}
 	return nil
+}
+
+// loadShell loads the ghost's shell drawn at factor times its own scale.
+// Every shell goes through here, the placeholder included, so that the
+// person's [appearance] setting reaches all of them the same way.
+func loadShell(dir string, m shell.Manifest, factor float64) (*shell.Shell, error) {
+	return shell.LoadWith(dir, m, shell.LoadOptions{ScaleFactor: factor})
+}
+
+// logShellScale says once what size the ghost is drawn at, and warns when
+// the person's factor asked for more than the loader allows: the ghost
+// still appears, but not at the size they wrote down, and the log is the
+// only place that can say why.
+func (g *Ghost) logShellScale(m shell.Manifest, factor float64) {
+	own := m.Scale
+	if own == 0 {
+		own = 1
+	}
+	if factor == 0 {
+		factor = 1
+	}
+	got, want := g.shell.Scale(), own*factor
+	if math.Abs(got-want) > 1e-9 {
+		g.log.Warn(hlog.Anim, "the shell's scale %g times the [appearance] factor %g is %g; drawing at %g",
+			own, factor, want, got)
+	}
+	w, h := g.shell.Size()
+	g.log.Debug(hlog.Anim, "shell drawn at scale %g (its own %g, [appearance] factor %g), %dx%d",
+		got, own, factor, w, h)
 }
 
 // applySettings takes the parsed config file and everything derived from
