@@ -46,6 +46,30 @@ func TestLookSpendsItsOwnBudget(t *testing.T) {
 	}
 }
 
+// A thinking model that spends its whole allowance reasoning answers with
+// nothing; the error says so, rather than that the backend said nothing,
+// and the allowance is one a thinking model can answer within.
+func TestVisionRunningOutOfTokensIsNamed(t *testing.T) {
+	var asked int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			MaxTokens int `json:"max_tokens"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		asked = req.MaxTokens
+		fmt.Fprint(w, `{"choices":[{"message":{"content":"","reasoning_content":"hmm"},"finish_reason":"length"}]}`)
+	}))
+	defer srv.Close()
+	s := NewService(&Config{Vision: VisionConfig{BaseURL: srv.URL, Model: "fake"}}, nil)
+	_, err := s.DescribeImage(context.Background(), []byte("png"), "what is it?")
+	if err == nil || !strings.Contains(err.Error(), "ran out of its") {
+		t.Errorf("err = %v, want one naming the token limit", err)
+	}
+	if asked < 1024 {
+		t.Errorf("max_tokens = %d, too few for a model that thinks first", asked)
+	}
+}
+
 // Describing a picture the ghost painted comes out of the same ration as
 // looking at the screen: it is the same model doing the same work.
 func TestDescribeImageSharesTheVisionBudget(t *testing.T) {

@@ -65,6 +65,9 @@ func (s *Service) Look(ctx context.Context, question string, png []byte) (string
 // thing, and the person fixes it in the same place.
 var errNoVision = fmt.Errorf("no vision model configured (set [backend.vision] base_url and model in the haunt config)")
 
+// visionMaxTokens bounds one vision reply, reasoning included.
+const visionMaxTokens = 2048
+
 // askVision puts one image and one question to the vision model. What a
 // look and a description of the ghost's own picture do differently is who
 // has to have agreed to it and which ration it comes out of; the request
@@ -82,7 +85,12 @@ func (s *Service) askVision(ctx context.Context, question string, png []byte) (s
 		"messages": []map[string]any{
 			{"role": "user", "content": content},
 		},
-		"max_tokens": 300,
+		// Room for a thinking model to think before it answers: GLM-4.6V
+		// spends two to three hundred tokens reasoning about one picture,
+		// and a limit that ends inside the reasoning leaves no answer at
+		// all. The question asks for a sentence; that is what keeps the
+		// answer short, not this.
+		"max_tokens": visionMaxTokens,
 	})
 	if err != nil {
 		return "", err
@@ -112,12 +120,16 @@ func (s *Service) askVision(ctx context.Context, question string, png []byte) (s
 			Message struct {
 				Content string `json:"content"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return "", fmt.Errorf("vision backend response: %w", err)
 	}
 	if len(out.Choices) == 0 || strings.TrimSpace(out.Choices[0].Message.Content) == "" {
+		if len(out.Choices) > 0 && out.Choices[0].FinishReason == "length" {
+			return "", fmt.Errorf("vision backend ran out of its %d tokens before answering", visionMaxTokens)
+		}
 		return "", fmt.Errorf("vision backend returned nothing")
 	}
 	return strings.TrimSpace(out.Choices[0].Message.Content), nil
