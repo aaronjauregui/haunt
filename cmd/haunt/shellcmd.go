@@ -16,13 +16,15 @@ import (
 // cmdShell handles `haunt shell <subcommand>`.
 func cmdShell(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("shell: expected a subcommand (init)")
+		return fmt.Errorf("shell: expected a subcommand (init, check)")
 	}
 	switch args[0] {
 	case "init":
 		return cmdShellInit(args[1:])
+	case "check":
+		return cmdShellCheck(args[1:])
 	default:
-		return fmt.Errorf("shell: unknown subcommand %q", args[0])
+		return fmt.Errorf("shell: unknown subcommand %q (init, check)", args[0])
 	}
 }
 

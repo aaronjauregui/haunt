@@ -394,3 +394,23 @@ variant of the `eyes` and `mouth` layers, and a face painted onto the
 body would show through every other one, and through `none`. Nothing
 refuses a body with a face on it.
 
+## Checking a shell
+
+    haunt shell check                         # in the ghost directory
+    haunt shell check -C wisp -render /tmp/wisp
+
+`shell check` loads the shell the way the driver does, with the scale
+factor from your own [configuration](../user/config.md#a-ghosts-size),
+and reports what it found: the shell's scale, the factor and the scale
+drawn at; the canvas in art and display pixels; each layer's mask,
+region, parent, default and variants; the poses; the clips and their
+triggers; and each mask with how many pixels it marks. A shell that
+would not load is reported with the loader's own error, and the command
+exits 1. `-factor F` stands in for the configured factor, and leaves the
+config unread.
+
+`-render DIR` writes the faces as PNGs: `default.png`, what the ghost
+wears at boot, and one per pose; and in a shell with masks, `base.png`,
+the base at art resolution, which is where a face left on the body shows,
+and `masks.png`, the base with each mask outlined in its own colour.
+

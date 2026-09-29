@@ -24,6 +24,10 @@ brain module named in the manifest must already be built.
 outside the ghost directory, but neither opens the art, so a shell that
 will not load still packs.
 
+`haunt shell check` loads the shell as the driver will, so art that
+strays out of its mask is found before the package is built
+([The shell](shell.md#checking-a-shell)).
+
 What goes in: every regular file under the directory, sorted, with fixed
 metadata so the same directory always packs to the same bytes. Skipped:
 dot-directories (`.git`) and a directory named `brain`, since the shipped
