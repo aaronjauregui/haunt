@@ -75,15 +75,23 @@ func (g *Ghost) look(asked string) (answer, app string, err error) {
 		return "", "", fmt.Errorf("that application is on the ignore list")
 	}
 
-	// Visibly indicated while active, as the design requires: a ghost that
-	// can look at your screen should never do it invisibly.
-	g.showBalloon("(looking…)")
-
+	// Captured before the ghost says it is looking, so what is captured is
+	// what was on screen: its own balloon included, which is the only way a
+	// ghost can see a picture hanging in it, and which "(looking…)" would
+	// otherwise have replaced.
 	png, err := captureWindow(win.X, win.Y, win.W, win.H)
 	if err != nil {
 		g.log.Warn(hlog.Screen, "capture: %v", err)
 		return "", "", fmt.Errorf("cannot capture the screen: %w", err)
 	}
+
+	// Visibly indicated while active, as the design requires: a ghost that
+	// can look at your screen should never do it invisibly. The picture was
+	// taken a moment ago, but it leaves the machine only now.
+	picture, shown := g.hangingPicture()
+	g.showBalloon("(looking…)")
+	looking := g.balloonGen()
+	defer g.doneLooking(looking, picture, shown)
 
 	question := lookQuestion
 	if strings.TrimSpace(asked) != "" {
@@ -99,8 +107,46 @@ func (g *Ghost) look(asked string) (answer, app string, err error) {
 	// does with having looked is its own business, and saying "I see you
 	// have a terminal open" unprompted is the tiresome version of this
 	// feature.
-	g.hideBalloon()
 	return answer, win.AppID, nil
+}
+
+// hangingPicture is the ID of the picture in the balloon and the balloon it
+// hangs in, or "" when the balloon holds anything else or nothing.
+func (g *Ghost) hangingPicture() (id string, gen uint64) {
+	if !g.pictureShowing() {
+		return "", 0
+	}
+	gen = g.balloonGen()
+	g.recallMu.Lock()
+	defer g.recallMu.Unlock()
+	for i := len(g.recall.lines) - 1; i >= 0; i-- {
+		if l := g.recall.lines[i]; l.gen == gen {
+			return l.picture, gen
+		}
+	}
+	return "", 0
+}
+
+// doneLooking takes "(looking…)" down and hangs back the picture it covered,
+// if there was one. A picture is something the person may still be looking
+// at; a line of text had its moment and is in the recall. Anything that
+// replaced "(looking…)" in the meantime is left alone.
+func (g *Ghost) doneLooking(looking uint64, picture string, shown uint64) {
+	if g.balloonGen() != looking {
+		return
+	}
+	if picture == "" {
+		g.hideBalloon()
+		return
+	}
+	img, err := g.loadPicture(picture)
+	if err != nil || !g.showImageBalloon(img) {
+		g.hideBalloon()
+		return
+	}
+	g.recallMoved(shown, g.balloonGen())
+	// Its own linger was on the balloon "(looking…)" replaced.
+	g.lingerBalloon(g.balloonGen(), pictureLinger)
 }
 
 // captureWindow grabs one window with grim. Screen capture has no client
