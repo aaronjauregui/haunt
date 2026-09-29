@@ -105,7 +105,7 @@ EOF
 [ghost]
 name = "wisp"
 version = "0.1.0"
-capabilities = ["message", "llm", "imagine", "window", "web", "tell"]
+capabilities = ["message", "llm", "imagine", "window", "screen", "web", "tell"]
 
 [persona]
 system = "You are Wisp, a wry little desktop spirit haunting the user's screen. Reply in one or two short sentences, with dry wit. Let what you remember about them color your mood and callbacks."
@@ -271,7 +271,9 @@ fi
 # goes for its hermes profile: a hermes home of its own, so a demo ghost
 # neither resumes the last demo's conversation nor writes into the real
 # ghost of the same name. ([hermes] home in the config would override it.)
+# SWAYSOCK is the nested sway's, so the windows the ghost watches and looks
+# at are the ones in the demo window, not the session it was started from.
 XDG_DATA_HOME="$workdir/data" HAUNT_RUNTIME_DIR="$runtime" HERMES_HOME="$workdir/hermes" \
-    WAYLAND_DISPLAY="$display" "$workdir/haunt" "${run_args[@]}" "${ghost_dirs[@]}" &
+    WAYLAND_DISPLAY="$display" SWAYSOCK="$workdir/sway.sock" "$workdir/haunt" "${run_args[@]}" "${ghost_dirs[@]}" &
 
 wait "$sway_pid"

@@ -13,6 +13,10 @@ library.
     make demo-seriko SERIKO=<ghost.nar>   # somebody else's ukagaka shell art
 
 `make demo-ai` needs hermes set up first ([The brain](hermes.md)).
+Wisp declares `screen`, so with `[backend.vision]` configured it can look
+at the focused window; the key named in `api_key_env` has to be in the
+environment `make` runs in, since hermes's key file is the container's
+alone ([Configuration](config.md)).
 `IDLE_MS=10000` shortens the wait before a demo ghost may speak first,
 and `GOAL_DELAY=5s` shortens the wait before it checks on goals, so
 initiative is watchable without waiting around.
