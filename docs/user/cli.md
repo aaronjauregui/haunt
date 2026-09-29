@@ -7,7 +7,7 @@ haunt run [-x N] [-y N] [-output NAME] [-record FILE] [-state DIR] [-idle-ms N] 
 haunt dev [-x N] [-y N] [-state DIR] <ghost-dir>
 haunt say [-ghost NAME] <text>
 haunt new [-brain] <name>
-haunt shell init [-C dir] [-art subdir] [-write] <art.ora>
+haunt shell init [-C dir] [-art subdir] [-scale F] [-write] <art.ora>
 haunt keygen
 haunt pack [-o FILE] <ghost-dir>
 haunt install [-yes] <file.haunt>
@@ -26,7 +26,7 @@ haunt mcp-serve -ghost NAME
 | `dev` | Run one ghost directory with hot reload: when its files change the ghost restarts in place, with its state intact. |
 | `say` | Send text to a running ghost, as if typed. Without `-ghost`, the one you last interacted with. |
 | `new` | Scaffold a ghost directory: a persona ghost by default, or with `-brain` a Go brain that builds to WASM. |
-| `shell init` | Build a shell (cropped PNGs and the `[shell]` section) from a layered OpenRaster drawing. `-write` replaces the section in `ghost.toml`. |
+| `shell init` | Build a shell (cropped PNGs, masks from a `masks` group, and the `[shell]` section) from a layered OpenRaster drawing. `-scale` sets how large the art is drawn. `-write` replaces the section in `ghost.toml`, keeping the poses, clips and hits written there by hand ([The shell](../ghosts/shell.md#importing-again)). |
 | `keygen` | Create the author's Ed25519 signing key. |
 | `pack` | Build a signed `.haunt` package from a ghost directory. |
 | `install` | Verify, install, and ask about the requested capabilities. `-yes` grants them all. |

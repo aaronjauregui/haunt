@@ -49,7 +49,12 @@ type Art struct {
 	// group it picks the default variant; at the top level, a hidden layer
 	// is taken to be a sketch or reference and left out.
 	Visible bool
-	Img     image.Image
+	// Depth is how many groups enclose the art: 0 at the top level, 1
+	// directly inside a group. Deeper art is flattened into its outermost
+	// Group, which is fine for variants but not for masks, where a nested
+	// group has no meaning and has to be refused rather than guessed at.
+	Depth int
+	Img   image.Image
 }
 
 // oraImage is stack.xml. Layers are listed top first, which is the reverse
@@ -110,7 +115,7 @@ func ReadORA(path string) (*Stack, error) {
 	}
 
 	st := &Stack{W: img.W, H: img.H}
-	if err := collect(img.Stack.Children, "", files, st); err != nil {
+	if err := collect(img.Stack.Children, "", 0, files, st); err != nil {
 		return nil, err
 	}
 	// stack.xml is top first; drawing order is the other way round.
@@ -123,8 +128,9 @@ func ReadORA(path string) (*Stack, error) {
 // collect walks the stack in document order, one group deep. Deeper nesting
 // is flattened into the outermost group, because the shell format has
 // exactly two levels — a layer and its variants — and inventing a mapping
-// for a third would be guessing at what the artist meant.
-func collect(nodes []oraNode, group string, files map[string]*zip.File, st *Stack) error {
+// for a third would be guessing at what the artist meant. depth counts the
+// groups around nodes, so that the flattening can still be seen afterwards.
+func collect(nodes []oraNode, group string, depth int, files map[string]*zip.File, st *Stack) error {
 	for _, n := range nodes {
 		switch n.XMLName.Local {
 		case "layer":
@@ -146,6 +152,7 @@ func collect(nodes []oraNode, group string, files map[string]*zip.File, st *Stac
 				X:       n.X,
 				Y:       n.Y,
 				Visible: n.Vis != "hidden",
+				Depth:   depth,
 				Img:     decoded,
 			})
 		case "stack":
@@ -153,7 +160,7 @@ func collect(nodes []oraNode, group string, files map[string]*zip.File, st *Stac
 			if inner == "" {
 				inner = n.Name
 			}
-			if err := collect(n.Children, inner, files, st); err != nil {
+			if err := collect(n.Children, inner, depth+1, files, st); err != nil {
 				return err
 			}
 		}

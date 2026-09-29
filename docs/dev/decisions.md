@@ -134,6 +134,9 @@ constraint on changes, not a history.
   about, and no shell in the tested corpus used a numeric interval.
 - **Art is cropped to what it covers.** Damage tracking makes a
   full-canvas blink repaint the whole ghost.
+- **Masks are the one uncropped shell art.** They are never drawn, so
+  cropping saves no repaint, and their shared size is what fixes the
+  canvas.
 - **Five pose names mean something to the driver.** A lexicon picks a
   face from the words when nobody set one; an explicit face always wins.
 - **Art and coordinates are in art pixels, scaled once at load.** The

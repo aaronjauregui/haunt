@@ -40,6 +40,58 @@ The rules are meant to be guessable from the layer palette:
 Names are tidied to what a TOML key and a file name can carry. The
 command prints what it decided: layers left out, names changed.
 
+Paint at whatever resolution suits the art, and let the shell's
+[scale](#scale) size it for the desktop:
+
+    haunt shell init -scale 0.25 -write wisp.ora   # a 1024-pixel drawing, drawn at 256
+
+`-scale` writes `scale` into the `[shell]` section; it must be above 0
+and at most 4. Without it, a `scale` already in `ghost.toml` is kept, and
+when there is none and the drawing's longer side is over 512 pixels, the
+command suggests a scale that draws it near 256.
+
+[Masks](#masks) come from the drawing too:
+
+- A top-level group named **`masks`** holds masks rather than art: one
+  layer per mask, named for it, and `silhouette` is required. Flat
+  `masks/<name>` layers mean the same. Whether the group or its layers
+  are hidden does not matter, so hide them to see the art underneath. A
+  group inside `masks` is refused.
+- Each mask is written uncropped, the size of the whole drawing, as a
+  greyscale PNG under `shell/masks/`, and listed in `[shell.masks]`.
+  Masks are the one thing not cropped: their shared size is the canvas.
+- A layer or group named like a mask is bound to it. A masked group with
+  nothing visible shows `none` by default: a hat that is off until a pose
+  puts it on.
+- A mask with no layer drawn for it (other than `silhouette`) gets an
+  empty slot, above everything else and parented to `body` when there is
+  a `body` layer.
+- Every variant of a masked layer is checked against its mask before
+  anything is written, with the same rule the loader uses, so a spill is
+  found while the drawing is open. The error names the layer and the
+  variant.
+
+### Importing again
+
+Re-running `shell init -write` after changing the drawing replaces what
+the drawing describes and keeps what was written by hand:
+
+- **Replaced:** every `[[shell.layer]]` table, `[shell.masks]` (a drawing
+  with no `masks` group gives a shell with no masks), and in the
+  `[shell]` table `sprite`, which is removed, and `scale`, only when
+  `-scale` is given.
+- **Kept verbatim,** comments and order included: every other line of
+  the `[shell]` table, and every pose, clip and hit table. They follow
+  the regenerated layers.
+- **Carried over by layer name:** a layer's `parent`, `pivot` and
+  `region`, which the drawing cannot express. Other fields written by
+  hand on a layer, and comments inside layer tables, are not kept.
+
+After writing, the command loads the shell. The usual casualty is a kept
+pose or clip naming a variant the drawing no longer has: the command
+prints the loader's error and exits non-zero, and the file stays written
+for you to fix.
+
 ## The `[shell]` section
 
 The simplest shell is one image:

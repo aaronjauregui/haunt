@@ -94,7 +94,7 @@ func usage() {
   haunt dev [-x N] [-y N] [-state DIR] <ghost-dir>
   haunt say [-ghost NAME] <text>
   haunt new [-brain] <name>
-  haunt shell init [-C dir] [-art subdir] [-write] <art.ora>
+  haunt shell init [-C dir] [-art subdir] [-scale F] [-write] <art.ora>
   haunt keygen
   haunt pack [-o FILE] <ghost-dir>
   haunt install [-yes] <file.haunt>

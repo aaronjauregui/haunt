@@ -451,3 +451,301 @@ func keys(m map[string][]byte) []string {
 	}
 	return out
 }
+
+// writeRawORA builds an OpenRaster file from a stack.xml given whole, for
+// shapes writeORA cannot express, such as a group inside a group.
+func writeRawORA(t *testing.T, path, stackXML string, images map[string]image.Image) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	zw := zip.NewWriter(f)
+	mt, err := zw.Create("mimetype")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mt.Write([]byte("image/openraster"))
+	for src, img := range images {
+		w, err := zw.Create(src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := png.Encode(w, img); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sx, err := zw.Create("stack.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sx.Write([]byte(stackXML))
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// convertORA writes a drawing and converts it.
+func convertORA(t *testing.T, w, h int, layers []oraLayerSpec) (*Result, error) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "ghost.ora")
+	writeORA(t, path, w, h, layers)
+	st, err := ReadORA(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Convert(st, "shell")
+}
+
+func layerNamed(t *testing.T, res *Result, name string) shell.Layer {
+	t.Helper()
+	for _, l := range res.Shell.Layers {
+		if l.Name == name {
+			return l
+		}
+	}
+	t.Fatalf("no layer %q in %+v", name, res.Shell.Layers)
+	return shell.Layer{}
+}
+
+// An artist hides the masks group to see the art under it. That must not
+// make the masks disappear: they are never drawn, so visibility says
+// nothing about them.
+func TestHiddenMasksGroupIsRead(t *testing.T) {
+	res, err := convertORA(t, 100, 100, []oraLayerSpec{
+		{name: "body", img: filled(100, 100, image.Rect(10, 10, 90, 90), blue)},
+		{name: "open", group: "eyes", img: filled(100, 100, image.Rect(30, 30, 50, 40), white)},
+		{name: "closed", group: "eyes", hidden: true, img: filled(100, 100, image.Rect(30, 34, 50, 36), black)},
+		{name: "silhouette", group: "Masks", hidden: true, img: filled(100, 100, image.Rect(5, 5, 95, 95), white)},
+		{name: "eyes", group: "Masks", hidden: true, img: filled(100, 100, image.Rect(25, 25, 55, 45), white)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"silhouette": "shell/masks/silhouette.png", "eyes": "shell/masks/eyes.png"}
+	if len(res.Shell.Masks) != len(want) {
+		t.Fatalf("masks = %v, want %v", res.Shell.Masks, want)
+	}
+	for name, path := range want {
+		if res.Shell.Masks[name] != path {
+			t.Errorf("mask %q = %q, want %q", name, res.Shell.Masks[name], path)
+		}
+		if _, ok := res.Files[path]; !ok {
+			t.Errorf("no file for mask %q (have %v)", name, keys(res.Files))
+		}
+	}
+	if res.Masks != 2 {
+		t.Errorf("Masks = %d, want 2", res.Masks)
+	}
+	// The masks are not art: no layer is made of them.
+	for _, l := range res.Shell.Layers {
+		if l.Name == "masks" || l.Name == "silhouette" {
+			t.Errorf("a mask became a layer: %+v", l)
+		}
+	}
+	eyes := layerNamed(t, res, "eyes")
+	if eyes.Mask != "eyes" || eyes.Default != "open" {
+		t.Errorf("eyes = %+v, want bound to its mask and wearing the visible variant", eyes)
+	}
+	if body := layerNamed(t, res, "body"); body.Mask != "" {
+		t.Errorf("body is masked: %+v", body)
+	}
+	out := res.TOML()
+	for _, want := range []string{"[shell.masks]", `silhouette = "shell/masks/silhouette.png"`, `mask = "eyes"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("TOML missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Index(out, "silhouette =") > strings.Index(out, "eyes =") {
+		t.Errorf("the silhouette is not listed first:\n%s", out)
+	}
+}
+
+// Masks share one size, which is the canvas, so they are written at the
+// drawing's full size wherever their marks are — here flat `masks/<name>`
+// layers placed off the origin.
+func TestMasksAreNotCropped(t *testing.T) {
+	res, err := convertORA(t, 120, 80, []oraLayerSpec{
+		{name: "body", img: filled(120, 80, image.Rect(20, 10, 100, 70), blue)},
+		{name: "masks/silhouette", x: 10, y: 5, img: filled(40, 30, image.Rect(0, 0, 40, 30), white)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := png.Decode(bytes.NewReader(res.Files["shell/masks/silhouette.png"]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := img.Bounds().Size(); got != image.Pt(120, 80) {
+		t.Fatalf("mask size = %v, want the whole 120x80 canvas", got)
+	}
+	gray, ok := img.(*image.Gray)
+	if !ok {
+		t.Fatalf("mask is a %T, want greyscale", img)
+	}
+	if v := gray.GrayAt(10, 5).Y; v < 128 {
+		t.Errorf("inside the mark, at its placed corner: %d, want inside", v)
+	}
+	if v := gray.GrayAt(9, 5).Y; v >= 128 {
+		t.Errorf("left of the mark: %d, want outside", v)
+	}
+	if v := gray.GrayAt(60, 60).Y; v != 0 {
+		t.Errorf("far from the mark: %d, want 0", v)
+	}
+	if res.W != 120 || res.H != 80 {
+		t.Errorf("canvas = %dx%d, want the masks' size", res.W, res.H)
+	}
+}
+
+func TestMasksWithoutSilhouetteAreAnError(t *testing.T) {
+	_, err := convertORA(t, 60, 60, []oraLayerSpec{
+		{name: "body", img: filled(60, 60, image.Rect(10, 10, 50, 50), blue)},
+		{name: "eyes", group: "masks", img: filled(60, 60, image.Rect(20, 20, 40, 30), white)},
+	})
+	if err == nil || !strings.Contains(err.Error(), "silhouette") {
+		t.Fatalf("err = %v, want one naming the missing silhouette", err)
+	}
+}
+
+// A group inside masks has no meaning — a mask is one layer — and
+// flattening it the way variants are flattened would be a guess.
+func TestNestedGroupInMasksIsAnError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ghost.ora")
+	writeRawORA(t, path, `<?xml version="1.0" encoding="UTF-8"?>
+<image w="60" h="60"><stack>
+  <stack name="masks">
+    <stack name="face">
+      <layer name="eyes" src="data/eyes.png" x="0" y="0"/>
+    </stack>
+    <layer name="silhouette" src="data/sil.png" x="0" y="0"/>
+  </stack>
+  <layer name="body" src="data/body.png" x="0" y="0"/>
+</stack></image>
+`, map[string]image.Image{
+		"data/eyes.png": filled(60, 60, image.Rect(20, 20, 40, 30), white),
+		"data/sil.png":  filled(60, 60, image.Rect(5, 5, 55, 55), white),
+		"data/body.png": filled(60, 60, image.Rect(10, 10, 50, 50), blue),
+	})
+	st, err := ReadORA(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range st.Layers {
+		if a.Name == "eyes" && a.Depth != 2 {
+			t.Errorf("eyes depth = %d, want 2", a.Depth)
+		}
+		if a.Name == "body" && a.Depth != 0 {
+			t.Errorf("body depth = %d, want 0", a.Depth)
+		}
+	}
+	_, err = Convert(st, "shell")
+	if err == nil || !strings.Contains(err.Error(), "eyes") {
+		t.Fatalf("err = %v, want one naming the nested layer", err)
+	}
+}
+
+// The smallest use of masks: an outline and nothing else. No slots appear
+// and no layer is bound.
+func TestSilhouetteOnly(t *testing.T) {
+	res, err := convertORA(t, 60, 60, []oraLayerSpec{
+		{name: "body", img: filled(60, 60, image.Rect(10, 10, 50, 50), blue)},
+		{name: "silhouette", group: "masks", img: filled(60, 60, image.Rect(8, 8, 52, 52), white)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Shell.Masks) != 1 || res.Shell.Masks["silhouette"] == "" {
+		t.Errorf("masks = %v, want the silhouette alone", res.Shell.Masks)
+	}
+	if len(res.Shell.Layers) != 1 || res.Shell.Layers[0].Mask != "" {
+		t.Errorf("layers = %+v, want the body alone, unmasked", res.Shell.Layers)
+	}
+	if res.W != 60 || res.H != 60 {
+		t.Errorf("canvas = %dx%d, want 60x60", res.W, res.H)
+	}
+}
+
+// Art that strays outside its mask would be refused by the loader; the
+// importer says so first, naming what to fix, and produces nothing.
+func TestSpillOutsideAMaskIsAnError(t *testing.T) {
+	res, err := convertORA(t, 200, 200, []oraLayerSpec{
+		{name: "body", img: filled(200, 200, image.Rect(20, 20, 180, 180), blue)},
+		{name: "open", group: "eyes", img: filled(200, 200, image.Rect(60, 60, 100, 80), white)},
+		{name: "wide", group: "eyes", hidden: true, img: filled(200, 200, image.Rect(60, 60, 160, 80), white)},
+		{name: "silhouette", group: "masks", img: filled(200, 200, image.Rect(10, 10, 190, 190), white)},
+		{name: "eyes", group: "masks", img: filled(200, 200, image.Rect(55, 55, 105, 85), white)},
+	})
+	if err == nil {
+		t.Fatalf("a spill converted: %+v", res.Shell.Layers)
+	}
+	for _, want := range []string{`"eyes"`, `"wide"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not name %s", err, want)
+		}
+	}
+}
+
+// A mask nobody has drawn for is a slot: an empty layer bound to it,
+// above everything, riding on the body. A masked group with nothing
+// visible shows nothing by default.
+func TestEmptySlotsAndHiddenMaskedGroups(t *testing.T) {
+	res, err := convertORA(t, 100, 100, []oraLayerSpec{
+		{name: "body", img: filled(100, 100, image.Rect(10, 10, 90, 90), blue)},
+		{name: "smile", group: "mouth", hidden: true, img: filled(100, 100, image.Rect(40, 60, 60, 66), black)},
+		{name: "silhouette", group: "masks", img: filled(100, 100, image.Rect(5, 5, 95, 95), white)},
+		{name: "mouth", group: "masks", img: filled(100, 100, image.Rect(35, 55, 65, 70), white)},
+		{name: "hat", group: "masks", img: filled(100, 100, image.Rect(10, 0, 90, 20), white)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mouth := layerNamed(t, res, "mouth")
+	if mouth.Mask != "mouth" || mouth.Default != "none" {
+		t.Errorf("mouth = %+v, want masked and showing nothing", mouth)
+	}
+	hat := layerNamed(t, res, "hat")
+	if hat.Mask != "hat" || hat.Image != "" || len(hat.Variants) != 0 || hat.Parent != "body" {
+		t.Errorf("hat = %+v, want an empty slot on the body", hat)
+	}
+	for _, l := range res.Shell.Layers {
+		if l.Name != "hat" && l.Z >= hat.Z {
+			t.Errorf("layer %q (z %d) is not below the slot (z %d)", l.Name, l.Z, hat.Z)
+		}
+	}
+	out := res.TOML()
+	for _, want := range []string{`default = "none"`, `name = "hat"` + "\n" + `mask = "hat"`, `parent = "body"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("TOML missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// A re-import carries the rigging an author added to layers the drawing
+// still has.
+func TestKeepCarriesRigging(t *testing.T) {
+	res, err := convertORA(t, 60, 60, []oraLayerSpec{
+		{name: "body", img: filled(60, 60, image.Rect(10, 10, 50, 50), blue)},
+		{name: "open", group: "eyes", img: filled(60, 60, image.Rect(20, 20, 40, 30), white)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Keep(shell.Manifest{Layers: []shell.Layer{
+		{Name: "eyes", Parent: "body", Region: "face", Pivot: [2]int{3, 4}, Z: 99},
+		{Name: "gone", Parent: "body"},
+	}})
+	eyes := layerNamed(t, res, "eyes")
+	if eyes.Parent != "body" || eyes.Region != "face" || eyes.Pivot != [2]int{3, 4} {
+		t.Errorf("eyes = %+v, want parent, region and pivot kept", eyes)
+	}
+	if eyes.Z == 99 {
+		t.Error("z came from the old shell rather than the drawing")
+	}
+	out := res.TOML()
+	for _, want := range []string{`parent = "body"`, `region = "face"`, "pivot = [3, 4]"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("TOML missing %q:\n%s", want, out)
+		}
+	}
+}
