@@ -21,6 +21,10 @@ headless outputs for multi-monitor cases. `sway` and `grim` must be on
 `PATH`. The window awareness, session and fullscreen tests also need
 `foot`, a terminal to open and focus; without it they skip.
 
+CI (`.github/workflows/test.yml`) runs `make build vet test` and a
+`gofmt` check on every push and pull request, on Ubuntu with sway, grim
+and foot installed, so none of the compositor tests skip there.
+
 Where the tests are:
 
 - `cmd/haunt/*_test.go` are end-to-end: a ghost directory is written to a

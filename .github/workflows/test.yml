@@ -1,0 +1,36 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # The integration tests skip without a compositor, which would pass
+      # without testing anything, so a missing tool fails the job instead.
+      - name: Install sway, grim and foot
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends sway grim foot
+          sway --version && command -v grim && command -v foot
+
+      # Runners have no login session, so nothing sets XDG_RUNTIME_DIR, and
+      # the headless sway puts its Wayland socket there.
+      - name: Make a runtime dir
+        run: |
+          dir="$(mktemp -d)"
+          chmod 700 "$dir"
+          echo "XDG_RUNTIME_DIR=$dir" >> "$GITHUB_ENV"
+
+      - run: make build vet
+      - name: gofmt
+        run: test -z "$(gofmt -l $(git ls-files '*.go' | grep -v '^third_party/'))"
+      - run: make test

@@ -1,5 +1,7 @@
 # Haunt
 
+[![test](https://github.com/aaronjauregui/haunt/actions/workflows/test.yml/badge.svg)](https://github.com/aaronjauregui/haunt/actions/workflows/test.yml)
+
 A desktop companion for Wayland. A **ghost** lives on your screen: a
 character with a personality, a **shell** of layered art that blinks and
 changes expression, and a **balloon** it speaks in.
