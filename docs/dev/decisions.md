@@ -136,6 +136,23 @@ constraint on changes, not a history.
   full-canvas blink repaint the whole ghost.
 - **Five pose names mean something to the driver.** A lexicon picks a
   face from the words when nobody set one; an explicit face always wins.
+- **Art and coordinates are in art pixels, scaled once at load.** The
+  shell's `scale`, times any factor the person sets, is applied by the
+  loader, which resamples the art and scales every coordinate; nothing
+  downstream knows the art was drawn at another size. Art can be
+  made at the resolution that suits making it, and the full-resolution
+  art stays in the package.
+- **Masks are PNGs, and only the silhouette is required.** A picture can
+  be painted in the same editor as the art, and eyes, mouth and slots are
+  optional, so a ghost with any face, or none, can use masks.
+- **The base is derived, never stored.** It is the unmasked layers at
+  their defaults, composited at load, so it cannot drift from the art it
+  is made of. The body is drawn with no face, so the base is the ghost
+  with nothing on it.
+- **Masked art stays inside its mask.** Checked at load, so parts drawn
+  separately cannot wander: a mouth whose variants sit in different
+  places jumps when a clip swaps them. The check is exported, so a tool
+  that writes art runs the same one.
 
 ## Packaging and state
 

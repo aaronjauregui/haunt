@@ -11,12 +11,26 @@
 //
 //	one PNG                → one layer, one pose, no animation
 //	+ variants             → expressions
-//	+ clips (later)        → animation by swapping variants on a clock
-//	+ transforms (later)   → interpolated motion of layers
+//	+ clips                → animation by swapping variants on a clock
+//	+ transforms           → interpolated motion of layers
+//	+ masks                → a fixed canvas, and a place for each part
 //
-// Layers carry `parent` and `pivot` from the start even though nothing
-// transforms them yet: a rig where rotating an upper arm carries the
-// forearm cannot be retrofitted onto shells authored without it.
+// Layers carry `parent` and `pivot`: a rig where rotating an upper arm
+// carries the forearm is part of the format, because it cannot be
+// retrofitted onto shells authored without it.
+//
+// Masks are the opt-in for a shell whose parts must stay put. A mask is a
+// painted picture of where a layer's art may go: every variant of a masked
+// layer is checked against it at load, so a mouth drawn by a different hand
+// (or a different generation) cannot land somewhere else on the face. The
+// masks also fix the canvas, and the layers without one composite into the
+// base (Shell.Base), the ghost with no face and nothing worn.
+//
+// Everything in a manifest is in art pixels, and a shell has a scale at
+// which that art is drawn. The loader converts once, resampling the art
+// and scaling every coordinate, so nothing downstream of it knows the art
+// was ever a different size: a ghost painted at 1024 pixels sits on the
+// desktop at 256, and the full-resolution art stays on disk.
 package shell
 
 import (
@@ -24,8 +38,10 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
+	"maps"
 	"math"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -49,15 +65,20 @@ type Layer struct {
 	// At offsets the layer within the shell canvas.
 	At [2]int `toml:"at"`
 	// Pivot is the point transforms rotate and scale about, relative to
-	// the layer's own origin. Unused until animation lands.
+	// the layer's own origin.
 	Pivot [2]int `toml:"pivot"`
 	// Parent nests this layer's transform inside another's, so a rotating
-	// arm carries its hand. Unused until animation lands, validated now.
+	// arm carries its hand.
 	Parent string `toml:"parent"`
 	// Region names the part of the ghost this layer represents (head,
 	// face, hand). Clicks report the topmost region they land on, which is
 	// how a brain can tell being patted from being poked.
 	Region string `toml:"region"`
+	// Mask binds the layer to one of the shell's masks: every variant's art
+	// must stay inside it, and the layer may show nothing (variant "none").
+	// A masked layer with no image and no variants is an empty slot, whose
+	// only variant is "none" until art is drawn for it.
+	Mask string `toml:"mask"`
 }
 
 // Manifest is the [shell] section: either a single sprite or a layer stack.
@@ -81,6 +102,57 @@ type Manifest struct {
 	// rectangles with no layer of their own (internal/seriko), and the
 	// alternative would be inventing art to carry them.
 	Hits []Hit `toml:"hit"`
+	// Scale is how large the art is drawn: 0.25 draws it at a quarter of
+	// its pixel size. Zero means 1. Everything in the manifest is in art
+	// pixels, and the loader converts once.
+	Scale float64 `toml:"scale"`
+	// Masks maps a mask name to a PNG marking where art may go. Declaring
+	// any fixes the canvas to their size; "silhouette" is required.
+	Masks map[string]string `toml:"masks"`
+}
+
+// Files lists every path the manifest names — the sprite, each layer's
+// image and variants, and the masks — so a caller can check that none of
+// them leaves the ghost directory.
+func (m Manifest) Files() []string {
+	var out []string
+	if m.Sprite != "" {
+		out = append(out, m.Sprite)
+	}
+	for _, l := range m.Layers {
+		if l.Image != "" {
+			out = append(out, l.Image)
+		}
+		for _, name := range sortedKeys(l.Variants) {
+			out = append(out, l.Variants[name])
+		}
+	}
+	for _, name := range sortedKeys(m.Masks) {
+		out = append(out, m.Masks[name])
+	}
+	return out
+}
+
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// LoadOptions are the person's adjustments to how a shell is drawn.
+type LoadOptions struct {
+	// ScaleFactor multiplies the shell's own scale. Zero means 1.
+	ScaleFactor float64
+}
+
+// LayerInfo describes a loaded layer, for tools that report on a shell.
+type LayerInfo struct {
+	Name, Mask, Default, Region, Parent string
+	// Variants is sorted; "" is a single-image layer's appearance.
+	Variants []string
 }
 
 // MoodPoses are the pose names the driver knows how to choose by itself,
@@ -102,7 +174,8 @@ var MoodPoses = []string{"happy", "sad", "surprised", "asleep", "thinking"}
 type Hit struct {
 	// Region is the name reported for a poke inside it.
 	Region string `toml:"region"`
-	// At is the top-left corner in shell coordinates.
+	// At is the top-left corner in shell coordinates (art pixels in a
+	// manifest, like every coordinate there).
 	At [2]int `toml:"at"`
 	// Size is width and height. A zero or negative dimension disables the
 	// rectangle, which is how shells switch one off per pose.
@@ -121,9 +194,15 @@ func (h Hit) rect() image.Rectangle {
 type loaded struct {
 	Layer
 	// variants holds every decoded appearance, keyed by variant name. A
-	// single-image layer stores it under "".
+	// single-image layer stores it under "". A masked layer's "none" is a
+	// zero-size image, so everything that draws or measures a layer has to
+	// cope with art that covers nothing.
 	variants map[string]*image.NRGBA
 	order    int
+	// pivot is Pivot in shell pixels. It is fractional once the art is
+	// scaled, because the art's origin moves to a whole pixel and the
+	// pivot has to stay on the same point of the drawing.
+	pivot [2]float64
 }
 
 // Shell is a loaded, composable ghost body.
@@ -145,18 +224,143 @@ type Shell struct {
 	// cache holds composited poses. A ghost that is not changing
 	// expression composites nothing.
 	cache map[string]*sprite.Sprite
+
+	// scale is the effective scale the art was drawn at, and artW and
+	// artH the canvas before it.
+	scale      float64
+	artW, artH int
+	// masks and base stay at art resolution, for the tools that check a
+	// shell and for anything that paints on it later. Both are empty in a
+	// shell without masks.
+	masks map[string]*image.Gray
+	base  *image.NRGBA
 }
 
-// Load decodes a shell manifest relative to dir.
+// Load is LoadWith with zero options.
 func Load(dir string, m Manifest) (*Shell, error) {
-	if len(m.Layers) == 0 {
-		return loadSingle(dir, m)
+	return LoadWith(dir, m, LoadOptions{})
+}
+
+// maxScale is the largest effective scale. Beyond it a shell is a wall of
+// pixels rather than a companion, and an art mistake rather than a choice.
+const maxScale = 4
+
+// LoadWith loads any shell: layers, a single sprite, or (when the manifest
+// names neither) the built-in placeholder at the effective scale. It does
+// not modify m.
+//
+// The effective scale is the shell's own times opts.ScaleFactor, held to at
+// most 4 rather than refused: the factor is the person's, and their config
+// should not stop a ghost appearing. Shell.Scale reports what was used, so
+// a caller that wants to say the factor was cut short compares it with
+// what it asked for.
+//
+// Everything that can be checked without decoding art is checked before
+// the placeholder is returned, so a manifest that says nothing but a bad
+// scale is still an error.
+func LoadWith(dir string, m Manifest, opts LoadOptions) (*Shell, error) {
+	// The loader rewrites clips, hits and layers as it scales them; working
+	// on a copy keeps the caller's manifest as written, so loading it twice
+	// gives the same shell.
+	m = m.clone()
+	for _, p := range m.Files() {
+		if !filepath.IsLocal(p) {
+			return nil, fmt.Errorf("path %q must be relative and stay inside the ghost directory", p)
+		}
 	}
+	// Written as a positive range test so that NaN fails it too.
+	if !(m.Scale >= 0 && m.Scale <= maxScale) {
+		return nil, fmt.Errorf("shell scale %g must be above 0 and at most %d", m.Scale, maxScale)
+	}
+	if !(opts.ScaleFactor >= 0) {
+		return nil, fmt.Errorf("shell scale factor %g must not be negative", opts.ScaleFactor)
+	}
+	if len(m.Masks) > 0 && len(m.Layers) == 0 {
+		return nil, fmt.Errorf("[shell.masks] needs [[shell.layer]]")
+	}
+	scale := effectiveScale(m.Scale, opts.ScaleFactor)
+
+	switch {
+	case m.Sprite == "" && len(m.Layers) == 0:
+		return placeholder(scale), nil
+	case len(m.Layers) == 0:
+		return loadSingle(dir, m.Sprite, scale)
+	}
+	return load(dir, m, scale)
+}
+
+// effectiveScale combines the shell's scale with the person's factor, zero
+// meaning 1 for both, and keeps the result within (0, maxScale].
+func effectiveScale(shell, factor float64) float64 {
+	if shell == 0 {
+		shell = 1
+	}
+	if factor == 0 {
+		factor = 1
+	}
+	s := shell * factor
+	switch {
+	case s > maxScale:
+		return maxScale
+	case s <= 0:
+		// Only two tiny factors underflowing can get here; the smallest
+		// scale that still draws something is as close as it gets.
+		return math.SmallestNonzeroFloat64
+	}
+	return s
+}
+
+// placeholder is the built-in ghost at a scale. It is drawn at its size in
+// code rather than resampled, which is why it has a floor: below 16 pixels
+// the drawing stops being a face.
+func placeholder(scale float64) *Shell {
+	s := Builtin(max(16, int(math.Round(160*scale))))
+	s.scale = scale
+	s.artW, s.artH = 160, 160
+	return s
+}
+
+// clone copies everything the loader might rewrite, down to the maps a
+// clip's keys hold.
+func (m Manifest) clone() Manifest {
+	out := m
+	out.Layers = make([]Layer, len(m.Layers))
+	for i, l := range m.Layers {
+		l.Variants = maps.Clone(l.Variants)
+		out.Layers[i] = l
+	}
+	if m.Poses != nil {
+		out.Poses = make(map[string]map[string]string, len(m.Poses))
+		for name, sel := range m.Poses {
+			out.Poses[name] = maps.Clone(sel)
+		}
+	}
+	out.Clips = make([]Clip, len(m.Clips))
+	for i, c := range m.Clips {
+		keys := make([]Key, len(c.Keys))
+		for j, k := range c.Keys {
+			k.Set = maps.Clone(k.Set)
+			k.Move = maps.Clone(k.Move)
+			keys[j] = k
+		}
+		c.Keys = keys
+		out.Clips[i] = c
+	}
+	out.Hits = slices.Clone(m.Hits)
+	out.Masks = maps.Clone(m.Masks)
+	return out
+}
+
+// load decodes a layered manifest relative to dir, at art resolution, and
+// checks it there; only then is the art scaled for display.
+func load(dir string, m Manifest, scale float64) (*Shell, error) {
 	s := &Shell{
 		poses:   m.Poses,
 		current: map[string]string{},
 		cache:   map[string]*sprite.Sprite{},
+		scale:   scale,
 	}
+	hasMasks := len(m.Masks) > 0
 	names := map[string]bool{}
 	for i, l := range m.Layers {
 		if l.Name == "" {
@@ -167,14 +371,28 @@ func Load(dir string, m Manifest) (*Shell, error) {
 		}
 		names[l.Name] = true
 
-		if l.Image == "" && len(l.Variants) == 0 {
+		masked := l.Mask != ""
+		if masked {
+			if !hasMasks {
+				return nil, fmt.Errorf("layer %q names mask %q but the shell declares no masks", l.Name, l.Mask)
+			}
+			if _, ok := m.Masks[l.Mask]; !ok {
+				return nil, fmt.Errorf("shell layer %q names mask %q, which [shell.masks] does not declare", l.Name, l.Mask)
+			}
+		}
+		if l.Image == "" && len(l.Variants) == 0 && !masked {
 			return nil, fmt.Errorf("shell layer %q has no image or variants", l.Name)
 		}
 		if l.Image != "" && len(l.Variants) > 0 {
 			return nil, fmt.Errorf("shell layer %q has both image and variants", l.Name)
 		}
 
-		ld := &loaded{Layer: l, variants: map[string]*image.NRGBA{}, order: i}
+		ld := &loaded{
+			Layer:    l,
+			variants: map[string]*image.NRGBA{},
+			order:    i,
+			pivot:    [2]float64{float64(l.Pivot[0]), float64(l.Pivot[1])},
+		}
 		if l.Image != "" {
 			img, err := loadImage(dir, l.Image)
 			if err != nil {
@@ -190,6 +408,18 @@ func Load(dir string, m Manifest) (*Shell, error) {
 				}
 				ld.variants[name] = img
 			}
+		}
+		if masked {
+			// Every masked layer can show nothing. A declared "none" is
+			// kept: it is ordinary art that happens to have that name.
+			if _, ok := ld.variants[none]; !ok {
+				ld.variants[none] = image.NewNRGBA(image.Rectangle{})
+			}
+			if l.Image == "" && ld.Default == "" {
+				ld.Default = none
+			}
+		}
+		if l.Image == "" {
 			if ld.Default == "" {
 				return nil, fmt.Errorf("shell layer %q has variants but no default", l.Name)
 			}
@@ -199,6 +429,15 @@ func Load(dir string, m Manifest) (*Shell, error) {
 		}
 		s.current[l.Name] = ld.Default
 		s.layers = append(s.layers, ld)
+	}
+
+	if hasMasks {
+		if err := s.loadMasks(dir, m.Masks); err != nil {
+			return nil, err
+		}
+		if err := s.checkArt(); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := s.validateParents(names); err != nil {
@@ -236,7 +475,21 @@ func Load(dir string, m Manifest) (*Shell, error) {
 		}
 		return s.layers[i].order < s.layers[j].order
 	})
-	s.w, s.h = s.canvas()
+
+	if hasMasks {
+		s.base = s.composeBase()
+	} else {
+		s.artW, s.artH = s.canvas()
+	}
+	if scale != 1 {
+		s.rescale(scale)
+	}
+	if hasMasks {
+		s.w = int(math.Round(float64(s.artW) * scale))
+		s.h = int(math.Round(float64(s.artH) * scale))
+	} else {
+		s.w, s.h = s.canvas()
+	}
 
 	if m.Default != "" {
 		if !s.SetPose(m.Default) {
@@ -246,18 +499,20 @@ func Load(dir string, m Manifest) (*Shell, error) {
 	return s, nil
 }
 
-// loadSingle wraps a one-image shell (or the built-in placeholder) as a
-// one-layer stack, so everything downstream sees the same thing.
-func loadSingle(dir string, m Manifest) (*Shell, error) {
-	var img *image.NRGBA
-	if m.Sprite == "" {
-		img = Builtin(160).layers[0].variants[""]
-	} else {
-		var err error
-		if img, err = loadImage(dir, m.Sprite); err != nil {
-			return nil, err
-		}
+// none is the variant every masked layer has: nothing drawn at all. Poses
+// and clips select it like any other, which is how a face comes off or a
+// hat is not worn.
+const none = "none"
+
+// loadSingle wraps a one-image shell as a one-layer stack, so everything
+// downstream sees the same thing.
+func loadSingle(dir, path string, scale float64) (*Shell, error) {
+	img, err := loadImage(dir, path)
+	if err != nil {
+		return nil, err
 	}
+	artW, artH := img.Bounds().Dx(), img.Bounds().Dy()
+	img, _ = resample(img, [2]int{}, scale)
 	b := img.Bounds()
 	return &Shell{
 		w: b.Dx(), h: b.Dy(),
@@ -267,6 +522,8 @@ func loadSingle(dir string, m Manifest) (*Shell, error) {
 		}},
 		current: map[string]string{"body": ""},
 		cache:   map[string]*sprite.Sprite{},
+		scale:   scale,
+		artW:    artW, artH: artH,
 	}, nil
 }
 
@@ -279,7 +536,7 @@ func loadImage(dir, path string) (*image.NRGBA, error) {
 }
 
 // validateParents rejects unknown parents and cycles, so a rig cannot hang
-// the compositor once transforms arrive.
+// the compositor.
 func (s *Shell) validateParents(names map[string]bool) error {
 	parent := map[string]string{}
 	for _, l := range s.layers {
@@ -306,11 +563,15 @@ func (s *Shell) validateParents(names map[string]bool) error {
 	return nil
 }
 
-// canvas is the union of every layer's placed bounds.
+// canvas is the union of every layer's placed bounds. Art that covers
+// nothing does not stretch it, wherever its layer is placed.
 func (s *Shell) canvas() (w, h int) {
 	for _, l := range s.layers {
 		for _, img := range l.variants {
 			b := img.Bounds()
+			if b.Empty() {
+				continue
+			}
 			if x := l.At[0] + b.Dx(); x > w {
 				w = x
 			}
@@ -333,6 +594,77 @@ func (s *Shell) layer(name string) *loaded {
 
 // Size is the shell canvas in pixels.
 func (s *Shell) Size() (w, h int) { return s.w, s.h }
+
+// Scale is the effective scale the art is drawn at: the shell's own times
+// the person's factor, within the limit LoadWith holds it to. The
+// placeholder reports the scale it was asked for, although it is drawn at
+// no less than 16 pixels.
+func (s *Shell) Scale() float64 {
+	if s.scale == 0 {
+		return 1
+	}
+	return s.scale
+}
+
+// ArtSize is the canvas in art pixels, before scaling: the masks' size
+// when the shell declares them, the union of the layers otherwise.
+func (s *Shell) ArtSize() (w, h int) {
+	if s.artW == 0 && s.artH == 0 {
+		return s.w, s.h
+	}
+	return s.artW, s.artH
+}
+
+// Base is the ghost with no face and nothing worn: every unmasked layer at
+// its default, untransformed, composited at art resolution on the canvas.
+// Nil for a shell without masks. Each call returns a fresh copy, so the
+// caller may paint on it.
+func (s *Shell) Base() *image.NRGBA {
+	if s.base == nil {
+		return nil
+	}
+	out := *s.base
+	out.Pix = slices.Clone(s.base.Pix)
+	return &out
+}
+
+// composeBase draws the unmasked layers at their defaults, in z order, on
+// the art-resolution canvas. It runs before the art is scaled.
+func (s *Shell) composeBase() *image.NRGBA {
+	img := image.NewNRGBA(image.Rect(0, 0, s.artW, s.artH))
+	for _, l := range s.layers {
+		if l.Mask != "" {
+			continue
+		}
+		art := l.variants[l.Default]
+		b := art.Bounds()
+		at := image.Rect(l.At[0], l.At[1], l.At[0]+b.Dx(), l.At[1]+b.Dy())
+		draw.Draw(img, at, art, b.Min, draw.Over)
+	}
+	return img
+}
+
+// Masks lists the declared mask names, sorted.
+func (s *Shell) Masks() []string {
+	return slices.Sorted(maps.Keys(s.masks))
+}
+
+// Mask is a declared mask at art resolution, nil if there is none by that
+// name. It is shared, and callers must not modify it.
+func (s *Shell) Mask(name string) *image.Gray { return s.masks[name] }
+
+// Layers describes the layers in z order.
+func (s *Shell) Layers() []LayerInfo {
+	out := make([]LayerInfo, 0, len(s.layers))
+	for _, l := range s.layers {
+		out = append(out, LayerInfo{
+			Name: l.Name, Mask: l.Mask, Default: l.Default,
+			Region: l.Region, Parent: l.Parent,
+			Variants: slices.Sorted(maps.Keys(l.variants)),
+		})
+	}
+	return out
+}
 
 // Poses lists the declared pose names, which is the vocabulary expression
 // inference is allowed to choose from.
@@ -463,7 +795,7 @@ func (s *Shell) Sprite() *sprite.Sprite {
 			draw.Draw(img, at, art, b.Min, draw.Over)
 			continue
 		}
-		drawTransformed(img, art, l.Layer, t)
+		drawTransformed(img, art, l.At, l.pivot, t)
 	}
 	sp := &sprite.Sprite{Img: img}
 	s.cache[k] = sp
@@ -515,9 +847,8 @@ func (s *Shell) RegionAt(x, y int) string {
 // the format already uses — a blink is two keyframes 90ms apart selecting
 // the closed and open eyes.
 //
-// Keyframes carry only `set` for now. Eased transforms (`move`) belong on
-// the same keyframe when they land, which is why a keyframe is a struct
-// rather than a bare variant selection.
+// A keyframe is a struct rather than a bare variant selection because it
+// carries eased transforms (`move`) alongside `set`.
 type Clip struct {
 	Name string `toml:"name"`
 	// Trigger says who starts it:
@@ -554,7 +885,9 @@ type Key struct {
 // is "unmoved", so a keyframe naming only Offset leaves rotation and scale
 // alone.
 type Transform struct {
-	// Offset shifts the layer, in shell pixels.
+	// Offset shifts the layer, in shell pixels. A manifest gives it in art
+	// pixels, and the loader scales it with the art; rotation, scale and
+	// opacity are unitless and stay as written.
 	Offset [2]float64 `toml:"offset"`
 	// Rotate turns it about its pivot, in degrees, clockwise.
 	Rotate float64 `toml:"rotate"`
@@ -833,22 +1166,26 @@ func (s *Shell) Damage(prev State) image.Rectangle {
 			if !ok {
 				continue
 			}
-			out = out.Union(layerBounds(art.Bounds(), l.Layer, st.t))
+			out = out.Union(layerBounds(art.Bounds(), l.At, l.pivot, st.t))
 		}
 	}
 	return out.Intersect(whole)
 }
 
-// layerBounds is where a layer's art lands in shell coordinates under a
-// transform.
-func layerBounds(b image.Rectangle, l Layer, t Transform) image.Rectangle {
+// layerBounds is where a layer's art, of bounds b placed at at, lands in
+// shell coordinates under a transform about pivot. Art that covers nothing
+// lands nowhere, however it is moved.
+func layerBounds(b image.Rectangle, at [2]int, pivot [2]float64, t Transform) image.Rectangle {
+	if b.Empty() {
+		return image.Rectangle{}
+	}
 	t = t.normalized()
 	if !t.moved() {
-		return b.Add(image.Pt(l.At[0], l.At[1]))
+		return b.Add(image.Pt(at[0], at[1]))
 	}
 	rad := t.Rotate * math.Pi / 180
 	cos, sin := math.Cos(rad), math.Sin(rad)
-	px, py := float64(l.Pivot[0]), float64(l.Pivot[1])
+	px, py := pivot[0], pivot[1]
 
 	minX, minY := math.Inf(1), math.Inf(1)
 	maxX, maxY := math.Inf(-1), math.Inf(-1)
@@ -856,7 +1193,7 @@ func layerBounds(b image.Rectangle, l Layer, t Transform) image.Rectangle {
 		{0, 0}, {float64(b.Dx()), 0}, {0, float64(b.Dy())}, {float64(b.Dx()), float64(b.Dy())},
 	} {
 		x, y := forward(c[0], c[1], px, py, cos, sin, t)
-		x, y = x+float64(l.At[0]), y+float64(l.At[1])
+		x, y = x+float64(at[0]), y+float64(at[1])
 		minX, minY = math.Min(minX, x), math.Min(minY, y)
 		maxX, maxY = math.Max(maxX, x), math.Max(maxY, y)
 	}
@@ -864,8 +1201,9 @@ func layerBounds(b image.Rectangle, l Layer, t Transform) image.Rectangle {
 		int(math.Ceil(maxX))+1, int(math.Ceil(maxY))+1)
 }
 
-// drawTransformed blits art under a transform: rotation and scale about the
-// layer's pivot, then the offset.
+// drawTransformed blits art placed at at under a transform: rotation and
+// scale about pivot, then the offset. The pivot is fractional in a scaled
+// shell, which is why it is passed in rather than read from the Layer.
 //
 // Sampling is bilinear, and that is not a quality nicety — it is what makes
 // interpolation mean anything. A breath of two pixels over two seconds
@@ -877,13 +1215,16 @@ func layerBounds(b image.Rectangle, l Layer, t Transform) image.Rectangle {
 //
 // Whole-pixel placements skip the sampling entirely, so a layer that has
 // merely been moved an integer distance still costs a plain blit.
-func drawTransformed(dst *image.NRGBA, art *image.NRGBA, l Layer, t Transform) {
+func drawTransformed(dst *image.NRGBA, art *image.NRGBA, at [2]int, pivot [2]float64, t Transform) {
 	b := art.Bounds()
+	if b.Empty() {
+		return
+	}
 	rad := t.Rotate * math.Pi / 180
 	cos, sin := math.Cos(rad), math.Sin(rad)
-	px, py := float64(l.Pivot[0]), float64(l.Pivot[1])
+	px, py := pivot[0], pivot[1]
 
-	area := layerBounds(b, l, t).Intersect(dst.Bounds())
+	area := layerBounds(b, at, pivot, t).Intersect(dst.Bounds())
 
 	alpha := 1.0
 	if t.Opacity != nil {
@@ -896,7 +1237,7 @@ func drawTransformed(dst *image.NRGBA, art *image.NRGBA, l Layer, t Transform) {
 	for y := area.Min.Y; y < area.Max.Y; y++ {
 		for x := area.Min.X; x < area.Max.X; x++ {
 			sx, sy := inverse(
-				float64(x)-float64(l.At[0]), float64(y)-float64(l.At[1]),
+				float64(x)-float64(at[0]), float64(y)-float64(at[1]),
 				px, py, cos, sin, t)
 			var c color.NRGBA
 			if whole {

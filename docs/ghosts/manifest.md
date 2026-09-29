@@ -13,8 +13,9 @@ author = ""
 capabilities = ["message", "llm", "window"]
 
 [shell]                         # see shell.md
+scale = 1.0                     # how large the art is drawn
 sprite = "shell.png"            # one image, or:
-# [[shell.layer]] ... [shell.pose.happy] ... [[shell.clip]] ...
+# [[shell.layer]] ... [shell.pose.happy] ... [[shell.clip]] ... [shell.masks] ...
 
 [persona]                       # a ghost on hermes; see persona-and-skills.md
 system = """
@@ -81,6 +82,18 @@ that looked suspicious for nothing.
 Either `sprite`, one PNG with transparency, or a layer stack with poses
 and clips. Omit both and the ghost wears a built-in placeholder. The
 format is [The shell](shell.md).
+
+| Field | Meaning |
+|---|---|
+| `sprite` | One PNG, the whole shell. |
+| `layer`, `pose`, `clip`, `hit` | The layer stack, its poses, animations and hit rectangles. |
+| `default_pose` | The pose worn at boot. |
+| `scale` | How large the art is drawn: above 0, at most 4, default 1. Every coordinate in the shell is in the art's own pixels. |
+| `masks` | Mask names to PNGs marking where each part may go; `silhouette` is required. |
+
+Every file the shell names (the sprite, each layer's image and variants,
+the masks) is a path relative to the ghost directory that stays inside
+it; the manifest is refused otherwise.
 
 ## `[persona]`
 

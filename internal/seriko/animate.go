@@ -128,8 +128,10 @@ func convertAnimation(sh *Shell, src Source, pics map[int]*image.NRGBA,
 		Z:       10 + a.ID,
 	}
 	// "nothing" is a real one-pixel transparent file rather than an absent
-	// one: a layer has to be able to *wear* it, and the format has no way
-	// to say "no art" as a variant.
+	// one: a layer has to be able to *wear* it, and only a masked layer
+	// has "no art" as a variant of its own. These layers have no mask to
+	// be held to, since SERIKO's animations go wherever their frames put
+	// them.
 	nonePath := "shell/" + name + "_none.png"
 	noneData, err := encodePNG(blank(1, 1))
 	if err != nil {

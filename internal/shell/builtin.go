@@ -17,7 +17,15 @@ import (
 // should be authored: repaint damage is the union of the changed layers'
 // bounds, so a blink drawn on a 68x19 patch repaints 68x19 pixels, and one
 // drawn on a full-size transparent sheet repaints the whole ghost.
+//
+// It is drawn at size in code rather than resampled from one picture, so a
+// small placeholder is as crisp as a large one. Its clips were written for
+// 160 pixels and their offsets are scaled by size/160, so a small ghost
+// breathes a small breath.
 func Builtin(size int) *Shell {
+	// px scales a distance in the 160-pixel drawing to this one.
+	px := func(v float64) float64 { return v * float64(size) / 160 }
+
 	body := color.NRGBA{R: 240, G: 240, B: 255, A: 255}
 	ink := color.NRGBA{R: 30, G: 30, B: 40, A: 255}
 
@@ -148,7 +156,7 @@ func Builtin(size int) *Shell {
 			Keys: []Key{
 				{At: 0, Move: map[string]Transform{"body": {Scale: 1}}},
 				{At: 90, Ease: EaseSine, Move: map[string]Transform{
-					"body": {Scale: 0.94, Offset: [2]float64{0, 4}},
+					"body": {Scale: 0.94, Offset: [2]float64{0, px(4)}},
 				}},
 				{At: 320, Ease: EaseSine, Move: map[string]Transform{
 					"body": {Scale: 1},
@@ -163,7 +171,7 @@ func Builtin(size int) *Shell {
 			Keys: []Key{
 				{At: 0, Move: map[string]Transform{"body": {}}},
 				{At: 2000, Ease: EaseSine, Move: map[string]Transform{
-					"body": {Offset: [2]float64{0, 2}},
+					"body": {Offset: [2]float64{0, px(2)}},
 				}},
 				{At: 4000, Ease: EaseSine, Move: map[string]Transform{
 					"body": {Offset: [2]float64{0, 0}},
@@ -180,6 +188,7 @@ func Builtin(size int) *Shell {
 				Pivot: [2]int{size / 2, size / 2},
 			},
 			variants: map[string]*image.NRGBA{"": bodyImg},
+			pivot:    [2]float64{float64(size / 2), float64(size / 2)},
 		},
 		{
 			Layer: Layer{

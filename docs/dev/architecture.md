@@ -42,7 +42,8 @@ internal/
                      searching the web and reading a page, and the hourly budgets
   files              the folders the person shares, read only: named roots, os.Root confinement,
                      paging text and PDFs, preparing pictures, search
-  shell              the shell format: layers, variants, poses, clips, transforms, hit regions
+  shell              the shell format: layers, variants, poses, clips, transforms, hit regions, masks
+                     and the base, and the scale art is drawn at
   sprite             decoded art: premultiplied buffers and alpha input regions
   artimport          OpenRaster drawing to shell
   seriko             SERIKO shell art to shell
