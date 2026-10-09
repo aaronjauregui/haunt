@@ -1,7 +1,7 @@
 # Hermes's bundled skills, the few a ghost may use
 
 Four skills copied unchanged from hermes-agent's `skills/` directory at
-commit 6005aa1 (NousResearch/hermes-agent, MIT, `LICENSE`). `humanizer`
+commit 818c13b (NousResearch/hermes-agent, MIT, `LICENSE`). `humanizer`
 carries its own upstream license beside it.
 
 Ghost profiles opt out of hermes's bundled library (`.no-bundled-skills`),

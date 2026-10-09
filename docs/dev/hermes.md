@@ -4,7 +4,7 @@ How a persona ghost thinks. `internal/hermes` is haunt's side of the seam;
 `internal/ghost/hermesbrain.go` is the brain that uses it, and
 `internal/ghost/hermestools.go` is the tool surface hermes calls back
 into. Every hermes identifier, path and payload here is checked against
-hermes-agent at commit **6005aa1**, which `scripts/hermes-docker` builds
+hermes-agent at commit **818c13b** (release v0.21.6), which `scripts/hermes-docker` builds
 its image from. When the pin moves, recheck them: the places that depend
 on hermes internals are named below.
 
@@ -52,16 +52,17 @@ Rewritten every start (haunt's):
   hermes skills the manifest names, in that order, earlier source winning
   a name clash; Markdown only; files 0444 and directories 0555. Read-only
   on disk because at the pinned hermes `skill_manage` edits and deletes
-  `external_dirs` skills from a live turn (only the background review
-  fork is refused, in `tools/skill_manager_guards.py`), and no config key
-  makes them read-only. The demo and the test rig `chmod -R u+w` before
+  `external_dirs` skills from a live turn and from the background review
+  fork (`tools/skill_manager_guards.py` refuses the fork only a delete),
+  and no config key makes them read-only. The demo and the test rig `chmod -R u+w` before
   removing a profile.
 - **`config.yaml`**, merged rather than replaced. Haunt owns
-  `platforms.api_server`, `platform_toolsets`, `agent.disabled_toolsets`,
+  `platforms.api_server`, `gateway.standalone`, `platform_toolsets`,
+  `agent.disabled_toolsets`,
   `tools.tool_search`, `mcp_servers.haunt`, its own entry in
   `skills.external_dirs`, and `_config_version` if absent; it defaults
-  `memory.write_approval` to false, `skills.guard_agent_created` to
-  true and `tts.provider` to `piper`. Everything else, the model above all, stays as the person set it
+  `memory.write_approval` to false and `skills.guard_agent_created` to
+  true. Everything else, the model above all, stays as the person set it
   unless `[hermes.model]` in the haunt config says otherwise.
 - **`.env`** gets `API_SERVER_KEY` (32 random bytes, hex),
   `API_SERVER_PORT` (a free loopback port), `API_SERVER_HOST=127.0.0.1`
@@ -82,7 +83,8 @@ platform_toolsets:
 agent:
   disabled_toolsets: [terminal, file, browser, code_execution, delegation,
     web, cronjob, computer_use, todo, vision, image_gen, tts, kanban,
-    connections, clarify]
+    connections, clarify, google_meet, x_search, video, video_gen,
+    spotify, a2a, browser-cdp, browser-use]
 tools:
   tool_search: {enabled: "off"}
 ```
@@ -90,16 +92,13 @@ tools:
 The MCP toolset is named after its key under `mcp_servers`. Naming any
 MCP server enables only those. `disabled_toolsets` is subtracted last, so
 a later hermes that widens an explicit list still cannot hand a ghost a
-shell. `clarify` is left out because the API server passes no clarify
+shell. The plugin toolsets are on that list because hermes enables a
+plugin's toolset beside an explicit list once the person turns the plugin
+on (`hermes_cli/tools_config.py` `_enabled_plugin_toolsets`). `clarify` is left out because the API server passes no clarify
 callback and the tool only ever answers that it is unavailable; haunt's
 `ask` is how a question is put. Tool search must be off: with it on, the
 MCP tools and `session_search` hide behind a lookup a small model does not
-think to use. `tts.provider` is set because hermes checks every tool's
-availability before a turn, disabled ones included (`tools/registry.py`
-`check_fn`), and the check for its default voice, `edge`, imports
-`edge_tts` through `tools.lazy_deps`, which pip-installs it: two seconds
-before a fresh profile's first turn, for a toolset the ghost cannot use.
-Piper's check is a `find_spec` and installs nothing. The model receives exactly `memory`, `skill_manage`,
+think to use. The model receives exactly `memory`, `skill_manage`,
 `skill_view`, `skills_list`, `session_search` and `mcp__haunt__…`.
 
 ## The gateway
@@ -108,6 +107,12 @@ Piper's check is a `find_spec` and installs nothing. The model receives exactly 
 --external-supervisor --replace` in its own process group, waits on
 `GET /health`, restarts it with the troupe's backoff shape, and stops it
 on shutdown. A gateway already answering on the profile's port is adopted.
+Hermes multiplexes profiles by default: one gateway serves every profile
+under the root, and a named profile with no installed service is refused
+a gateway of its own. `gateway.standalone: true` in the profile is what
+lets haunt start one, and it also keeps a gateway the person runs from
+serving the ghost's profile outside haunt. Hermes calls the key a
+temporary shim, so a later pin may need another way.
 It is started only once the control socket is listening, because hermes
 spawns `mcp-serve` immediately and that asks for the tool list; turns
 sent before it is up wait for it, up to two minutes, without counting
@@ -151,10 +156,12 @@ in front of the model until it resolves it.
 SSE frames are `event: <name>\ndata: <json>\n\n` with `: keepalive`
 comments every 10 s. The order is `run.started`, `message.started`, then
 any of `assistant.delta {delta}`, `tool.started {tool_name, preview,
-args}`, `tool.completed {tool_name}`, `tool.failed`, `tool.progress`,
+args}`, `tool.completed {tool_name}`, `tool.failed` (a tool that returned an
+error), `tool.progress`,
 then `assistant.completed {content, completed, partial, interrupted}`,
 `run.completed|run.failed|run.cancelled`, and `done`; an exception is
-`error {message}` before `done`. `tool.progress` with `tool_name`
+`error {message}` before `done`. `assistant.commentary` and
+`approval.request` are ignored. `tool.progress` with `tool_name`
 `_thinking` is reasoning and is ignored. Captured frames live in
 `internal/hermes/testdata`.
 

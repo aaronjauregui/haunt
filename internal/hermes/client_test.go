@@ -329,6 +329,9 @@ func TestEnsureProfile(t *testing.T) {
 	if doc["_config_version"] != configVersion {
 		t.Errorf("_config_version = %v, want %d", doc["_config_version"], configVersion)
 	}
+	if gw, _ := doc["gateway"].(map[string]any); gw["standalone"] != true {
+		t.Errorf("gateway = %v, want standalone: true", doc["gateway"])
+	}
 	doc["_config_version"] = configVersion + 1 // hermes migrated it
 	doc["model"] = map[string]any{"default": "their-model"}
 	doc["platform_toolsets"] = map[string]any{"api_server": []string{"terminal"}}
@@ -365,9 +368,6 @@ func TestEnsureProfile(t *testing.T) {
 	srv := doc["mcp_servers"].(map[string]any)["haunt"].(map[string]any)
 	if srv["command"] != "/usr/bin/haunt" || srv["timeout"] != 600 || srv["env"].(map[string]any)["HAUNT_RUNTIME_DIR"] != "/run/x" {
 		t.Errorf("mcp server entry %v", srv)
-	}
-	if doc["tts"].(map[string]any)["provider"] != "piper" {
-		t.Errorf("tts %v, want piper, whose check installs nothing", doc["tts"])
 	}
 	if doc["memory"].(map[string]any)["write_approval"] != false {
 		t.Errorf("memory %v", doc["memory"])

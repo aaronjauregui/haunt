@@ -82,13 +82,13 @@ What hermes holds about you is in the profile, in plain text:
 hermes image with only what a ghost's brain needs mounted: the ghost's
 profile, the haunt binary read-only, and the control-socket directory.
 
-Build the image from the commit haunt is checked against (hermes's tags
-are date-based):
+Build the image from the commit haunt is checked against, release
+v0.21.6:
 
 ```sh
 git clone https://github.com/nousresearch/hermes-agent && cd hermes-agent
-git checkout 6005aa1
-docker build -t hermes-agent:6005aa1 .
+git checkout 818c13b
+docker build -t hermes-agent:818c13b .
 ```
 
 A 403 from ghcr.io during the build is a stale `docker login ghcr.io`.

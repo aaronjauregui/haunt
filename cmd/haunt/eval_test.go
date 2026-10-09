@@ -600,7 +600,7 @@ func checkHermes(e prereqEnv) prereqs {
 }
 
 // hermesImage is scripts/hermes-docker's default image.
-const hermesImage = "hermes-agent:6005aa1"
+const hermesImage = "hermes-agent:818c13b"
 
 // modelName is the model under test as the results record it.
 func modelName(cfg *config.File) string {

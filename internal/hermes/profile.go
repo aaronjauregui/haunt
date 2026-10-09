@@ -287,10 +287,14 @@ func (c Config) EnsureProfile(spec ProfileSpec) (Profile, error) {
 
 // disabledToolsets is subtracted last, whatever else enables them: a later
 // hermes widening an explicit toolset list must not hand a ghost a shell.
+// The second line is plugin toolsets, which hermes turns on alongside an
+// explicit list once the person enables the plugin.
 var disabledToolsets = []string{
 	"terminal", "file", "browser", "code_execution", "delegation", "web",
 	"cronjob", "computer_use", "todo", "vision", "image_gen", "tts",
 	"kanban", "connections", "clarify",
+	"google_meet", "x_search", "video", "video_gen", "spotify", "a2a",
+	"browser-cdp", "browser-use",
 }
 
 // noBundledSkills is hermes's opt-out marker for bundled skills
@@ -299,7 +303,7 @@ const noBundledSkills = ".no-bundled-skills"
 
 // configVersion is hermes's config schema version (`_config_version` in
 // hermes_cli/config_defaults.py) at the commit docs/dev/hermes.md pins.
-const configVersion = 45
+const configVersion = 50
 
 func (c Config) writeConfig(path string, spec ProfileSpec, hasSkills bool) error {
 	doc := map[string]any{}
@@ -339,6 +343,13 @@ func (c Config) writeConfig(path string, spec ProfileSpec, hasSkills bool) error
 	platforms := section("platforms")
 	platforms["api_server"] = map[string]any{"enabled": true}
 
+	// A ghost's gateway is haunt's to start and stop, and serves this
+	// profile alone. Hermes otherwise refuses a named profile a gateway of
+	// its own, and a gateway the person runs would serve the ghost's
+	// profile too, outside haunt (hermes_cli/profiles.py profiles_to_serve).
+	gateway := section("gateway")
+	gateway["standalone"] = true
+
 	// Only these, and the haunt server's own toolset (named after its key
 	// under mcp_servers). No clarify: it is inert on the API server, and
 	// haunt's `ask` is the way to put a question.
@@ -351,16 +362,6 @@ func (c Config) writeConfig(path string, spec ProfileSpec, hasSkills bool) error
 	// using; a ghost's verbs must be in front of it.
 	tools := section("tools")
 	tools["tool_search"] = map[string]any{"enabled": "off"}
-
-	// Hermes checks every tool's availability before each turn, disabled
-	// toolsets included, and checking its default voice (edge) installs
-	// the edge-tts package on a profile that lacks it: seconds before a
-	// fresh ghost's first word, for a tool it cannot call. Piper's check
-	// only looks for the package. A voice the person chose is kept.
-	tts := section("tts")
-	if _, set := tts["provider"]; !set {
-		tts["provider"] = "piper"
-	}
 
 	memory := section("memory")
 	if _, set := memory["write_approval"]; !set {
@@ -421,7 +422,7 @@ func (c Config) writeConfig(path string, spec ProfileSpec, hasSkills bool) error
 		return err
 	}
 	header := []byte("# Written by haunt for ghost " + spec.Ghost + ". The api_server, toolset,\n" +
-		"# tool_search and mcp_servers.haunt settings, and the " + SkillsDir + " entry in\n" +
+		"# gateway.standalone, tool_search and mcp_servers.haunt settings, and the " + SkillsDir + " entry in\n" +
 		"# skills.external_dirs, are rewritten on every start;\n" +
 		"# everything else (the model above all) is yours to change.\n")
 	return writeIfChanged(path, append(header, out...), 0o600)
