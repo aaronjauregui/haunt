@@ -569,8 +569,8 @@ func TestEnsureProfile(t *testing.T) {
 	if srv["command"] != "/usr/bin/haunt" || srv["timeout"] != 600 || srv["env"].(map[string]any)["HAUNT_RUNTIME_DIR"] != "/run/x" {
 		t.Errorf("mcp server entry %v", srv)
 	}
-	if doc["memory"].(map[string]any)["write_approval"] != false {
-		t.Errorf("memory %v", doc["memory"])
+	if _, ok := doc["memory"]; ok {
+		t.Errorf("haunt wrote a memory section: %v", doc["memory"])
 	}
 	env, _ := readEnv(filepath.Join(p.Dir, ".env"))
 	if env["OPENROUTER_API_KEY"] != "theirs" || env["HAUNT_GHOST"] != "Moth" {
@@ -584,21 +584,20 @@ func TestEnsureProfile(t *testing.T) {
 		t.Errorf("SOUL.md was not regenerated")
 	}
 
-	// A profile left naming the deleted memory provider loses it.
-	raw, _ = os.ReadFile(cfgPath)
-	stale := strings.Replace(string(raw), "memory:\n", "memory:\n    provider: haunt\n", 1)
-	if stale == string(raw) {
-		t.Fatalf("no memory section to plant a provider in:\n%s", raw)
-	}
-	if err := os.WriteFile(cfgPath, []byte(stale), 0o600); err != nil {
+	// Memory is hermes's: the backend the person chose with hermes stays.
+	doc["memory"] = map[string]any{"provider": "holographic", "memory_enabled": false}
+	out, _ = yaml.Marshal(doc)
+	if err := os.WriteFile(cfgPath, out, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := c.EnsureProfile(spec); err != nil {
 		t.Fatal(err)
 	}
 	raw, _ = os.ReadFile(cfgPath)
-	if strings.Contains(string(raw), "provider: haunt") {
-		t.Errorf("stale memory provider kept:\n%s", raw)
+	doc = nil
+	yaml.Unmarshal(raw, &doc)
+	if m, _ := doc["memory"].(map[string]any); len(m) != 2 || m["provider"] != "holographic" || m["memory_enabled"] != false {
+		t.Errorf("the person's memory settings were changed: %v", doc["memory"])
 	}
 
 	opened, err := c.OpenProfile("Moth")

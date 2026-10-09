@@ -26,10 +26,16 @@ constraint on changes, not a history.
   own backend layer speaks the OpenAI API only for the driver's verbs
   (vision, images) and ComfyUI for images. A brain that wants a model runs
   on hermes; there is no `chat` intent.
-- **One writer per store, one interpreter per utterance.** No parser in
-  front of the model deciding whether typed text is a command. No belief
-  store beside hermes memory: a correction is the model editing its
-  memory, and there is no confirmation dialogue for it.
+- **Memory is hermes's.** Haunt neither writes, configures nor reads a
+  ghost's memory. The person picks the backend with hermes (`hermes -p
+  haunt-<ghost> memory setup`), built-in or a provider, or a provider
+  alone, and haunt works with whatever memory tools the model then has.
+  There is no belief store beside it: a correction is the model editing
+  its memory, and there is no confirmation dialogue for it. The rules
+  about what may be remembered are the soul's and the skills', worded for
+  any store; nothing in haunt gates or audits a write.
+- **One interpreter per utterance.** No parser in front of the model
+  deciding whether typed text is a command.
 - **The trust line is at the model's output, not the model.** A
   downloaded brain is untrusted; the person's chosen model is on the
   person's side of the line. What is gated is effects.

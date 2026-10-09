@@ -76,8 +76,10 @@ writing files, no browser, and hermes's own web toolset stays off
 whatever the ghost may look up. Every verb goes through the same
 consent, budgets and quiet rules as anything else the ghost does.
 
-What hermes holds about you is in the profile, in plain text:
-`memories/MEMORY.md` and `memories/USER.md`.
+What hermes holds about you is hermes's own memory, which haunt leaves
+alone: by default plain text in the profile's `memories/MEMORY.md` and
+`memories/USER.md`, or a provider you chose with `hermes -p haunt-wisp
+memory setup` ([Memory](memory.md#what-it-remembers)).
 
 ## Hermes in a container
 
@@ -111,6 +113,16 @@ command = ["/abs/path/to/haunt/scripts/hermes-docker"]
 
 `HERMES_IMAGE` picks a different image tag. The container uses host
 networking; the gateway binds loopback only.
+
+The holographic memory provider recalls by keyword alone without numpy,
+which the image does not have. `scripts/hermes-numpy.Dockerfile` adds it:
+
+```sh
+docker build -t hermes-agent:818c13b-numpy - < scripts/hermes-numpy.Dockerfile
+```
+
+The wrapper uses `hermes-agent:818c13b-numpy` whenever that image exists
+and `HERMES_IMAGE` is unset.
 
 A Claude subscription is not a way in: hermes's Anthropic OAuth path bills
 purchased extra-usage credits only. `ANTHROPIC_API_KEY` is pay-per-token.
