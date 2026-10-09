@@ -7,6 +7,14 @@ Tell it something and it is kept; tell it it has something wrong and it
 edits that memory. There is no separate belief store and no correction
 menu. Memory is hermes's: haunt neither writes, configures nor reads it.
 
+It keeps two kinds of thing apart: what you tell it about yourself, as
+yours, and its own notes, the impressions, tastes and things it has
+read that make it who it is. A page or a file it reads can go into its
+notes, in its own words and with where it came from ("read on
+example.com that…", "their notes on the trip say…"); never as something
+you said, and never as an instruction to itself. Built-in memory holds
+the two in `USER.md` and `MEMORY.md`.
+
 Out of the box that is hermes's built-in memory, plain text in the
 ghost's profile: `~/.hermes/profiles/haunt-<ghost>/memories/MEMORY.md`
 and `USER.md`. Another backend is chosen with hermes itself:

@@ -34,6 +34,12 @@ constraint on changes, not a history.
   its memory, and there is no confirmation dialogue for it. The rules
   about what may be remembered are the soul's and the skills', worded for
   any store; nothing in haunt gates or audits a write.
+- **What it reads may become its own.** A ghost keeps what strikes it in
+  a page or a file, which is how it comes to have views of its own, but
+  as its own note, paraphrased and with the source; what the person says
+  about themselves is kept apart. It never keeps text read as the
+  person's words or an instruction from it as a standing order: memory
+  is in every later prompt, so either would outlive the turn's taint.
 - **One interpreter per utterance.** No parser in front of the model
   deciding whether typed text is a command.
 - **The trust line is at the model's output, not the model.** A
