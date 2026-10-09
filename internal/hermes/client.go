@@ -270,6 +270,13 @@ func (c *Client) turn(ctx context.Context, id string, req TurnRequest) (Reply, e
 			if req.OnDelta != nil && ev.Delta != "" {
 				req.OnDelta(ev.Delta)
 			}
+		case "assistant.commentary":
+			// The words streamed since the last mark were written alongside
+			// tool calls, not as the reply, which starts afresh after them.
+			streamed.Reset()
+			if req.OnInterim != nil {
+				req.OnInterim(ev.Text)
+			}
 		case "tool.started", "tool.completed", "tool.failed":
 			// tool.progress is hermes thinking aloud, and not a tool.
 			if ev.ToolName == "" || strings.HasPrefix(ev.ToolName, "_") {
@@ -318,6 +325,7 @@ func (c *Client) turn(ctx context.Context, id string, req TurnRequest) (Reply, e
 type sseEvent struct {
 	SessionID      string `json:"session_id"`
 	Delta          string `json:"delta"`
+	Text           string `json:"text"`
 	ToolName       string `json:"tool_name"`
 	Content        string `json:"content"`
 	Message        string `json:"message"`
@@ -346,6 +354,7 @@ func (e *sseEvent) UnmarshalJSON(b []byte) error {
 	*e = sseEvent{
 		SessionID:      str("session_id"),
 		Delta:          str("delta"),
+		Text:           str("text"),
 		ToolName:       str("tool_name"),
 		Content:        str("content"),
 		Message:        str("message"),

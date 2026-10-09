@@ -155,15 +155,41 @@ in front of the model until it resolves it.
 
 SSE frames are `event: <name>\ndata: <json>\n\n` with `: keepalive`
 comments every 10 s. The order is `run.started`, `message.started`, then
-any of `assistant.delta {delta}`, `tool.started {tool_name, preview,
-args}`, `tool.completed {tool_name}`, `tool.failed` (a tool that returned an
+any of `assistant.delta {delta}`, `assistant.commentary {text,
+already_streamed}`, `tool.started {tool_name, preview, args}`,
+`tool.completed {tool_name}`, `tool.failed` (a tool that returned an
 error), `tool.progress`,
 then `assistant.completed {content, completed, partial, interrupted}`,
 `run.completed|run.failed|run.cancelled`, and `done`; an exception is
-`error {message}` before `done`. `assistant.commentary` and
-`approval.request` are ignored. `tool.progress` with `tool_name`
-`_thinking` is reasoning and is ignored. Captured frames live in
-`internal/hermes/testdata`.
+`error {message}` before `done`. `approval.request` is ignored.
+`tool.progress` with `tool_name` `_thinking` is reasoning and is
+ignored. Captured and hand-made frames live in
+`internal/hermes/testdata` (`lookup.sse` and `lookup-silent.sse` are
+written by hand in the shape of the v0.21.6 source).
+
+**Interim words.** Text the model writes alongside a tool call ("let me
+look…") streams as `assistant.delta` like any other, and once that model
+call is over hermes sends it again whole as `assistant.commentary`,
+before the call's `tool.started`; `already_streamed` is true when the
+deltas carried all of it. It is not part of `assistant.completed`'s
+`content`, which is the turn's last part only, and the first delta after
+a tool round opens with `\n\n`. Hermes sends commentary while
+`display.interim_assistant_messages` is on (the default), also for a
+would-be reply hermes sends back to the model to carry on (its stall and
+verification guards); on the Codex app-server runtime every message the
+model writes is sent as commentary, the last included. The client
+treats commentary as the end of a part (`TurnRequest.OnInterim`, with the
+text), and a stream that ends without `assistant.completed` answers with
+the last part alone. The driver shows each part as it arrives, in place
+of the one before: interim words stay up while the tools run, as the
+ghost saying what it is doing, and the reply replaces them, so the
+balloon ends on what the finished turn shows. Commentary that did not
+stream is shown from its text. Each part is held and read on its own
+for a pose tag and for `NO_REPLY`, and a part's pose goes on with its
+first words. The talk animation stops at the end of each part. The
+why-trace records the reply alone; the session keeps the interim words
+on the message that made the call, and `history` shows them as lines of
+the turn.
 
 On the driver's side: the first-token deadline (`[hermes]
 first_token_timeout`, 30 s) is on the first sign of life, and a tool
@@ -192,9 +218,10 @@ the waking indicator is up, which they wait under.
 first costs a model round trip before the words, and a model left to
 the tool reaches for it before nearly every greeting; the tag rides on
 the words instead. The stream is held while its opening could still be a tag
-(`MaybePose`), as it is while it could be `NO_REPLY`; the pose goes on
-with the first words shown, or, for a turn not streamed, with the
-finished reply. Any short bracketed opening is taken off, a pose the
+(`MaybePose`), as it is while it could be `NO_REPLY`, and the opening is
+that of the part arriving, so a reply after interim words opens with its
+own tag; the pose goes on with the first words shown, or, for a turn not
+streamed, with the finished reply. Any short bracketed opening is taken off, a pose the
 shell has or not: told to open with a bracket, a model also opens with
 labels for what it did (`[memory add]`) or stage directions, and none of
 those is for the balloon. One that names no pose falls back to the
@@ -222,8 +249,9 @@ reply that is `NO_REPLY` alone, or at the start or end of a reply under
 300 characters, is dropped: no balloon, and the why-trace records a
 suppressed turn (`Silent`). Looser than hermes's exact-match rule on
 purpose, for small models that decorate the token. While streaming,
-deltas are held back as long as the text could still be the token
-(`MaybeSilent`); an unprompted turn is not streamed at all.
+deltas are held back as long as the part arriving could still be the
+token (`MaybeSilent`); an unprompted turn is not streamed at all. A
+silent reply after interim words takes those words down with it.
 
 **Pictures.** Words that follow a `draw` call wait until the picture has
 been up for its twenty seconds rather than painting over it.
@@ -627,8 +655,9 @@ would start a second gateway from it on the next start.
 fake `hermes` executable (`cmd/haunt/testdata/fakehermes`) that reads
 the profile, spawns `haunt mcp-serve` with hermes's filtered environment,
 and speaks the captured SSE format from a script (`FAKEHERMES_SCRIPT`:
-match, delay, tool call, reply). `newHermesRig` is the shared rig. The
-fake gateway also logs what it finds under `skills.external_dirs`.
+match, delay, interim words, tool call, reply). `newHermesRig` is the
+shared rig. The fake gateway also logs what it finds under
+`skills.external_dirs`.
 `internal/hermes` tests replay captured SSE and cover the profile merge
 and the skills install. The evals are the live counterpart, on a real
 model ([Hacking](hacking.md#evals)).

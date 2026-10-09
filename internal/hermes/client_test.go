@@ -185,6 +185,117 @@ func TestTurnReturnsSilence(t *testing.T) {
 	}
 }
 
+// streamParts is a turn's stream as the caller sees it: the parts OnInterim
+// ends, each with what OnDelta delivered for it and hermes's own text, and
+// the order the callbacks came in.
+type streamParts struct {
+	cur     strings.Builder
+	interim []string // hermes's text for each part OnInterim ended
+	deltas  []string // what OnDelta delivered for those parts
+	order   []string
+}
+
+func (p *streamParts) request(input string) TurnRequest {
+	return TurnRequest{
+		Input: input,
+		OnDelta: func(d string) {
+			p.cur.WriteString(d)
+			if n := len(p.order); n == 0 || p.order[n-1] != "delta" {
+				p.order = append(p.order, "delta")
+			}
+		},
+		OnInterim: func(text string) {
+			p.interim = append(p.interim, text)
+			p.deltas = append(p.deltas, p.cur.String())
+			p.cur.Reset()
+			p.order = append(p.order, "interim")
+		},
+		OnTool: func(e ToolEvent) {
+			if !e.Done {
+				p.order = append(p.order, "tool")
+			}
+		},
+	}
+}
+
+// Words written alongside a tool call stream as deltas and are then marked
+// as commentary, before the call starts. They are not the reply: the reply
+// is what follows the mark, and its pose tag opens that part, not the
+// stream.
+func TestTurnMarksInterimWords(t *testing.T) {
+	f, srv := newFakeHermes(t)
+	f.stream = func(string, string) string {
+		return strings.ReplaceAll(fixture(t, "lookup.sse"), `"haunt-fake"`, `"haunt-moth"`)
+	}
+	saved := ""
+	var p streamParts
+	reply, err := testClient(srv, &saved).Turn(context.Background(), p.request("Did I burn anything last week?"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(p.order, []string{"delta", "interim", "tool", "delta"}) {
+		t.Errorf("callbacks came %v", p.order)
+	}
+	if !slices.Equal(p.interim, []string{"Let me look."}) || !slices.Equal(p.deltas, []string{"Let me look."}) {
+		t.Errorf("interim %q, streamed as %q", p.interim, p.deltas)
+	}
+	const want = "[sad] Yes: the bread, on Tuesday."
+	if reply.Text != want || strings.TrimSpace(p.cur.String()) != want {
+		t.Errorf("reply %q, streamed after the mark %q", reply.Text, p.cur.String())
+	}
+	if pose, rest := CutPose(p.cur.String()); pose != "sad" || strings.TrimSpace(rest) != "Yes: the bread, on Tuesday." {
+		t.Errorf("the reply's part opens with pose %q, words %q", pose, rest)
+	}
+	if !slices.Equal(reply.Tools, []string{"session_search"}) {
+		t.Errorf("tools %v", reply.Tools)
+	}
+}
+
+// Silence after interim words is the reply's: the part after the mark is
+// the token, though the stream as a whole does not open with it.
+func TestTurnSilenceAfterInterimWords(t *testing.T) {
+	f, srv := newFakeHermes(t)
+	f.stream = func(string, string) string { return fixture(t, "lookup-silent.sse") }
+	saved := ""
+	var p streamParts
+	reply, err := testClient(srv, &saved).Turn(context.Background(), p.request(Envelope("idle")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !Silent(reply.Text) {
+		t.Errorf("reply %q is not silence", reply.Text)
+	}
+	if after := p.cur.String(); !MaybeSilent(after) || !Silent(after) {
+		t.Errorf("the part after the mark, %q, does not read as silence", after)
+	}
+	if whole := strings.Join(p.deltas, "") + p.cur.String(); MaybeSilent(whole) {
+		t.Errorf("the whole stream %q reads as silence; the test proves nothing", whole)
+	}
+}
+
+// A stream that ends without assistant.completed answers with what it
+// streamed after the last mark, not the interim words before it.
+func TestTurnWithoutCompletionAnswersTheLastPart(t *testing.T) {
+	f, srv := newFakeHermes(t)
+	f.sessions["haunt-moth"] = true
+	f.stream = func(string, string) string {
+		return "event: assistant.delta\ndata: {\"delta\":\"One moment.\"}\n\n" +
+			"event: assistant.commentary\ndata: {\"text\":\"One moment.\",\"already_streamed\":true}\n\n" +
+			"event: tool.started\ndata: {\"tool_name\":\"memory\"}\n\n" +
+			"event: tool.completed\ndata: {\"tool_name\":\"memory\"}\n\n" +
+			"event: assistant.delta\ndata: {\"delta\":\"\\n\\nFound it.\"}\n\n" +
+			"event: done\ndata: {}\n\n"
+	}
+	saved := "haunt-moth"
+	reply, err := testClient(srv, &saved).Turn(context.Background(), TurnRequest{Input: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(reply.Text) != "Found it." {
+		t.Errorf("reply %q", reply.Text)
+	}
+}
+
 // A session that exists already is adopted; one that has vanished is made
 // again.
 func TestSessionIsFoundAndRemade(t *testing.T) {
@@ -251,6 +362,31 @@ func TestMessages(t *testing.T) {
 	acted := []Lookup{{Tool: "face", Args: "{}", Result: `{"result":"ok"}`}}
 	if !slices.Equal(msgs[2].Acted, acted) || msgs[4].Acted != nil {
 		t.Errorf("the ghost's calls %+v, want %+v on the first turn's last reply only", msgs[2].Acted, acted)
+	}
+}
+
+// Interim words are kept in the session on the message that made the call,
+// and read back as interim, their pose tag taken off as the reply's is.
+func TestMessagesInterimWords(t *testing.T) {
+	f, srv := newFakeHermes(t)
+	f.sessions["haunt-moth"] = true
+	f.history = `{"object":"list","data":[
+		{"role":"user","content":"Did I burn anything last week?"},
+		{"role":"assistant","content":"[thinking] Let me look.","tool_calls":[
+			{"id":"c1","type":"function","function":{"name":"session_search","arguments":"{\"query\": \"burned\"}"}}]},
+		{"role":"tool","tool_call_id":"c1","content":"{\"results\": [\"they burned the bread on Tuesday\"]}"},
+		{"role":"assistant","content":"[sad] Yes: the bread, on Tuesday."}]}`
+	saved := "haunt-moth"
+	msgs, err := testClient(srv, &saved).Messages(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 3 || msgs[1].Text != "Let me look." || !msgs[1].Interim ||
+		msgs[2].Text != "Yes: the bread, on Tuesday." || msgs[2].Interim {
+		t.Fatalf("messages %+v", msgs)
+	}
+	if len(msgs[2].Looked) != 1 || msgs[1].Looked != nil {
+		t.Errorf("the lookup rides on %+v, want the reply it led to", msgs)
 	}
 }
 

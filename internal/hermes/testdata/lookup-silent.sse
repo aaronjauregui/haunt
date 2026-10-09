@@ -1,0 +1,60 @@
+event: run.started
+data: {"user_message": {"role": "user", "content": "[haunt event] kind=idle minutes=20"}, "runtime": {"provider": "", "model": "", "route_source": "global", "requested": {"provider": "", "model": ""}}, "session_id": "haunt-fake", "run_id": "run_a41c7e9d3b2f4e0a9c6d58b1f2e07a64", "seq": 1, "ts": 1789614903.5110998}
+
+event: message.started
+data: {"message": {"id": "msg_2b8d0f6a1c3e4b5d9a7e60f4c1d38e29", "role": "assistant"}, "session_id": "haunt-fake", "run_id": "run_a41c7e9d3b2f4e0a9c6d58b1f2e07a64", "seq": 2, "ts": 1789614903.5141997}
+
+event: assistant.delta
+data: {"message_id": "msg_2b8d0f6a1c3e4b5d9a7e60f4c1d38e29", "delta": "Let ", "session_id": "haunt-fake", "run_id": "run_a41c7e9d3b2f4e0a9c6d58b1f2e07a64", "seq": 3, "ts": 1789614903.5172997}
+
+event: assistant.delta
+data: {"message_id": "msg_2b8d0f6a1c3e4b5d9a7e60f4c1d38e29", "delta": "me c", "session_id": "haunt-fake", "run_id": "run_a41c7e9d3b2f4e0a9c6d58b1f2e07a64", "seq": 4, "ts": 1789614903.5203996}
+
+event: assistant.delta
+data: {"message_id": "msg_2b8d0f6a1c3e4b5d9a7e60f4c1d38e29", "delta": "heck", "session_id": "haunt-fake", "run_id": "run_a41c7e9d3b2f4e0a9c6d58b1f2e07a64", "seq": 5, "ts": 1789614903.5234995}
+
+event: assistant.delta
+data: {"message_id": "msg_2b8d0f6a1c3e4b5d9a7e60f4c1d38e29", "delta": " som", "session_id": "haunt-fake", "run_id": "run_a41c7e9d3b2f4e0a9c6d58b1f2e07a64", "seq": 6, "ts": 1789614903.5265994}
+
+event: assistant.delta
+data: {"message_id": "msg_2b8d0f6a1c3e4b5d9a7e60f4c1d38e29", "delta": "ethi", "session_id": "haunt-fake", "run_id": "run_a41c7e9d3b2f4e0a9c6d58b1f2e07a64", "seq": 7, "ts": 1789614903.5296993}
+
+event: assistant.delta
+data: {"message_id": "msg_2b8d0f6a1c3e4b5d9a7e60f4c1d38e29", "delta": "ng f", "session_id": "haunt-fake", "run_id": "run_a41c7e9d3b2f4e0a9c6d58b1f2e07a64", "seq": 8, "ts": 1789614903.5327992}
+
+event: assistant.delta
+data: {"message_id": "msg_2b8d0f6a1c3e4b5d9a7e60f4c1d38e29", "delta": "irst", "session_id": "haunt-fake", "run_id": "run_a41c7e9d3b2f4e0a9c6d58b1f2e07a64", "seq": 9, "ts": 1789614903.5358992}
+
+event: assistant.delta
+data: {"message_id": "msg_2b8d0f6a1c3e4b5d9a7e60f4c1d38e29", "delta": ".", "session_id": "haunt-fake", "run_id": "run_a41c7e9d3b2f4e0a9c6d58b1f2e07a64", "seq": 10, "ts": 1789614903.538999}
+
+event: assistant.commentary
+data: {"message_id": "msg_2b8d0f6a1c3e4b5d9a7e60f4c1d38e29", "text": "Let me check something first.", "already_streamed": true, "session_id": "haunt-fake", "run_id": "run_a41c7e9d3b2f4e0a9c6d58b1f2e07a64", "seq": 11, "ts": 1789614903.542099}
+
+event: tool.started
+data: {"message_id": "msg_2b8d0f6a1c3e4b5d9a7e60f4c1d38e29", "tool_name": "session_search", "preview": "idle", "args": {"query": "idle"}, "session_id": "haunt-fake", "run_id": "run_a41c7e9d3b2f4e0a9c6d58b1f2e07a64", "seq": 12, "ts": 1789614903.545199}
+
+event: tool.completed
+data: {"message_id": "msg_2b8d0f6a1c3e4b5d9a7e60f4c1d38e29", "tool_name": "session_search", "preview": null, "args": null, "session_id": "haunt-fake", "run_id": "run_a41c7e9d3b2f4e0a9c6d58b1f2e07a64", "seq": 13, "ts": 1789614903.5482988}
+
+event: assistant.delta
+data: {"message_id": "msg_2b8d0f6a1c3e4b5d9a7e60f4c1d38e29", "delta": "\n\nNO", "session_id": "haunt-fake", "run_id": "run_a41c7e9d3b2f4e0a9c6d58b1f2e07a64", "seq": 14, "ts": 1789614903.5513988}
+
+event: assistant.delta
+data: {"message_id": "msg_2b8d0f6a1c3e4b5d9a7e60f4c1d38e29", "delta": "_REP", "session_id": "haunt-fake", "run_id": "run_a41c7e9d3b2f4e0a9c6d58b1f2e07a64", "seq": 15, "ts": 1789614903.5544987}
+
+event: assistant.delta
+data: {"message_id": "msg_2b8d0f6a1c3e4b5d9a7e60f4c1d38e29", "delta": "LY", "session_id": "haunt-fake", "run_id": "run_a41c7e9d3b2f4e0a9c6d58b1f2e07a64", "seq": 16, "ts": 1789614903.5575986}
+
+event: tool.progress
+data: {"message_id": "msg_2b8d0f6a1c3e4b5d9a7e60f4c1d38e29", "tool_name": "_thinking", "delta": "NO_REPLY", "session_id": "haunt-fake", "run_id": "run_a41c7e9d3b2f4e0a9c6d58b1f2e07a64", "seq": 17, "ts": 1789614903.5606985}
+
+event: assistant.completed
+data: {"session_id": "haunt-fake", "message_id": "msg_2b8d0f6a1c3e4b5d9a7e60f4c1d38e29", "content": "NO_REPLY", "completed": true, "partial": false, "interrupted": false, "runtime": {"provider": "custom", "model": "fake", "route_source": "global", "requested": {"provider": "", "model": ""}}, "run_id": "run_a41c7e9d3b2f4e0a9c6d58b1f2e07a64", "seq": 18, "ts": 1789614903.5637984}
+
+event: run.completed
+data: {"session_id": "haunt-fake", "message_id": "msg_2b8d0f6a1c3e4b5d9a7e60f4c1d38e29", "completed": true, "partial": false, "interrupted": false, "messages": [{"role": "assistant", "content": "Let me check something first.", "tool_calls": [{"id": "call_8e21d4b0", "call_id": "call_8e21d4b0", "response_item_id": "fc_8e21d4b0", "type": "function", "function": {"name": "session_search", "arguments": "{\"query\": \"idle\"}"}}], "timestamp": 1789614904.1079998, "finish_reason": "tool_calls", "reasoning": null}, {"role": "tool", "content": "{\"results\": []}", "tool_call_id": "call_8e21d4b0", "tool_name": "session_search", "timestamp": 1789614904.158}, {"role": "assistant", "content": "NO_REPLY", "timestamp": 1789614904.208, "finish_reason": "stop", "reasoning": null}], "usage": {"input_tokens": 20, "output_tokens": 10, "total_tokens": 30, "runtime": {"provider": "custom", "model": "fake", "route_source": "global", "requested": {"provider": "", "model": ""}}}, "runtime": {"provider": "custom", "model": "fake", "route_source": "global", "requested": {"provider": "", "model": ""}}, "run_id": "run_a41c7e9d3b2f4e0a9c6d58b1f2e07a64", "seq": 19, "ts": 1789614903.5668983}
+
+event: done
+data: {"session_id": "haunt-fake", "run_id": "run_a41c7e9d3b2f4e0a9c6d58b1f2e07a64", "seq": 20, "ts": 1789614903.5699983}
+

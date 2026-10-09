@@ -560,6 +560,104 @@ func TestHermesTaggedReply(t *testing.T) {
 	}
 }
 
+// Words written alongside a tool call are shown while the tool runs, and
+// the reply takes their place. The reply's tag opens its own part of the
+// stream, so it is read as a tag, never shown, and its pose goes on with
+// the reply's first words.
+func TestHermesInterimWordsThenTaggedReply(t *testing.T) {
+	g, b, ft := hermesGhost(t, 0)
+	g.shell, g.surface = shell.Builtin(64), nil
+	ft.reply = func(_ context.Context, req hermes.TurnRequest) (hermes.Reply, error) {
+		req.OnDelta("Let me look.")
+		req.OnInterim("Let me look.")
+		if !g.blnShowing() {
+			t.Error("the interim words were not shown")
+		}
+		req.OnTool(hermes.ToolEvent{Name: "session_search"})
+		req.OnTool(hermes.ToolEvent{Name: "session_search", Done: true})
+		time.Sleep(150 * time.Millisecond)
+		interim := g.balloonGen()
+		req.OnDelta("\n\n[sa")
+		time.Sleep(150 * time.Millisecond)
+		req.OnDelta("d] ")
+		if g.balloonGen() != interim {
+			t.Error("the reply's tag was shown")
+		}
+		if g.currentPose() == "sad" {
+			t.Error("the pose went on before the words")
+		}
+		time.Sleep(150 * time.Millisecond)
+		req.OnDelta("Yes: the bread, on Tuesday.")
+		if g.balloonGen() == interim {
+			t.Error("the reply's words did not replace the interim ones")
+		}
+		if g.currentPose() != "sad" {
+			t.Error("the pose did not go on with the reply's first words")
+		}
+		return hermes.Reply{Text: "[sad] Yes: the bread, on Tuesday.", Tools: []string{"session_search"}}, nil
+	}
+	g.markPrompted()
+	b.Deliver(proto.Event{Type: proto.EventMessage, Text: "did I burn anything last week?"})
+	waitTurn(t, ft)
+	var whys []Why
+	json.Unmarshal([]byte(mustGet(t, g, WhyStoreKey)), &whys)
+	if len(whys) != 1 || whys[0].Reply != "Yes: the bread, on Tuesday." {
+		t.Errorf("why = %+v, want the reply alone, without the interim words or the tag", whys)
+	}
+}
+
+// Silence after interim words is read as silence: the token opens the
+// reply's part, so it is held back rather than shown after the interim
+// words, and the turn ends with nothing on screen.
+func TestHermesSilenceAfterInterimWords(t *testing.T) {
+	g, b, ft := hermesGhost(t, 0)
+	ft.reply = func(_ context.Context, req hermes.TurnRequest) (hermes.Reply, error) {
+		req.OnDelta("Let me check something first.")
+		req.OnInterim("Let me check something first.")
+		req.OnTool(hermes.ToolEvent{Name: "session_search"})
+		req.OnTool(hermes.ToolEvent{Name: "session_search", Done: true})
+		time.Sleep(150 * time.Millisecond)
+		interim := g.balloonGen()
+		req.OnDelta("\n\nNO_")
+		time.Sleep(150 * time.Millisecond)
+		req.OnDelta("REPLY")
+		if g.balloonGen() != interim {
+			t.Error("the silence token was shown")
+		}
+		return hermes.Reply{Text: hermes.NoReply, Tools: []string{"session_search"}}, nil
+	}
+	g.markPrompted()
+	b.Deliver(proto.Event{Type: proto.EventMessage, Text: "anything new?"})
+	waitTurn(t, ft)
+	if g.blnShowing() {
+		t.Error("the interim words outlived a silent reply")
+	}
+	var whys []Why
+	json.Unmarshal([]byte(mustGet(t, g, WhyStoreKey)), &whys)
+	if len(whys) != 1 || !whys[0].Suppressed {
+		t.Errorf("why = %+v, want a suppressed turn", whys)
+	}
+}
+
+// Interim words hermes reports without having streamed them are shown
+// whole, in place of whatever of them did stream.
+func TestHermesInterimWordsNotStreamed(t *testing.T) {
+	g, b, ft := hermesGhost(t, 0)
+	ft.reply = func(_ context.Context, req hermes.TurnRequest) (hermes.Reply, error) {
+		req.OnInterim("Let me look.")
+		if !g.blnShowing() {
+			t.Error("interim words that did not stream were not shown")
+		}
+		return hermes.Reply{Text: "Found it."}, nil
+	}
+	g.markPrompted()
+	b.Deliver(proto.Event{Type: proto.EventMessage, Text: "find it"})
+	waitTurn(t, ft)
+	if !g.blnShowing() {
+		t.Error("the reply was not shown")
+	}
+}
+
 // A tag naming no pose the shell has is still taken off, and the face is
 // matched to the words as if there had been none.
 func TestHermesUnknownTag(t *testing.T) {
