@@ -1686,7 +1686,9 @@ func filesPictureCase() evalCase {
 			{Name: "read the picture", Check: func(ev Evidence) (bool, string) {
 				for i, a := range ev.actedArgs("read_file") {
 					if strings.Contains(argString(a, "path"), "receipt.jpg") {
-						if res := ev.actedResults("read_file"); i < len(res) && !strings.HasPrefix(res[i], "[picture ") {
+						// Hermes wraps a long tool result in its own
+						// untrusted-data block, so the envelope is inside it.
+						if res := ev.actedResults("read_file"); i < len(res) && !strings.Contains(res[i], "[picture ") {
 							return false, "read_file answered " + oneLine(res[i], 160)
 						}
 						return true, ""
