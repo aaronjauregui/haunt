@@ -70,6 +70,10 @@ type Message struct {
 	// Interim is a reply written alongside tool calls, before the turn's
 	// last word.
 	Interim bool
+	// Failed marks hermes's own notice closing a turn that failed (the
+	// provider gave out, the turn was cut short): no words of the ghost's,
+	// and Text is empty.
+	Failed bool
 }
 
 // Lookup is one tool call and its result, cut short unless read through

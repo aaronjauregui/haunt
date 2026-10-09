@@ -499,6 +499,14 @@ func (c *Client) messages(ctx context.Context, n, argsMax, resultMax int) ([]Mes
 			continue
 		}
 		text := rawText(m.Content)
+		if m.DisplayKind == "failed_turn" {
+			// Hermes's notice, "Your request was not processed…", written
+			// in the ghost's place when a turn failed. The turn's calls go
+			// on it, as they would on a reply.
+			last = len(msgs)
+			msgs = append(msgs, Message{Role: "assistant", Failed: true, Time: unixTime(m.Timestamp)})
+			continue
+		}
 		switch m.Role {
 		case "tool":
 			if at, ok := byCall[m.ToolCallID]; ok {
@@ -533,16 +541,11 @@ func (c *Client) messages(ctx context.Context, n, argsMax, resultMax int) ([]Mes
 		if strings.TrimSpace(text) == "" {
 			continue
 		}
-		sec := int64(m.Timestamp)
 		if m.Role == "assistant" {
 			// The pose a reply opened with was worn, not said.
 			_, text = CutPose(text)
 		}
-		msg := Message{
-			Role: m.Role,
-			Text: text,
-			Time: time.Unix(sec, int64((m.Timestamp-float64(sec))*1e9)),
-		}
+		msg := Message{Role: m.Role, Text: text, Time: unixTime(m.Timestamp)}
 		if m.Role == "assistant" {
 			msg.Interim = len(m.ToolCalls) > 0
 			last = len(msgs)
@@ -552,6 +555,12 @@ func (c *Client) messages(ctx context.Context, n, argsMax, resultMax int) ([]Mes
 	endTurn()
 	// "latest" pages back from the newest and still answers oldest first.
 	return msgs, nil
+}
+
+// unixTime is a hermes timestamp, seconds since the epoch as a float.
+func unixTime(ts float64) time.Time {
+	sec := int64(ts)
+	return time.Unix(sec, int64((ts-float64(sec))*1e9))
 }
 
 // HauntToolPrefix is how hermes names the tools haunt's MCP server offers

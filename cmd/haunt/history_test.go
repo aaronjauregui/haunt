@@ -46,6 +46,11 @@ func TestHistoryTurns(t *testing.T) {
 		list.Window == nil || list.Window.App != "foot" || !list.Time.Equal(at.Add(time.Second)) {
 		t.Errorf("list turn %+v", list)
 	}
+	failed := historyTurn{input: &hermes.Message{Role: "user", Text: "hello?", Time: at},
+		replies: []hermes.Message{{Role: "assistant", Failed: true, Time: at}}}.record()
+	if !failed.Failed || failed.Silent || failed.Reply != "" {
+		t.Errorf("failed turn %+v", failed)
+	}
 	if len(list.Acted) != 1 || list.Acted[0] != (traceCall{"notes_read", `{"file":"list"}`, "eggs\noven"}) ||
 		len(list.Looked) != 1 || list.Looked[0].Tool != "skill_view" {
 		t.Errorf("list turn calls %+v %+v", list.Acted, list.Looked)
