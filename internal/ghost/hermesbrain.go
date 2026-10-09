@@ -635,22 +635,26 @@ func (b *hermesBrain) run(t hermesTurn) (out turnOutcome) {
 		alive.Do(func() { deadline.Stop() })
 	}
 
+	// The words arrive in parts: any written alongside tool calls ("let me
+	// look…"), each ended by OnInterim, and the reply after the last.
+	// Each part is shown as it comes, in place of the one before, so the
+	// balloon ends on the reply, which is what is shown once the turn is
+	// over; and each is read on its own for a pose tag or the silence
+	// token, which open a part, not the turn.
 	var (
 		mu      sync.Mutex
-		acc     string
+		acc     string // the part arriving
 		shown   bool
 		talking bool
-		tagged  bool
+		tagged  bool // whether this part's pose has gone on
 		faced   bool
 		drew    bool
 		last    time.Time
 	)
-	onDelta := func(delta string) {
-		wake()
-		mu.Lock()
-		defer mu.Unlock()
-		acc += delta
-		// A reply may open with the pose to wear as it is said; until the
+	// show puts the part so far on screen once it is known to be words,
+	// at most every 120 ms unless now. Called with mu held.
+	show := func(now bool) {
+		// A part may open with the pose to wear as it is said; until the
 		// opening is known not to be one, nothing is shown.
 		if hermes.MaybePose(acc) {
 			return
@@ -669,11 +673,35 @@ func (b *hermesBrain) run(t hermesTurn) (out turnOutcome) {
 			talking = true
 			g.startTalking()
 		}
-		if time.Since(last) >= 120*time.Millisecond {
+		if now || time.Since(last) >= 120*time.Millisecond {
 			last = time.Now()
 			waiting.Stop()
 			g.showBalloon(strings.TrimSpace(words))
 			shown = true
+		}
+	}
+	onDelta := func(delta string) {
+		wake()
+		mu.Lock()
+		defer mu.Unlock()
+		acc += delta
+		show(false)
+	}
+	onInterim := func(text string) {
+		wake()
+		mu.Lock()
+		defer mu.Unlock()
+		// Hermes's account of the part is the whole of it, whether or not
+		// its deltas all arrived. It stays up while the tools run, until
+		// the next part has words to replace it.
+		if strings.TrimSpace(text) != "" {
+			acc = text
+		}
+		show(true)
+		acc, tagged = "", false
+		if talking {
+			talking = false
+			g.stopTalking()
 		}
 	}
 	onTool := func(ev hermes.ToolEvent) {
@@ -689,10 +717,11 @@ func (b *hermesBrain) run(t hermesTurn) (out turnOutcome) {
 	}
 
 	reply, err := b.turner.Turn(ctx, hermes.TurnRequest{
-		Input:   t.input,
-		Context: g.turnContext(time.Now()),
-		OnDelta: onDelta,
-		OnTool:  onTool,
+		Input:     t.input,
+		Context:   g.turnContext(time.Now()),
+		OnDelta:   onDelta,
+		OnInterim: onInterim,
+		OnTool:    onTool,
 	})
 	g.stopTalking()
 	waiting.Stop()

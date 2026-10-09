@@ -83,6 +83,10 @@ type rule struct {
 	Look       string         `json:"look"`
 	LookArgs   map[string]any `json:"look_args"`
 	LookResult string         `json:"look_result"`
+	// Interim, if set, is what the model writes alongside its first call:
+	// streamed, then sent as assistant.commentary before the call starts,
+	// and kept on the call's message, as hermes does.
+	Interim string `json:"interim"`
 	// Reply is what the model says. {tool} is replaced by the last
 	// tool's result and {input} by the input.
 	Reply string `json:"reply"`
@@ -97,7 +101,7 @@ type step struct {
 var defaultRules = []rule{
 	{Match: "[haunt event]", Reply: "NO_REPLY"},
 	{Match: "remind me", Look: "session_search", LookArgs: map[string]any{"query": "oven"},
-		LookResult: `{"results": []}`, Tool: "intend",
+		LookResult: `{"results": []}`, Interim: "Let me look.", Tool: "intend",
 		Args:  map[string]any{"text": "check the oven", "delay_ms": 600000},
 		Reply: "Done: {tool}"},
 	{Match: "", Reply: "echo: {input}"},
@@ -605,7 +609,19 @@ func (s *server) chat(w http.ResponseWriter, r *http.Request) {
 			"function": map[string]any{"name": name, "arguments": string(argText)}})
 		results = append(results, map[string]any{"role": "tool", "tool_call_id": callID, "content": result, "timestamp": now})
 	}
+	said := false
+	interim := func() {
+		if rl.Interim == "" || said {
+			return
+		}
+		said = true
+		for i := 0; i < len(rl.Interim); i += 4 {
+			e.send("assistant.delta", map[string]any{"message_id": msgID, "delta": rl.Interim[i:min(i+4, len(rl.Interim))]})
+		}
+		e.send("assistant.commentary", map[string]any{"message_id": msgID, "text": rl.Interim, "already_streamed": true})
+	}
 	if rl.Look != "" {
+		interim()
 		e.send("tool.started", map[string]any{"message_id": msgID, "tool_name": rl.Look, "preview": "", "args": rl.LookArgs})
 		e.send("tool.completed", map[string]any{"message_id": msgID, "tool_name": rl.Look, "preview": nil, "args": nil})
 		record(rl.Look, rl.LookArgs, rl.LookResult)
@@ -618,6 +634,7 @@ func (s *server) chat(w http.ResponseWriter, r *http.Request) {
 	last := ""
 	for _, st := range steps {
 		tool := "mcp__haunt__" + st.Tool
+		interim()
 		e.send("tool.started", map[string]any{"message_id": msgID, "tool_name": tool, "preview": "", "args": st.Args})
 		text, err := s.callTool(r.Context(), st.Tool, st.Args)
 		if err != nil {
@@ -633,7 +650,7 @@ func (s *server) chat(w http.ResponseWriter, r *http.Request) {
 		reply = strings.ReplaceAll(reply, "{tool}", last)
 	}
 	if len(calls) > 0 {
-		stored = append(stored, map[string]any{"role": "assistant", "content": "", "tool_calls": calls, "timestamp": now})
+		stored = append(stored, map[string]any{"role": "assistant", "content": rl.Interim, "tool_calls": calls, "timestamp": now})
 		stored = append(stored, results...)
 	}
 

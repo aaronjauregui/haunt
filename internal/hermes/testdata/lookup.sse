@@ -1,0 +1,63 @@
+event: run.started
+data: {"user_message": {"role": "user", "content": "Did I burn anything last week?"}, "runtime": {"provider": "", "model": "", "route_source": "global", "requested": {"provider": "", "model": ""}}, "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 1, "ts": 1789614402.1151}
+
+event: message.started
+data: {"message": {"id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "role": "assistant"}, "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 2, "ts": 1789614402.1181998}
+
+event: assistant.delta
+data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "delta": "Let ", "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 3, "ts": 1789614402.1212997}
+
+event: assistant.delta
+data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "delta": "me l", "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 4, "ts": 1789614402.1243997}
+
+event: assistant.delta
+data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "delta": "ook.", "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 5, "ts": 1789614402.1274996}
+
+event: assistant.commentary
+data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "text": "Let me look.", "already_streamed": true, "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 6, "ts": 1789614402.1305995}
+
+event: tool.started
+data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "tool_name": "session_search", "preview": "burned", "args": {"query": "burned"}, "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 7, "ts": 1789614402.1336994}
+
+event: tool.completed
+data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "tool_name": "session_search", "preview": null, "args": null, "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 8, "ts": 1789614402.1367993}
+
+event: assistant.delta
+data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "delta": "\n\n[s", "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 9, "ts": 1789614402.1398993}
+
+event: assistant.delta
+data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "delta": "ad] ", "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 10, "ts": 1789614402.1429992}
+
+event: assistant.delta
+data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "delta": "Yes:", "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 11, "ts": 1789614402.146099}
+
+event: assistant.delta
+data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "delta": " the", "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 12, "ts": 1789614402.149199}
+
+event: assistant.delta
+data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "delta": " bre", "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 13, "ts": 1789614402.152299}
+
+event: assistant.delta
+data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "delta": "ad, ", "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 14, "ts": 1789614402.1553988}
+
+event: assistant.delta
+data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "delta": "on T", "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 15, "ts": 1789614402.1584988}
+
+event: assistant.delta
+data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "delta": "uesd", "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 16, "ts": 1789614402.1615987}
+
+event: assistant.delta
+data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "delta": "ay.", "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 17, "ts": 1789614402.1646986}
+
+event: tool.progress
+data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "tool_name": "_thinking", "delta": "[sad] Yes: the bread, on Tuesday.", "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 18, "ts": 1789614402.1677985}
+
+event: assistant.completed
+data: {"session_id": "haunt-fake", "message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "content": "[sad] Yes: the bread, on Tuesday.", "completed": true, "partial": false, "interrupted": false, "runtime": {"provider": "custom", "model": "fake", "route_source": "global", "requested": {"provider": "", "model": ""}}, "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 19, "ts": 1789614402.1708984}
+
+event: run.completed
+data: {"session_id": "haunt-fake", "message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "completed": true, "partial": false, "interrupted": false, "messages": [{"role": "assistant", "content": "Let me look.", "tool_calls": [{"id": "call_3a7f19c2", "call_id": "call_3a7f19c2", "response_item_id": "fc_3a7f19c2", "type": "function", "function": {"name": "session_search", "arguments": "{\"query\": \"burned\"}"}}], "timestamp": 1789614402.712, "finish_reason": "tool_calls", "reasoning": null}, {"role": "tool", "content": "{\"results\": [\"they burned the bread on Tuesday\"]}", "tool_call_id": "call_3a7f19c2", "tool_name": "session_search", "timestamp": 1789614402.762}, {"role": "assistant", "content": "[sad] Yes: the bread, on Tuesday.", "timestamp": 1789614402.812, "finish_reason": "stop", "reasoning": null}], "usage": {"input_tokens": 20, "output_tokens": 10, "total_tokens": 30, "runtime": {"provider": "custom", "model": "fake", "route_source": "global", "requested": {"provider": "", "model": ""}}}, "runtime": {"provider": "custom", "model": "fake", "route_source": "global", "requested": {"provider": "", "model": ""}}, "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 20, "ts": 1789614402.1739984}
+
+event: done
+data: {"session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 21, "ts": 1789614402.1770983}
+

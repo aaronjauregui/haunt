@@ -16,6 +16,12 @@ type TurnRequest struct {
 	// OnDelta receives the reply's text as it streams. Called from the
 	// reading goroutine, in order.
 	OnDelta func(delta string)
+	// OnInterim marks the end of words written alongside tool calls rather
+	// than as the reply: what OnDelta delivered since the last mark was
+	// interim, text is those words whole as hermes reports them (streamed
+	// or not), and the deltas after it start the next part afresh. The
+	// reply is the part after the last mark. May be nil.
+	OnInterim func(text string)
 	// OnTool hears the model's tool calls starting and finishing, for the
 	// why-trace and the working face. May be nil.
 	OnTool func(ToolEvent)
