@@ -184,6 +184,10 @@ type Skill struct {
 	// skill's text names. A learned skill with any is one hermes's review
 	// wrote for an agent with more tools than this one.
 	Assumes []string
+	// Deps is the front matter's `deps:`, the packages hermes installs
+	// when the skill is viewed (tools/skills_tool.py skill_view). A model
+	// that writes the skill chooses what gets installed.
+	Deps []string
 }
 
 // Skill sources that are not a SkillSource.
@@ -290,12 +294,16 @@ func walkSkills(root string, fn func(Skill)) error {
 		}
 		s := Skill{Name: filepath.Base(filepath.Dir(p)), Dir: filepath.Dir(p)}
 		if head, _, ok := strings.Cut(strings.TrimPrefix(string(data), "---\n"), "\n---"); ok && strings.HasPrefix(string(data), "---\n") {
-			var fm struct{ Name, Description string }
+			var fm struct {
+				Name, Description string
+				Deps              any
+			}
 			if yaml.Unmarshal([]byte(head), &fm) == nil {
 				if fm.Name != "" {
 					s.Name = fm.Name
 				}
 				s.Description = fm.Description
+				s.Deps = depNames(fm.Deps)
 			}
 		}
 		seen := map[string]bool{}
@@ -313,6 +321,25 @@ func walkSkills(root string, fn func(Skill)) error {
 		return nil
 	}
 	return err
+}
+
+// depNames reads `deps:` as hermes does: one name or a list of them, blank
+// entries dropped.
+func depNames(v any) []string {
+	var list []any
+	switch d := v.(type) {
+	case string:
+		list = []any{d}
+	case []any:
+		list = d
+	}
+	var out []string
+	for _, d := range list {
+		if name := strings.TrimSpace(fmt.Sprint(d)); name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // A ghost's toolsets and hermes tools, as hermes names them for the

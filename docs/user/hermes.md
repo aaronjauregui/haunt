@@ -26,7 +26,10 @@ if the gateway is not up within two minutes.
 While it works on an answer its balloon says "thinking…", until the first
 words arrive; wearing a face or looking something up along the way does
 not take that down. A tool with a wait of its own ("painting…") shows its
-own words while it runs.
+own words while it runs. When the model's provider is down, hermes
+retries a few times, waits about fifteen seconds and tries once more;
+after that an answer to you says in the balloon that it failed, and
+anything you said meanwhile goes to the model next.
 
 ## Setting it up
 

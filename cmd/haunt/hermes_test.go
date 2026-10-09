@@ -289,14 +289,23 @@ bundled_skills = ["humanizer"]
 	}
 	waitFakeLog(t, fakeLog, time.Second, func(e fakeEntry) bool { return e.Kind == "mcp_stopped" })
 
-	// `haunt journal -skills` reads the profile, with the ghost gone.
+	// `haunt journal -skills` reads the profile, with the ghost gone. The
+	// model has written a skill that would have hermes install a package.
+	learned := filepath.Join(profile, "skills", "clips", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(learned), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(learned, []byte("---\nname: clips\ndescription: Cut a clip.\ndeps: [ffmpeg]\n---\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	jc := exec.Command(bin, "journal", "-skills", "-state", stateDir, "wisp")
 	jc.Env = append(os.Environ(), "HAUNT_CONFIG_DIR="+cfgDir)
 	out, err = jc.CombinedOutput()
 	if err != nil {
 		t.Fatalf("haunt journal -skills: %v: %s", err, out)
 	}
-	for _, want := range []string{"Learned (it wrote these itself):\n  (none)", "From its package:\n  kitchen-watch: Mind the oven.",
+	for _, want := range []string{"Learned (it wrote these itself):\n  clips: Cut a clip.\n",
+		"    ! installs packages when it is loaded: ffmpeg\n", "From its package:\n  kitchen-watch: Mind the oven.",
 		"From haunt:\n  ", "  focus-session: ", "From hermes:\n  humanizer: "} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("journal -skills lacks %q:\n%s", want, out)

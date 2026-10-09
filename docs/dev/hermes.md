@@ -52,14 +52,16 @@ Rewritten every start (haunt's):
   hermes skills the manifest names, in that order, earlier source winning
   a name clash; Markdown only; files 0444 and directories 0555. Read-only
   on disk because at the pinned hermes `skill_manage` edits and deletes
-  `external_dirs` skills from a live turn and from the background review
-  fork (`tools/skill_manager_guards.py` refuses the fork only a delete),
-  and no config key makes them read-only. The demo and the test rig `chmod -R u+w` before
+  `external_dirs` skills from a live turn, and the background review fork
+  may patch or rewrite any skill it has read, whoever owns it
+  (`tools/skill_manager_guards.py` gates the fork's deletes alone). No
+  config key makes them read-only, so the permissions are the only guard
+  on haunt's skills. The demo and the test rig `chmod -R u+w` before
   removing a profile.
 - **`config.yaml`**, merged rather than replaced. Haunt owns
   `platforms.api_server`, `gateway.standalone`, `platform_toolsets`,
-  `agent.disabled_toolsets`,
-  `tools.tool_search`, `mcp_servers.haunt`, its own entry in
+  `agent.disabled_toolsets`, `agent.auto_recovery_cycles`,
+  `tools.tool_search`, `skills.inline_shell`, `mcp_servers.haunt`, its own entry in
   `skills.external_dirs`, and `_config_version` if absent; it defaults
   `memory.write_approval` to false and `skills.guard_agent_created` to
   true. Everything else, the model above all, stays as the person set it
@@ -174,6 +176,20 @@ animation runs while deltas arrive; tool events feed the why-trace and
 suppress the lexicon face when the model wore one itself. One turn in
 flight per ghost. The person's words queue behind it, and so does
 everything before the gateway is up (`lateTurner`, two minutes at most).
+
+**A provider outage.** Once hermes has spent its retries
+(`agent.api_max_retries`) on a provider that is down, overloaded or
+timing out, its auto-recovery ladder (`agent/turn_recovery_autorecover.py`)
+waits and runs the retries again, `agent.auto_recovery_cycles` times, 5 by
+default, at 15, 30, 60, 60 and 60 s with up to a fifth more as jitter, or
+the provider's `Retry-After` up to 120 s. Its notices go to the status
+and thinking callbacks, which the session stream does not wire, so a
+waiting turn sends nothing but keepalives. Before the first sign of life
+the first-token deadline cuts that short; after a tool event nothing
+does, and a turn that wore a face would sit through four minutes and more
+with the person's words queued. The profile sets the cycles to 1: the
+first wait, 15 to 18 s, is what rides out a moment's overload, and the
+later ones only make a dead provider slower to report.
 
 **Waking.** The boot event starts the waking indicator ("waking up…")
 the moment the ghost is on screen, and the boot turn carries it
@@ -581,6 +597,16 @@ What the pinned hermes source says, and haunt depends on:
   dangerous shell patterns. It does not check which tools a skill
   assumes; `haunt journal -skills` flags a learned skill naming a tool
   from a disabled toolset.
+- `skill_view` installs the packages a skill's front matter names in
+  `deps:` (one name or a list) through hermes's package manager when the
+  skill is loaded (`tools/skills_tool.py`), unless lazy installs are off
+  (`security.allow_lazy_installs: false` or
+  `HERMES_DISABLE_LAZY_INSTALLS=1`, `pm/install.py`); haunt sets neither.
+  The model writes skills, so `haunt journal -skills` flags a learned
+  skill that declares any.
+- A skill's ``!`cmd` `` snippets run in a shell when it is viewed if
+  `skills.inline_shell` is on (`agent/skill_preprocessing.py`), outside
+  any toolset. Hermes defaults it off; the profile pins it off.
 - Seeding one bundled skill into an opted-out profile is not possible
   (`hermes skills reset --restore` seeds only essentials; `hermes skills
   install` fetches the live repo), which is why the four allowed bundled
