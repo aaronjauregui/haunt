@@ -19,8 +19,9 @@ import (
 // Client is one ghost's line to its hermes gateway's API server.
 //
 // A ghost has one session for its whole life. Hermes compresses it as it
-// grows, and compression may end the session and carry on in a child with
-// a new id; the client follows that by taking the id each finished turn
+// grows, in place by default; with compression.in_place off, compression
+// ends the session and carries on in a child with a new id, and the
+// client follows that by taking the id each finished turn
 // reports, and hands it to SaveSession so the next start resumes the same
 // conversation.
 type Client struct {
@@ -390,7 +391,11 @@ func readSSE(r io.Reader, fn func(event string, data []byte) bool) error {
 }
 
 // Messages reads back the last n entries of the ghost's session, oldest
-// first, for `haunt history`. Tool traffic is not an entry of its own: it
+// first, for `haunt history`. The session is read whole: the turns hermes
+// compacted out of the model's working context are part of what was said,
+// and so are the sessions a compression ended before this one; hermes
+// gives back both. Its compaction handoffs are not, and come back as
+// hidden rows that are skipped. Tool traffic is not an entry of its own: it
 // is the record of how an answer was reached, and the history is what was
 // said. The calls ride on the reply they led to: hermes's own in
 // Message.Looked, the ghost's in Message.Acted. Their arguments and results
@@ -413,7 +418,10 @@ func (c *Client) messages(ctx context.Context, n, argsMax, resultMax int) ([]Mes
 	if err != nil {
 		return nil, err
 	}
-	q := url.Values{"order": {"latest"}}
+	// include_compacted adds the turns an in-place compaction archived,
+	// which is how hermes compresses by default; without it the history
+	// begins at the last compaction.
+	q := url.Values{"order": {"latest"}, "include_compacted": {"true"}}
 	if n > 0 {
 		q.Set("limit", strconv.Itoa(n))
 	}
@@ -434,7 +442,8 @@ func (c *Client) messages(ctx context.Context, n, argsMax, resultMax int) ([]Mes
 					Arguments json.RawMessage `json:"arguments"`
 				} `json:"function"`
 			} `json:"tool_calls"`
-			Timestamp float64 `json:"timestamp"`
+			Timestamp   float64 `json:"timestamp"`
+			DisplayKind string  `json:"display_kind"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
@@ -463,6 +472,13 @@ func (c *Client) messages(ctx context.Context, n, argsMax, resultMax int) ([]Mes
 		looked, acted, byCall, last = nil, nil, map[string]callAt{}, -1
 	}
 	for _, m := range out.Data {
+		if m.DisplayKind == "hidden" {
+			// A compaction handoff or a control row, said by nobody. A
+			// handoff is a user row and can fall inside a turn, between a
+			// lookup and the reply it led to, so it must not end the turn
+			// as the person's words would.
+			continue
+		}
 		text := rawText(m.Content)
 		switch m.Role {
 		case "tool":
