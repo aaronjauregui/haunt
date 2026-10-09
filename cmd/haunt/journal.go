@@ -117,9 +117,10 @@ func printSkills(name string) error {
 					fmt.Printf("    ! names tools a ghost does not have: %s\n", strings.Join(s.Assumes, ", "))
 				}
 				if len(s.Deps) > 0 {
-					// Hermes installs these the moment the skill is
-					// viewed, and the model chose them.
-					fmt.Printf("    ! installs packages when it is loaded: %s\n", strings.Join(s.Deps, ", "))
+					// Hermes would install these when the skill is
+					// viewed; a ghost's profile has installs off, so
+					// a skill that needs them is dead weight here.
+					fmt.Printf("    ! needs packages a ghost does not get: %s\n", strings.Join(s.Deps, ", "))
 				}
 			}
 		}

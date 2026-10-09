@@ -61,7 +61,8 @@ Rewritten every start (haunt's):
 - **`config.yaml`**, merged rather than replaced. Haunt owns
   `platforms.api_server`, `gateway.standalone`, `platform_toolsets`,
   `agent.disabled_toolsets`, `agent.auto_recovery_cycles`,
-  `tools.tool_search`, `skills.inline_shell`, `mcp_servers.haunt`, its own entry in
+  `tools.tool_search`, `skills.inline_shell`, `security.allow_lazy_installs`,
+  `mcp_servers.haunt`, its own entry in
   `skills.external_dirs`, and `_config_version` if absent; it defaults
   `memory.write_approval` to false and `skills.guard_agent_created` to
   true. Everything else, the model above all, stays as the person set it
@@ -631,11 +632,13 @@ What the pinned hermes source says, and haunt depends on:
   from a disabled toolset.
 - `skill_view` installs the packages a skill's front matter names in
   `deps:` (one name or a list) through hermes's package manager when the
-  skill is loaded (`tools/skills_tool.py`), unless lazy installs are off
-  (`security.allow_lazy_installs: false` or
-  `HERMES_DISABLE_LAZY_INSTALLS=1`, `pm/install.py`); haunt sets neither.
-  The model writes skills, so `haunt journal -skills` flags a learned
-  skill that declares any.
+  skill is loaded (`tools/skills_tool.py`), unless installs on demand are
+  off (`security.allow_lazy_installs: false`, `pm/install.py`). The model
+  writes skills, so the profile pins them off: the skill still loads,
+  with a note that its packages could not be installed, and `haunt
+  journal -skills` flags a learned skill that declares any. The same
+  setting stops hermes fetching a plugin the config names at start; a
+  ghost runs on what the image has.
 - A skill's ``!`cmd` `` snippets run in a shell when it is viewed if
   `skills.inline_shell` is on (`agent/skill_preprocessing.py`), outside
   any toolset. Hermes defaults it off; the profile pins it off.

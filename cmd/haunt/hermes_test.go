@@ -290,7 +290,7 @@ bundled_skills = ["humanizer"]
 	waitFakeLog(t, fakeLog, time.Second, func(e fakeEntry) bool { return e.Kind == "mcp_stopped" })
 
 	// `haunt journal -skills` reads the profile, with the ghost gone. The
-	// model has written a skill that would have hermes install a package.
+	// model has written a skill that needs a package.
 	learned := filepath.Join(profile, "skills", "clips", "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(learned), 0o700); err != nil {
 		t.Fatal(err)
@@ -305,7 +305,7 @@ bundled_skills = ["humanizer"]
 		t.Fatalf("haunt journal -skills: %v: %s", err, out)
 	}
 	for _, want := range []string{"Learned (it wrote these itself):\n  clips: Cut a clip.\n",
-		"    ! installs packages when it is loaded: ffmpeg\n", "From its package:\n  kitchen-watch: Mind the oven.",
+		"    ! needs packages a ghost does not get: ffmpeg\n", "From its package:\n  kitchen-watch: Mind the oven.",
 		"From haunt:\n  ", "  focus-session: ", "From hermes:\n  humanizer: "} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("journal -skills lacks %q:\n%s", want, out)

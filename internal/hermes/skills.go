@@ -185,8 +185,8 @@ type Skill struct {
 	// wrote for an agent with more tools than this one.
 	Assumes []string
 	// Deps is the front matter's `deps:`, the packages hermes installs
-	// when the skill is viewed (tools/skills_tool.py skill_view). A model
-	// that writes the skill chooses what gets installed.
+	// when the skill is viewed (tools/skills_tool.py skill_view) where
+	// installs on demand are on. A ghost's profile has them off.
 	Deps []string
 }
 

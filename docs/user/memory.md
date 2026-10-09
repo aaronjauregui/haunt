@@ -62,8 +62,8 @@ ghost may write new ones as it learns how you like things done.
 
 Under a skill the ghost wrote itself, a line starting `!` is worth a
 look: the skill names tools a ghost does not have, or declares packages
-(`deps:`) that hermes installs the moment the skill is loaded. Delete
-the skill's directory to be rid of it.
+(`deps:`) that a ghost's hermes will not install, so it cannot use the
+skill as written. Delete the skill's directory to be rid of it.
 
 A morning check-in runs on a `morning` occasion if the ghost's manifest
 schedules one, or when you sit down in the morning; a weekly review runs
