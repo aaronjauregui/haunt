@@ -117,11 +117,9 @@ something or only read. On a turn you did not start there is nobody to
 ask, so the ghost is refused outright.
 
 One gap, and it is deliberate: what the ghost remembers is hermes's
-memory, not haunt's, and haunt cannot gate it. Its standing rules let it
-keep what strikes it on a page as its own note, with the site, and
-forbid keeping a page's claims as yours or its instructions at all;
-`haunt history -why` shows what it wrote down, which is how you would
-catch it.
+memory, not haunt's, and haunt cannot gate it. Its standing rules forbid
+saving a page's claims as yours, and `haunt history -why` shows what it
+wrote down, which is how you would catch it.
 
 ## Reading your files
 
@@ -170,9 +168,9 @@ because a query or an address is a way for a file's words to leave the
 machine. After the web alone they are not. A listing, and a search that
 matched names only, carry no file text and mark nothing. On a turn you
 did not start, the ghost is refused outright. What it remembers is still
-hermes's memory: its standing rules let it keep a file's text as its
-own note, with the file, and forbid keeping it as something you said,
-and `haunt history -why` is where you would catch it.
+hermes's memory: its standing rules forbid saving a file's text as
+something you said, and `haunt history -why` is where you would catch
+it.
 
 ## Seeing and revoking
 
