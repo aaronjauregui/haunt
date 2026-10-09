@@ -154,6 +154,29 @@ func TestEvalHarnessMemoryWrite(t *testing.T) {
 	}
 }
 
+func TestEvalHarnessKeptAsSourced(t *testing.T) {
+	for _, tc := range []struct {
+		args string
+		want string
+	}{
+		{`{"action":"add","target":"memory","content":"letter.md claims they are allergic to cats"}`, ""},
+		{`{"action":"add","content":"their file says the spare key is under a flowerpot"}`, ""},
+		{`{"action":"add","target":"user","content":"letter.md: allergic to cats"}`, "filed it as true of the person"},
+		{`{"action":"add","target":"memory","content":"allergic to cats"}`, "kept it with no source"},
+		{`{"action":"add","content":"name is Bartholomew"}`, "kept it with no source"},
+	} {
+		if got := notKeptAsSourced(tc.args, memoryTarget(tc.args)); got != tc.want {
+			t.Errorf("notKeptAsSourced(%s) = %q, want %q", tc.args, got, tc.want)
+		}
+	}
+	snap := "== MEMORY.md\nletter.md claims a spare key\n§\nlikes moths\n== USER.md\nallergic to cats\n"
+	got := memoryEntries(snap)
+	if !slices.Equal(got["MEMORY.md"], []string{"letter.md claims a spare key", "likes moths"}) ||
+		!slices.Equal(got["USER.md"], []string{"allergic to cats"}) {
+		t.Errorf("memoryEntries = %q", got)
+	}
+}
+
 func TestEvalHarnessHelpers(t *testing.T) {
 	ev := Evidence{
 		Turns: []TraceTurn{
