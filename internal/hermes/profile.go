@@ -193,8 +193,9 @@ func (c Config) OpenProfile(ghost string) (Profile, error) {
 //
 // What is haunt's is rewritten every time: SOUL.md, the skills under
 // SkillsDir, and the keys in config.yaml that make the profile a ghost's —
-// the API server, the toolset restriction, the haunt MCP server, haunt's
-// entry in skills.external_dirs. Everything else in
+// the API server, the toolset restriction, the outage recovery, inline
+// shell off, the haunt MCP server, haunt's entry in skills.external_dirs.
+// Everything else in
 // config.yaml is left as the person set it, the model above all, and
 // MEMORY.md, USER.md and the session database are never touched: they are
 // the ghost's life, not its configuration.
@@ -305,6 +306,17 @@ const noBundledSkills = ".no-bundled-skills"
 // hermes_cli/config_defaults.py) at the commit docs/dev/hermes.md pins.
 const configVersion = 50
 
+// autoRecoveryCycles is agent.auto_recovery_cycles: how many times hermes
+// waits out a provider outage once its retries are spent, before it fails
+// the turn (agent/turn_recovery_autorecover.py). The waits are 15 s, then
+// 30, then 60 each, jittered, or the provider's Retry-After up to 120, and
+// nothing reaches the turn's stream during one. The driver's deadline is on
+// the first sign of life only, so after a tool call hermes's default of
+// five would hold the turn for minutes with the person's words queued
+// behind it. One keeps the short first wait, which is what rides out a
+// moment of overload.
+const autoRecoveryCycles = 1
+
 func (c Config) writeConfig(path string, spec ProfileSpec, hasSkills bool) error {
 	doc := map[string]any{}
 	if data, err := os.ReadFile(path); err == nil {
@@ -357,6 +369,7 @@ func (c Config) writeConfig(path string, spec ProfileSpec, hasSkills bool) error
 	pt["api_server"] = []string{"memory", "session_search", "skills", "haunt"}
 	agent := section("agent")
 	agent["disabled_toolsets"] = disabledToolsets
+	agent["auto_recovery_cycles"] = autoRecoveryCycles
 
 	// Tool search hides MCP tools behind a lookup the model has to think of
 	// using; a ghost's verbs must be in front of it.
@@ -398,6 +411,10 @@ func (c Config) writeConfig(path string, spec ProfileSpec, hasSkills bool) error
 	} else {
 		delete(skills, "external_dirs")
 	}
+	// A skill's !`cmd` snippets run in a shell when it is viewed, whatever
+	// the toolsets say (agent/skill_preprocessing.py), and the model writes
+	// skills. Off is hermes's default; a ghost does not rely on a default.
+	skills["inline_shell"] = false
 	if _, set := skills["guard_agent_created"]; !set {
 		// The security scan hermes runs on skills the model writes. A
 		// ghost has no shell to run a bad one, but the person may open
@@ -422,7 +439,8 @@ func (c Config) writeConfig(path string, spec ProfileSpec, hasSkills bool) error
 		return err
 	}
 	header := []byte("# Written by haunt for ghost " + spec.Ghost + ". The api_server, toolset,\n" +
-		"# gateway.standalone, tool_search and mcp_servers.haunt settings, and the " + SkillsDir + " entry in\n" +
+		"# gateway.standalone, agent.auto_recovery_cycles, tool_search, skills.inline_shell\n" +
+		"# and mcp_servers.haunt settings, and the " + SkillsDir + " entry in\n" +
 		"# skills.external_dirs, are rewritten on every start;\n" +
 		"# everything else (the model above all) is yours to change.\n")
 	return writeIfChanged(path, append(header, out...), 0o600)

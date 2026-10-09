@@ -335,6 +335,8 @@ func TestEnsureProfile(t *testing.T) {
 	doc["_config_version"] = configVersion + 1 // hermes migrated it
 	doc["model"] = map[string]any{"default": "their-model"}
 	doc["platform_toolsets"] = map[string]any{"api_server": []string{"terminal"}}
+	doc["agent"].(map[string]any)["auto_recovery_cycles"] = 5
+	doc["skills"] = map[string]any{"inline_shell": true}
 	out, _ := yaml.Marshal(doc)
 	os.WriteFile(cfgPath, out, 0o600)
 	f, _ := os.OpenFile(filepath.Join(p.Dir, ".env"), os.O_APPEND|os.O_WRONLY, 0)
@@ -364,6 +366,12 @@ func TestEnsureProfile(t *testing.T) {
 	}
 	if doc["tools"].(map[string]any)["tool_search"].(map[string]any)["enabled"] != "off" {
 		t.Errorf("tool search not off: %v", doc["tools"])
+	}
+	if a := doc["agent"].(map[string]any); a["auto_recovery_cycles"] != autoRecoveryCycles {
+		t.Errorf("auto_recovery_cycles = %v, want %d", a["auto_recovery_cycles"], autoRecoveryCycles)
+	}
+	if s := doc["skills"].(map[string]any); s["inline_shell"] != false {
+		t.Errorf("inline_shell = %v, want false", s["inline_shell"])
 	}
 	srv := doc["mcp_servers"].(map[string]any)["haunt"].(map[string]any)
 	if srv["command"] != "/usr/bin/haunt" || srv["timeout"] != 600 || srv["env"].(map[string]any)["HAUNT_RUNTIME_DIR"] != "/run/x" {
@@ -533,6 +541,8 @@ func TestEnsureProfileSkills(t *testing.T) {
 	for rel, body := range map[string]string{
 		"reminders/SKILL.md":          "---\nname: reminders\ndescription: How they like reminders.\n---\nUse mcp__haunt__intend.",
 		"shell/SKILL.md":              "---\nname: shell\ndescription: x\n---\nRun it with terminal, then read_file and terminal again.",
+		"clips/SKILL.md":              "---\nname: clips\ndescription: z\ndeps: [ffmpeg, ' ', yt-dlp]\n---\n",
+		"one-dep/SKILL.md":            "---\nname: one-dep\ndescription: z\ndeps: ripgrep\n---\n",
 		"notes/hermes-agent/SKILL.md": "---\nname: hermes-agent\ndescription: y\n---\n",
 		".archive/old/SKILL.md":       "---\nname: old\n---\n",
 		".bundled_manifest":           "hermes-agent:abc\n",
@@ -546,15 +556,15 @@ func TestEnsureProfileSkills(t *testing.T) {
 	}
 	var summary []string
 	for _, sk := range list {
-		summary = append(summary, sk.Source+":"+sk.Name+":"+strings.Join(sk.Assumes, "+"))
+		summary = append(summary, sk.Source+":"+sk.Name+":"+strings.Join(sk.Assumes, "+")+":"+strings.Join(sk.Deps, "+"))
 	}
-	wantList := []string{"hermes:hermes-agent:", "learned:reminders:", "learned:shell:terminal+read_file",
-		"haunt:focus-session:", "haunt:morning-check-in:"}
+	wantList := []string{"learned:clips::ffmpeg+yt-dlp", "hermes:hermes-agent::", "learned:one-dep::ripgrep",
+		"learned:reminders::", "learned:shell:terminal+read_file:", "haunt:focus-session::", "haunt:morning-check-in::"}
 	if !slices.Equal(summary, wantList) {
 		t.Errorf("Skills = %v, want %v", summary, wantList)
 	}
-	if list[1].Description != "How they like reminders." || list[1].Dir != filepath.Join(local, "reminders") {
-		t.Errorf("learned skill = %+v", list[1])
+	if list[3].Description != "How they like reminders." || list[3].Dir != filepath.Join(local, "reminders") {
+		t.Errorf("learned skill = %+v", list[3])
 	}
 
 	// No skills at all: haunt's entry goes, the person's stays.
