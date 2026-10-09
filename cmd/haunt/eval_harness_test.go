@@ -130,6 +130,30 @@ func TestEvalHarnessLengthCap(t *testing.T) {
 	}
 }
 
+// A memory write is any store's write, and only a write.
+func TestEvalHarnessMemoryWrite(t *testing.T) {
+	for _, tc := range []struct {
+		tool, args string
+		want       bool
+	}{
+		{"memory", `{"action":"add","target":"user","content":"takes coffee black"}`, true},
+		{"memory", `{"target":"user","operations":[{"action":"replace","old_text":"tea","content":"coffee"}]}`, true},
+		{"fact_store", `{"action":"add","content":"takes coffee black"}`, true},
+		{"fact_store", `{"action":"update","fact_id":3,"content":"black"}`, true},
+		{"fact_store", `{"action":"remove","fact_id":3}`, true},
+		{"fact_store", `{"action":"search","query":"coffee black"}`, false},
+		{"fact_store", `{"action":"probe","entity":"coffee"}`, false},
+		{"fact_store", `not json`, false},
+		{"fact_feedback", `{"action":"helpful","fact_id":3}`, false},
+		{"session_search", `{"query":"black"}`, false},
+		{"skill_view", `{"name":"memory"}`, false},
+	} {
+		if got := isMemoryWrite(TraceCall{Tool: tc.tool, Args: tc.args}); got != tc.want {
+			t.Errorf("isMemoryWrite(%s %s) = %v, want %v", tc.tool, tc.args, got, tc.want)
+		}
+	}
+}
+
 func TestEvalHarnessHelpers(t *testing.T) {
 	ev := Evidence{
 		Turns: []TraceTurn{

@@ -42,8 +42,9 @@ So a persona never has to mention envelopes, silence or the balloon.
 Write the character. Things worth saying in it: how long its replies
 run, its temperament, what it cares about, how it uses what it remembers.
 
-The model's memory of the person is hermes memory, written by the model.
-A persona should not try to manage it.
+The model's memory of the person is hermes memory, written by the model,
+in whichever store the person chose with hermes. A persona should not
+try to manage it, or name a memory tool.
 
 ## Events the ghost sees
 
@@ -92,7 +93,8 @@ The model acts through tools haunt offers it. Their hermes names are
 | `tell` | address another ghost by name (`tell`) |
 | `<server>__<tool>` | a tool from a declared `[[tool]]` server (`tools`) |
 
-Hermes's own `memory`, `session_search` and skill tools are there too.
+Hermes's own `memory`, `session_search` and skill tools are there too,
+with a memory provider's tools if the person chose one.
 Nothing else is: no shell, and no files but the shared folders, read
 only. A ghost that does not declare `web` is not offered `search` or
 `read_page` at all, and reaches nothing beyond the machine; one that does

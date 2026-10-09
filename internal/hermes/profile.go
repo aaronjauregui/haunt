@@ -196,9 +196,12 @@ func (c Config) OpenProfile(ghost string) (Profile, error) {
 // the API server, the toolset restriction, the outage recovery, inline
 // shell off, the haunt MCP server, haunt's entry in skills.external_dirs.
 // Everything else in
-// config.yaml is left as the person set it, the model above all, and
-// MEMORY.md, USER.md and the session database are never touched: they are
-// the ghost's life, not its configuration.
+// config.yaml is left as the person set it, the model above all. Memory
+// is hermes's: haunt neither writes, configures nor reads it, so the
+// memory section of config.yaml, MEMORY.md, USER.md, a memory provider's
+// store and the session database are never touched. They are the ghost's
+// life, not its configuration, and which backend holds it is the person's
+// choice, made with `hermes memory setup`.
 func (c Config) EnsureProfile(spec ProfileSpec) (Profile, error) {
 	root, err := c.Root()
 	if err != nil {
@@ -375,19 +378,6 @@ func (c Config) writeConfig(path string, spec ProfileSpec, hasSkills bool) error
 	// using; a ghost's verbs must be in front of it.
 	tools := section("tools")
 	tools["tool_search"] = map[string]any{"enabled": "off"}
-
-	memory := section("memory")
-	if _, set := memory["write_approval"]; !set {
-		// A companion that asks permission to remember your cat's name is
-		// not a companion. Only defaulted: the person may want otherwise.
-		memory["write_approval"] = false
-	}
-	// Hermes memory is the ghost's only memory. A profile that names a
-	// haunt memory provider is from a haunt that had one; hermes would
-	// fail to load it.
-	if memory["provider"] == "haunt" {
-		delete(memory, "provider")
-	}
 
 	// Haunt's skill directory is one entry among whatever the person
 	// listed. Relative, because hermes resolves it against HERMES_HOME,

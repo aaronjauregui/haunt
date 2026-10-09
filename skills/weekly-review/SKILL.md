@@ -54,4 +54,4 @@ they make the calls. Keep it under five minutes and five questions.
 - An entry named `_haunt/drift/…` is the driver's note that a goal went
   quiet, not a goal of theirs: leave it alone here.
 - If they say how they like their reviews (shorter, another day, not at
-  all), save it to memory and follow it next time.
+  all), remember it and follow it next time.

@@ -16,8 +16,8 @@ import (
 
 // cmdJournal prints a ghost's journal: the action log, a line for each thing
 // it did. What a ghost on hermes remembers about the person is hermes
-// memory, readable in the profile's memories/ (and editable by telling the
-// ghost). -skills lists the routines it has on hermes, and which of them it
+// memory, which haunt does not read: `hermes -p haunt-<ghost> memory
+// status` says where it is, and telling the ghost edits it. -skills lists the routines it has on hermes, and which of them it
 // wrote itself. -style is the look its pictures have, and whether the ghost
 // was asked for one of its own.
 func cmdJournal(args []string) error {

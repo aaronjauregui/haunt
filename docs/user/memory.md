@@ -5,8 +5,35 @@
 A ghost on hermes remembers in hermes memory, written by the model alone.
 Tell it something and it is kept; tell it it has something wrong and it
 edits that memory. There is no separate belief store and no correction
-menu. What it holds is in its profile for you to read:
-`~/.hermes/profiles/haunt-<ghost>/memories/MEMORY.md` and `USER.md`.
+menu. Memory is hermes's: haunt neither writes, configures nor reads it.
+
+Out of the box that is hermes's built-in memory, plain text in the
+ghost's profile: `~/.hermes/profiles/haunt-<ghost>/memories/MEMORY.md`
+and `USER.md`. Another backend is chosen with hermes itself:
+
+    hermes -p haunt-wisp memory setup     # pick a provider, or built-in only
+    hermes -p haunt-wisp memory status    # what is in use
+    hermes -p haunt-wisp memory off       # back to built-in only
+
+A provider runs beside the built-in memory. To make it the only store,
+turn the built-in one off as well:
+
+    hermes -p haunt-wisp config set memory.memory_enabled false
+    hermes -p haunt-wisp config set memory.user_profile_enabled false
+
+The ghost works with whichever it has. Holographic, the local provider
+bundled with hermes, keeps its facts in `memory_store.db` in the profile,
+an SQLite file; the container image needs numpy for its fuller recall
+([Hermes](hermes.md#hermes-in-a-container)). `hermes -p haunt-wisp memory
+reset` erases the built-in memory; a provider's store is that provider's
+to clear.
+
+A provider that records every turn stores whatever reaches the model:
+the window titles in the events the ghost is sent, and what its tools
+returned, such as its description of your screen or the text of a page
+or a file it read. A cloud provider sends all of that off the machine.
+The standing rule that a page's or a file's words are never kept as
+yours binds what the model saves, not what such a provider records.
 
 A scripted ghost remembers in its own key-value store, which its brain
 reads at boot and writes as it goes.

@@ -64,5 +64,5 @@ focus session's text), or they say they are done:
   `mcp__haunt__intentions` whether one is already running, and offer to
   end it first.
 - If they got distracted, do not lecture them. If they say how they like
-  to work (shorter sessions, no check-in question), save it to memory and
+  to work (shorter sessions, no check-in question), remember it and
   follow it next time.

@@ -64,9 +64,10 @@ Rewritten every start (haunt's):
   `tools.tool_search`, `skills.inline_shell`, `security.allow_lazy_installs`,
   `mcp_servers.haunt`, its own entry in
   `skills.external_dirs`, and `_config_version` if absent; it defaults
-  `memory.write_approval` to false and `skills.guard_agent_created` to
-  true. Everything else, the model above all, stays as the person set it
-  unless `[hermes.model]` in the haunt config says otherwise.
+  `skills.guard_agent_created` to true. Everything else, the model above
+  all, stays as the person set it unless `[hermes.model]` in the haunt
+  config says otherwise. No `memory` key is haunt's: that section is the
+  person's, set through `hermes memory setup`.
 - **`.env`** gets `API_SERVER_KEY` (32 random bytes, hex),
   `API_SERVER_PORT` (a free loopback port), `API_SERVER_HOST=127.0.0.1`
   and `HAUNT_GHOST`, each chosen once and kept so the CLI can find a
@@ -76,7 +77,9 @@ Rewritten every start (haunt's):
   mail and documents. The marker affects seeding only; the essential
   skill `hermes-agent` is still seeded.
 
-Never touched: `memories/MEMORY.md`, `memories/USER.md`, `state.db`.
+Never touched: anything that holds what the ghost remembers or said —
+`memories/MEMORY.md`, `memories/USER.md`, a memory provider's store
+(holographic's `memory_store.db`, say) and `state.db`.
 
 The toolset restriction:
 
@@ -102,7 +105,12 @@ callback and the tool only ever answers that it is unavailable; haunt's
 `ask` is how a question is put. Tool search must be off: with it on, the
 MCP tools and `session_search` hide behind a lookup a small model does not
 think to use. The model receives exactly `memory`, `skill_manage`,
-`skill_view`, `skills_list`, `session_search` and `mcp__haunt__…`.
+`skill_view`, `skills_list`, `session_search` and `mcp__haunt__…`, plus
+the tools of the memory provider the person chose, which hermes exposes
+whenever the `memory` toolset is enabled
+(`agent/memory_manager.py` `memory_provider_tools_enabled`). With
+built-in memory turned off, `memory` itself is gone and the provider's
+tools are the only memory the model has.
 
 ## The gateway
 
@@ -578,19 +586,25 @@ ever issues them in parallel, and a security decision that depends on a
 client's issuing discipline is not one. The same state holds who started
 the turn and its kind, which the web and file gates both read.
 
-Hermes's `memory` tool is not haunt's to gate, so nothing stops the model
-writing what a page or a file said into memory. The SOUL clause forbids
-it, and `haunt journal` shows memory writes; that is the whole of the
-defence.
+Hermes memory is not haunt's to gate, whichever store it is, so nothing
+stops the model writing what a page or a file said into it. The SOUL
+clause forbids it, and `haunt history -why` shows the memory calls in
+the session; that is the whole of the defence. A provider that records
+every turn on its own keeps the page or file text whatever the model
+does.
 
 ## Memory
 
-Hermes memory as it comes: `MEMORY.md`, `USER.md`, the `memory` tool,
-`session_search`, the post-turn review, and `memory.write_approval`
-defaulted off (a ghost that asks permission to remember your cat's name is
-not a companion). Haunt keeps no belief store. A correction is the model
-replacing a memory entry; hermes blocks removals only in its background
-review fork, not in a live turn.
+Memory is hermes's, as the person set it up: by default `MEMORY.md`,
+`USER.md` and the `memory` tool; or an external provider beside them or
+alone, chosen with `hermes -p haunt-<ghost> memory setup`. Haunt writes
+no memory config, reads no store and offers no memory verb of its own;
+it keeps `memory` among the platform toolsets because that is what
+exposes a provider's tools too. SOUL.md and the skills speak of what the
+ghost remembers, never of a tool, so they hold for any store. Haunt
+keeps no belief store. A correction is the model editing what it
+remembers; for built-in memory, hermes blocks removals only in its
+background review fork, not in a live turn.
 
 ## Skills
 

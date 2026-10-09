@@ -143,7 +143,7 @@ ghost's public actions to the others as `observed` events.
 | Grants and the pinned author key | `ghosts/<name>/grants.toml` | the CLI; watched by the running ghost |
 | Who is resident | `resident` | the CLI |
 | The room's spend log | `room-curiosity.json` | the troupe |
-| What the model remembers | the hermes profile's `memories/` | hermes only |
+| What the model remembers | hermes memory: the profile's `memories/`, or the provider the person chose | hermes only |
 | The conversation | the hermes profile's session database | hermes only |
 | Control sockets | `XDG_RUNTIME_DIR` (`HAUNT_RUNTIME_DIR`) | |
 | The pictures a ghost has painted | `ghosts/<name>/pictures/<id>.png`, the newest hundred, with their prompts and captions under `_haunt/picture/` in the store | the running ghost only |
