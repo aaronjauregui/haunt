@@ -286,6 +286,16 @@ func (c *Client) turn(ctx context.Context, id string, req TurnRequest) (Reply, e
 			te := ToolEvent{Name: ev.ToolName, Done: event != "tool.started", Failed: event == "tool.failed"}
 			if !te.Done {
 				reply.Tools = append(reply.Tools, ev.ToolName)
+				// Words streamed before a call were written alongside it.
+				// Commentary has already said so when hermes sends it; a
+				// profile with display.interim_assistant_messages off sends
+				// none, and the call is the only mark there is.
+				if text := streamed.String(); strings.TrimSpace(text) != "" {
+					streamed.Reset()
+					if req.OnInterim != nil {
+						req.OnInterim(text)
+					}
+				}
 			}
 			if req.OnTool != nil {
 				req.OnTool(te)

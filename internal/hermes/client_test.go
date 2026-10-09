@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -248,6 +249,36 @@ func TestTurnMarksInterimWords(t *testing.T) {
 	}
 	if !slices.Equal(reply.Tools, []string{"session_search"}) {
 		t.Errorf("tools %v", reply.Tools)
+	}
+}
+
+// With display.interim_assistant_messages off hermes sends no commentary,
+// and the tool call is what marks the words before it as interim.
+func TestTurnMarksInterimWordsAtTheCall(t *testing.T) {
+	f, srv := newFakeHermes(t)
+	commentary := regexp.MustCompile(`(?m)^event: assistant\.commentary\ndata: .*\n\n`)
+	f.stream = func(string, string) string {
+		sse := strings.ReplaceAll(fixture(t, "lookup.sse"), `"haunt-fake"`, `"haunt-moth"`)
+		if !commentary.MatchString(sse) {
+			t.Fatal("lookup.sse has no commentary to take out")
+		}
+		return commentary.ReplaceAllString(sse, "")
+	}
+	saved := ""
+	var p streamParts
+	reply, err := testClient(srv, &saved).Turn(context.Background(), p.request("Did I burn anything last week?"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(p.order, []string{"delta", "interim", "tool", "delta"}) {
+		t.Errorf("callbacks came %v", p.order)
+	}
+	if !slices.Equal(p.interim, []string{"Let me look."}) {
+		t.Errorf("interim %q", p.interim)
+	}
+	const want = "[sad] Yes: the bread, on Tuesday."
+	if reply.Text != want || strings.TrimSpace(p.cur.String()) != want {
+		t.Errorf("reply %q, streamed after the mark %q", reply.Text, p.cur.String())
 	}
 }
 

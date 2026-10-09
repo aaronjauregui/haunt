@@ -183,7 +183,9 @@ would-be reply hermes sends back to the model to carry on (its stall and
 verification guards); on the Codex app-server runtime every message the
 model writes is sent as commentary, the last included. The client
 treats commentary as the end of a part (`TurnRequest.OnInterim`, with the
-text), and a stream that ends without `assistant.completed` answers with
+text), and so is a `tool.started` with words streamed since the last
+mark, which is the only mark a profile with interim messages off gets.
+A stream that ends without `assistant.completed` answers with
 the last part alone. The driver shows each part as it arrives, in place
 of the one before: interim words stay up while the tools run, as the
 ghost saying what it is doing, and the reply replaces them, so the
