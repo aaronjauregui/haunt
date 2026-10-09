@@ -560,6 +560,7 @@ func TestEnsureProfile(t *testing.T) {
 	doc["platform_toolsets"] = map[string]any{"api_server": []string{"terminal"}}
 	doc["agent"].(map[string]any)["auto_recovery_cycles"] = 5
 	doc["skills"] = map[string]any{"inline_shell": true}
+	doc["security"] = map[string]any{"allow_lazy_installs": true}
 	out, _ := yaml.Marshal(doc)
 	os.WriteFile(cfgPath, out, 0o600)
 	f, _ := os.OpenFile(filepath.Join(p.Dir, ".env"), os.O_APPEND|os.O_WRONLY, 0)
@@ -595,6 +596,9 @@ func TestEnsureProfile(t *testing.T) {
 	}
 	if s := doc["skills"].(map[string]any); s["inline_shell"] != false {
 		t.Errorf("inline_shell = %v, want false", s["inline_shell"])
+	}
+	if s := doc["security"].(map[string]any); s["allow_lazy_installs"] != false {
+		t.Errorf("allow_lazy_installs = %v, want false", s["allow_lazy_installs"])
 	}
 	srv := doc["mcp_servers"].(map[string]any)["haunt"].(map[string]any)
 	if srv["command"] != "/usr/bin/haunt" || srv["timeout"] != 600 || srv["env"].(map[string]any)["HAUNT_RUNTIME_DIR"] != "/run/x" {

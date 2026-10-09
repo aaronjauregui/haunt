@@ -415,6 +415,13 @@ func (c Config) writeConfig(path string, spec ProfileSpec, hasSkills bool) error
 	// the toolsets say (agent/skill_preprocessing.py), and the model writes
 	// skills. Off is hermes's default; a ghost does not rely on a default.
 	skills["inline_shell"] = false
+
+	// Hermes installs packages on demand: what a skill's `deps:` names when
+	// it is viewed, a plugin the config names at start. The model writes
+	// skills, so on demand is the model's choosing; a ghost runs on what
+	// the image already has (pm/install.py).
+	security := section("security")
+	security["allow_lazy_installs"] = false
 	if _, set := skills["guard_agent_created"]; !set {
 		// The security scan hermes runs on skills the model writes. A
 		// ghost has no shell to run a bad one, but the person may open
@@ -439,7 +446,8 @@ func (c Config) writeConfig(path string, spec ProfileSpec, hasSkills bool) error
 		return err
 	}
 	header := []byte("# Written by haunt for ghost " + spec.Ghost + ". The api_server, toolset,\n" +
-		"# gateway.standalone, agent.auto_recovery_cycles, tool_search, skills.inline_shell\n" +
+		"# gateway.standalone, agent.auto_recovery_cycles, tool_search, skills.inline_shell,\n" +
+		"# security.allow_lazy_installs\n" +
 		"# and mcp_servers.haunt settings, and the " + SkillsDir + " entry in\n" +
 		"# skills.external_dirs, are rewritten on every start;\n" +
 		"# everything else (the model above all) is yours to change.\n")
