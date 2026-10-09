@@ -121,7 +121,7 @@ does). Each line is one turn, oldest first, and `-n` counts turns
 
 ```json
 {"time":"2026-09-18T09:14:02+10:00","provoked_by":"person","input":"remind me to check the oven",
- "reply":"Done — in ten minutes.","silent":false,"self_prompt":false,
+ "reply":"Done — in ten minutes.","silent":false,"failed":false,"self_prompt":false,
  "acted":[{"tool":"intend","args":"{\"text\":\"check the oven\",\"delay_ms\":600000}","result":"hermes/…"}],
  "looked":[{"tool":"session_search","args":"{\"query\":\"oven\"}","result":"…"}],
  "window":{"app":"foot","title":"~"}}
@@ -133,6 +133,7 @@ does). Each line is one turn, oldest first, and `-n` counts turns
 | `input` | what provoked the turn; an event is given without its envelope prefix |
 | `reply` | every line the ghost wrote in the turn, one per line; empty when it said nothing |
 | `silent` | the ghost said nothing |
+| `failed` | the turn failed (the model's provider gave out) and hermes closed it; no words are the ghost's |
 | `self_prompt` | the ghost was woken rather than spoken to |
 | `acted` | the ghost's own tools, as hermes called them, with their arguments and results whole |
 | `looked` | hermes's own tools: memory, session search, skills |

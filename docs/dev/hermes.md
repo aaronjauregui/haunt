@@ -61,6 +61,9 @@ Rewritten every start (haunt's):
 - **`config.yaml`**, merged rather than replaced. Haunt owns
   `platforms.api_server`, `gateway.standalone`, `platform_toolsets`,
   `agent.disabled_toolsets`, `agent.auto_recovery_cycles`,
+  `auxiliary.title_generation.model_upgrade_enabled` (off: hermes keeps
+  the session title it derives from the first message and makes no model
+  call for a better one, which nothing of a ghost's shows),
   `tools.tool_search`, `skills.inline_shell`, `security.allow_lazy_installs`,
   `mcp_servers.haunt`, its own entry in
   `skills.external_dirs`, and `_config_version` if absent; it defaults
@@ -226,9 +229,12 @@ and thinking callbacks, which the session stream does not wire, so a
 waiting turn sends nothing but keepalives. Before the first sign of life
 the first-token deadline cuts that short; after a tool event nothing
 does, and a turn that wore a face would sit through four minutes and more
-with the person's words queued. The profile sets the cycles to 1: the
-first wait, 15 to 18 s, is what rides out a moment's overload, and the
-later ones only make a dead provider slower to report.
+with the person's words queued. The profile sets the cycles to 2: the
+waits of 15 and 30 s ride out a provider's overload, which on z.ai comes
+as bursts of 429s, and the later ones only make a dead provider slower to
+report. A turn that fails anyway is closed by hermes with an assistant
+row of its own, "Your request was not processed…" (or "This turn did not
+complete…" once a tool ran), marked `display_kind: "failed_turn"`.
 
 **Waking.** The boot event starts the waking indicator ("waking up…")
 the moment the ghost is on screen, and the boot turn carries it
@@ -687,7 +693,11 @@ a `role: user` row with `content: ""` and `display_kind: "hidden"`,
 placed where the compaction happened, which can be inside a turn between
 a lookup and its reply; a handoff merged into a real message comes back
 as that message's own content. Every `hidden` row is skipped, before it
-can end a turn. `-why` joins the trace
+can end a turn. A `failed_turn` row is hermes's notice closing a turn
+that failed: it is read as a failed reply with no words
+(`Message.Failed`), which takes the turn's calls, `-json` gives it as
+`"failed": true` and `-why` as `(the turn failed)`, and the evals record
+the trial as an error rather than grade it. `-why` joins the trace
 and also shows hermes's own tool calls (memory, session search, skills)
 from the session's messages. The system prompt is not available: the API
 server returns only `has_system_prompt`, and haunt does not read hermes's

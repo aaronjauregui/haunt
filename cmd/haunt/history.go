@@ -191,6 +191,7 @@ type traceRecord struct {
 	Input      string       `json:"input"`       // an event without its envelope prefix
 	Reply      string       `json:"reply"`       // "" when nothing was said
 	Silent     bool         `json:"silent"`
+	Failed     bool         `json:"failed"` // the turn failed; hermes, not the ghost, closed it
 	SelfPrompt bool         `json:"self_prompt"`
 	Acted      []traceCall  `json:"acted"`  // the ghost's own tools, mcp__haunt__ taken off
 	Looked     []traceCall  `json:"looked"` // hermes's own: memory, session_search, skill_view, …
@@ -234,7 +235,9 @@ func (t historyTurn) record() traceRecord {
 	// interim ones included; the calls ride on whichever carries them.
 	var said []string
 	for _, m := range t.replies {
-		if !hermes.Silent(m.Text) {
+		if m.Failed {
+			r.Failed = true
+		} else if !hermes.Silent(m.Text) {
 			said = append(said, strings.TrimSpace(m.Text))
 		}
 		for _, c := range m.Acted {
@@ -245,7 +248,7 @@ func (t historyTurn) record() traceRecord {
 		}
 	}
 	r.Reply = strings.Join(said, "\n")
-	r.Silent = r.Reply == ""
+	r.Silent = r.Reply == "" && !r.Failed
 	// The time of the last thing known about the turn: hermes does not
 	// always stamp a reply, and an unstamped one reads as the epoch.
 	for _, at := range []time.Time{t.lastReplyTime(), t.why.Time, t.inputTime()} {
@@ -290,7 +293,9 @@ func printLine(m hermes.Message) {
 	}
 	// Indent continuations so a multi-paragraph reply stays legible.
 	text := strings.ReplaceAll(strings.TrimSpace(m.Text), "\n", "\n       ")
-	if who == "ghost" && hermes.Silent(m.Text) {
+	if m.Failed {
+		text = "(the turn failed)"
+	} else if who == "ghost" && hermes.Silent(m.Text) {
 		// Hermes keeps the token as the reply; nothing was shown.
 		text = "(said nothing)"
 	}

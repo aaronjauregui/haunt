@@ -21,6 +21,7 @@ type TraceTurn struct {
 	Input      string      `json:"input"`
 	Reply      string      `json:"reply"`
 	Silent     bool        `json:"silent"`
+	Failed     bool        `json:"failed"` // hermes closed the turn as failed
 	SelfPrompt bool        `json:"self_prompt"`
 	Acted      []TraceCall `json:"acted"`  // haunt's own tools, mcp__haunt__ stripped
 	Looked     []TraceCall `json:"looked"` // hermes's own tools: memory, skill_view, …

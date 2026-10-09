@@ -308,6 +308,14 @@ func runTrial(tr *evalTrial, opts evalOptions, out *trialResult) {
 		return
 	}
 	res.attach(ev)
+	for i, tu := range ev.Turns {
+		if tu.Failed {
+			// The provider gave out or hermes cut the turn short: nothing
+			// the ghost did, so nothing to grade it on.
+			res.Outcome, res.Why = outError, fmt.Sprintf("hermes failed turn %d (see the log)", i)
+			return
+		}
+	}
 	res.Graders = gradeTrial(tr.Case, ev, opts.Judge)
 	res.Outcome = trialOutcome(res.Graders)
 }

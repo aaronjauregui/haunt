@@ -316,9 +316,10 @@ const configVersion = 50
 // nothing reaches the turn's stream during one. The driver's deadline is on
 // the first sign of life only, so after a tool call hermes's default of
 // five would hold the turn for minutes with the person's words queued
-// behind it. One keeps the short first wait, which is what rides out a
-// moment of overload.
-const autoRecoveryCycles = 1
+// behind it. Two keep the short waits, which ride out a provider's
+// overload (z.ai's 429s come in bursts), and still fail a dead one within
+// a minute.
+const autoRecoveryCycles = 2
 
 func (c Config) writeConfig(path string, spec ProfileSpec, hasSkills bool) error {
 	doc := map[string]any{}
@@ -373,6 +374,17 @@ func (c Config) writeConfig(path string, spec ProfileSpec, hasSkills bool) error
 	agent := section("agent")
 	agent["disabled_toolsets"] = disabledToolsets
 	agent["auto_recovery_cycles"] = autoRecoveryCycles
+
+	// Hermes names each session, and upgrades the name it derives from the
+	// first message with a model call (agent/title_generator.py). Nothing
+	// shows a ghost's session title; the call is load on the provider.
+	aux := section("auxiliary")
+	tg, _ := aux["title_generation"].(map[string]any)
+	if tg == nil {
+		tg = map[string]any{}
+		aux["title_generation"] = tg
+	}
+	tg["model_upgrade_enabled"] = false
 
 	// Tool search hides MCP tools behind a lookup the model has to think of
 	// using; a ghost's verbs must be in front of it.
@@ -436,7 +448,8 @@ func (c Config) writeConfig(path string, spec ProfileSpec, hasSkills bool) error
 		return err
 	}
 	header := []byte("# Written by haunt for ghost " + spec.Ghost + ". The api_server, toolset,\n" +
-		"# gateway.standalone, agent.auto_recovery_cycles, tool_search, skills.inline_shell,\n" +
+		"# gateway.standalone, agent.auto_recovery_cycles, auxiliary.title_generation.model_upgrade_enabled,\n" +
+		"# tool_search, skills.inline_shell,\n" +
 		"# security.allow_lazy_installs\n" +
 		"# and mcp_servers.haunt settings, and the " + SkillsDir + " entry in\n" +
 		"# skills.external_dirs, are rewritten on every start;\n" +

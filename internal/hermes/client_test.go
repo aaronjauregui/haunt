@@ -461,6 +461,34 @@ func TestTranscriptKeepsCallsWhole(t *testing.T) {
 // of a turn, after a lookup and before the reply it led to;
 // history-lineage.json is a session a compression ended and the child
 // that carries it on.
+// Hermes closes a failed turn with a notice of its own in the ghost's
+// place; it reads as a failed turn, not as words, and keeps the turn's
+// calls.
+func TestMessagesFailedTurn(t *testing.T) {
+	f, srv := newFakeHermes(t)
+	f.sessions["haunt-moth"] = true
+	f.history = `{"data":[
+		{"role":"user","content":"what did I burn?","timestamp":1789614336},
+		{"role":"assistant","content":"","tool_calls":[{"id":"c1","function":{"name":"session_search","arguments":"{}"}}],"timestamp":1789614337},
+		{"role":"tool","tool_call_id":"c1","content":"nothing","timestamp":1789614338},
+		{"role":"assistant","content":"This turn did not complete. Some actions may already have run; verify their effects before resending.","display_kind":"failed_turn","timestamp":1789614339},
+		{"role":"user","content":"hello?","timestamp":1789614340},
+		{"role":"assistant","content":"Here.","timestamp":1789614341}
+	]}`
+	saved := "haunt-moth"
+	msgs, err := testClient(srv, &saved).Messages(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 4 || !msgs[1].Failed || msgs[1].Text != "" || msgs[1].Role != "assistant" ||
+		msgs[3].Failed || msgs[3].Text != "Here." {
+		t.Fatalf("messages %+v", msgs)
+	}
+	if len(msgs[1].Looked) != 1 || msgs[1].Looked[0].Tool != "session_search" || msgs[1].Looked[0].Result != "nothing" {
+		t.Errorf("the failed turn's calls %+v", msgs[1].Looked)
+	}
+}
+
 func TestMessagesAcrossCompaction(t *testing.T) {
 	for _, tc := range []struct {
 		fixture string
@@ -599,6 +627,9 @@ func TestEnsureProfile(t *testing.T) {
 	}
 	if s := doc["security"].(map[string]any); s["allow_lazy_installs"] != false {
 		t.Errorf("allow_lazy_installs = %v, want false", s["allow_lazy_installs"])
+	}
+	if tg := doc["auxiliary"].(map[string]any)["title_generation"].(map[string]any); tg["model_upgrade_enabled"] != false {
+		t.Errorf("title_generation = %v, want model_upgrade_enabled false", tg)
 	}
 	srv := doc["mcp_servers"].(map[string]any)["haunt"].(map[string]any)
 	if srv["command"] != "/usr/bin/haunt" || srv["timeout"] != 600 || srv["env"].(map[string]any)["HAUNT_RUNTIME_DIR"] != "/run/x" {
