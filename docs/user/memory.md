@@ -84,7 +84,9 @@ front of it, which tools it used (hermes's own memory and skill lookups
 included), and the turns where it chose to say nothing. The reasons live
 in the ghost's own store and only the last dozen turns keep them. The
 conversation itself is hermes's, so `haunt history` needs the ghost's
-gateway running.
+gateway running. It is the whole conversation: hermes compresses a long
+one so the model's context stays small, and the turns compressed away
+are still shown, though the ghost now has only a summary of them.
 
 `-json` is for a program reading the conversation back (the eval harness
 does). Each line is one turn, oldest first, and `-n` counts turns

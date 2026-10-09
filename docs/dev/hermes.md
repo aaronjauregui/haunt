@@ -134,8 +134,10 @@ wait.
 
 One session per ghost, created with `POST /api/sessions` and
 `{"id":"haunt-<ghost>"}`; a 409 `session_exists` is adopted. The id is
-kept in the store under `_haunt/hermes_session`. Compression may end a
-session and continue in a child with a new id, so the id is taken from
+kept in the store under `_haunt/hermes_session`. Hermes compresses in
+place by default (`compression.in_place: true`: same id, the older turns
+archived as `compacted`); with it off, compression ends the session and
+continues in a child with a new id, so the id is taken from
 `assistant.completed` and `run.*` payloads and stored when it changes; a
 404 `session_not_found` makes a new one. `X-Hermes-Session-Key: <ghost>`
 goes on every request: it scopes long-term memory, the context engine and
@@ -622,8 +624,23 @@ visible, plus about 75 per skill.
 Each hermes turn records its input, reply or silence, tools used, and
 the window in front of it, in the ghost's store (`why.go`); the last
 dozen are kept. `haunt history` reads `GET
-/api/sessions/{id}/messages?order=latest&limit=N` from the gateway, skips
-tool traffic, and prints envelopes as `event:`; `-why` joins the trace
+/api/sessions/{id}/messages?order=latest&limit=N&include_compacted=true`
+from the gateway, skips tool traffic, and prints envelopes as `event:`.
+
+That read is the whole conversation across compression. Hermes resolves
+the id to the live tip and returns the verified compression lineage, root
+to tip, as one list (`session_id` on each row says which segment it came
+from); `include_compacted=true` adds the rows an in-place compaction
+archived. Rows the compression carried forward are deduplicated, and the
+list is in conversation order. `order=latest&limit=N` takes the newest N
+of that merged list (the server caps N at 500), and the handoff rows
+count towards N. Nothing on a row says it was compacted: `active` and
+`compacted` are not in the response. A compaction's handoff comes back as
+a `role: user` row with `content: ""` and `display_kind: "hidden"`,
+placed where the compaction happened, which can be inside a turn between
+a lookup and its reply; a handoff merged into a real message comes back
+as that message's own content. Every `hidden` row is skipped, before it
+can end a turn. `-why` joins the trace
 and also shows hermes's own tool calls (memory, session search, skills)
 from the session's messages. The system prompt is not available: the API
 server returns only `has_system_prompt`, and haunt does not read hermes's

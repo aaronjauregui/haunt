@@ -82,7 +82,7 @@ func newFakeHermes(t *testing.T) (*fakeHermes, *httptest.Server) {
 		w.Write([]byte(f.stream(id, input)))
 	}))
 	mux.HandleFunc("GET /api/sessions/{id}/messages", auth(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("order") != "latest" || r.URL.Query().Get("limit") != "10" {
+		if q := r.URL.Query(); q.Get("order") != "latest" || q.Get("limit") != "10" || q.Get("include_compacted") != "true" {
 			t.Errorf("history asked with %s", r.URL.RawQuery)
 		}
 		if f.history != "" {
@@ -285,6 +285,62 @@ func TestTranscriptKeepsCallsWhole(t *testing.T) {
 	}
 	if r := short[1].Acted[0].Result; r == long || strings.Contains(r, "\n") {
 		t.Errorf("history result not cut to a line: %q", r)
+	}
+}
+
+// A compacted session is read whole, and its handoff is not a turn. The
+// fixtures are hermes's own answers, from its session store and API
+// handler: history-compacted.json is an in-place compaction in the middle
+// of a turn, after a lookup and before the reply it led to;
+// history-lineage.json is a session a compression ended and the child
+// that carries it on.
+func TestMessagesAcrossCompaction(t *testing.T) {
+	for _, tc := range []struct {
+		fixture string
+		want    []Message
+	}{
+		{"history-compacted.json", []Message{
+			{Role: "user", Text: "question 1"},
+			{Role: "assistant", Text: "answer 1", Acted: []Lookup{{Tool: "face", Args: `{"pose": "happy"}`, Result: `{"result":"ok"}`}}},
+			{Role: "user", Text: "what did I burn last week?"},
+			{Role: "assistant", Text: "The bread.",
+				Looked: []Lookup{{Tool: "session_search", Args: `{"query": "burn"}`, Result: `{"results": ["the bread"]}`}},
+				Acted:  []Lookup{{Tool: "face", Args: `{"pose": "sad"}`, Result: `{"result":"ok"}`}}},
+		}},
+		{"history-lineage.json", []Message{
+			{Role: "user", Text: "question 1"},
+			{Role: "assistant", Text: "answer 1"},
+			{Role: "user", Text: "question 2"},
+			{Role: "assistant", Text: "answer 2"},
+			{Role: "user", Text: "question 3"},
+			{Role: "assistant", Text: "answer 3"},
+		}},
+	} {
+		f, srv := newFakeHermes(t)
+		f.sessions["haunt-moth"] = true
+		f.history = fixture(t, tc.fixture)
+		saved := "haunt-moth"
+		msgs, err := testClient(srv, &saved).Messages(context.Background(), 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, m := range msgs {
+			got = append(got, m.Role+": "+m.Text)
+		}
+		var want []string
+		for _, m := range tc.want {
+			want = append(want, m.Role+": "+m.Text)
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("%s: messages\n%q\nwant\n%q", tc.fixture, got, want)
+			continue
+		}
+		for i, w := range tc.want {
+			if w.Looked != nil && !slices.Equal(msgs[i].Looked, w.Looked) || w.Acted != nil && !slices.Equal(msgs[i].Acted, w.Acted) {
+				t.Errorf("%s: %q looked %+v acted %+v, want %+v and %+v", tc.fixture, w.Text, msgs[i].Looked, msgs[i].Acted, w.Looked, w.Acted)
+			}
+		}
 	}
 }
 
