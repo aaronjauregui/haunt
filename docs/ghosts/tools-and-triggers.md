@@ -78,7 +78,7 @@ ghost. Rules:
   window opened for speaking on its own account. What a ghost should do
   with it is take on an intention, because cron silently skips whatever
   it missed while the laptop was shut, and an intention survives that,
-  a restart, and a quiet hour. A ghost on hermes does exactly this.
+  a restart, and a quiet hour. A persona ghost does exactly this.
 - **Nothing shows.** No balloon, no journal entry, no memory.
 - **Unchanged answers are dropped.** An answer identical to the last is
   not delivered.
@@ -108,14 +108,14 @@ polling gets its ghost back.
 
 ## Skills that use a tool
 
-A package skill written for one of these tools declares it, so hermes
-lists the skill only when the tool is there:
+A package skill written for one of these tools declares it, so the
+skill is listed only when the tool is there. The model is offered a
+server's tool as `<server>__<tool>`, and that is the spelling to use:
 
 ```yaml
 metadata:
-  hermes:
-    requires_toolsets: [mcp-haunt]
-    requires_tools: [mcp__haunt__notes__append]
+  haunt:
+    requires_tools: [notes__append]
 ```
 
 See [Persona and skills](persona-and-skills.md).

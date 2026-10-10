@@ -3,9 +3,9 @@
 #
 # Runs scripts/demo.sh, captures the nested sway window with wf-recorder,
 # and encodes the capture as a GIF. Recording starts and stops on Enter, so
-# the take is driven by hand: a hermes ghost is half a minute of "waking
-# up…" before it says anything, and that half minute does not belong in the
-# GIF.
+# the take is driven by hand: a persona ghost on a local model can be most
+# of a minute of "waking up…" before it says anything, and that wait does
+# not belong in the GIF.
 #
 # The raw capture is kept beside the GIF, and RAW= reads it back, so
 # finding the cut costs no further recording:

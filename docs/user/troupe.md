@@ -43,6 +43,6 @@ picture, a flourish it was asked for, being poked. They may react without
 being spoken to, which is where dynamics nobody wrote come from. Only
 public things: a ghost can watch its neighbour and can never reach its
 neighbour's memory. Reacting is unprompted, so it comes out of the same
-allowance as speaking first, and a ghost on hermes is woken about its
+allowance as speaking first, and a persona ghost is woken about its
 neighbours at most once an hour on top of that. A ghost with the `tell`
 capability can also address another by name.

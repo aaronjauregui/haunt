@@ -33,7 +33,7 @@ haunt memory ls|show|rm|reindex [-ghost NAME | -state DIR] [topic [line-number]]
 | `pack` | Build a signed `.haunt` package from a ghost directory. |
 | `install` | Verify, install, and ask about the requested capabilities. `-yes` grants them all. |
 | `ls`, `rm` | List installed ghosts (`*` marks the resident ones); uninstall one, memory and grants included. |
-| `switch`, `add`, `drop` | This ghost alone; this one as well; this one no longer. The set is read when `run` starts. |
+| `switch`, `add`, `drop` | This ghost alone; this one as well; this one out. The set is read when `run` starts. |
 | `perms` | What a ghost asked for and what it has. `grant` and `revoke` take a capability, or `tool:<server>.<tool>`, and apply to a running ghost within seconds. |
 | `shush`, `unshush` | Quiet now, for an hour or the given duration; and back. |
 | `journal` | What the ghost did. `-intentions` is what it is still meaning to do; `-echoes` lists what it saved to memory in the words of a page or a file it read; `-skills` lists its routines by source, including the ones it wrote itself; `-style` is the style it draws its pictures in, and `-style -reset` puts it back to the one its package ships. |

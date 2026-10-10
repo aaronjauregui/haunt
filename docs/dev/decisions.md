@@ -21,24 +21,49 @@ constraint on changes, not a history.
 
 ## The brain
 
-- **Hermes owns the model.** Haunt has no chat client and no one-shot
-  loop. Which provider, which key and which bill are hermes's. Haunt's
-  own backend layer speaks the OpenAI API only for the driver's verbs
-  (vision, images) and ComfyUI for images. A brain that wants a model runs
-  on hermes; there is no `chat` intent.
-- **Memory is hermes's.** Haunt neither writes, configures nor reads a
-  ghost's memory. The person picks the backend with hermes (`hermes -p
-  haunt-<ghost> memory setup`), built-in or a provider, or a provider
-  alone, and haunt works with whatever memory tools the model then has.
-  There is no belief store beside it: a correction is the model editing
-  its memory, and there is no confirmation dialogue for it. The rules
-  about what may be remembered are the soul's and the skills', worded for
-  any store. Haunt flags a write and never gates one: a memory write in
-  the session whose words repeat what the ghost read from the web or a
-  file a few turns before is marked by `haunt history` and listed by
-  `haunt journal -echoes`, and the person decides what to do about it. A
-  gate would have to tell the person's facts from a page's inside the
-  model's words; a flag only has to show where the words came from.
+- **Haunt owns the loop.** A persona ghost's model is reached directly
+  over the OpenAI-compatible chat completions API (`internal/model`), with
+  no agent process between haunt and the model server. The transcript,
+  its compaction, memory, skills and tool dispatch are haunt's. An agent
+  framework in the middle owns the message list, and every lever that
+  makes a character hold on a model (prefill, sampling, where a reminder
+  sits) sits behind it; it cannot tie a tool call to its turn or show the
+  driver a memory write, and the seam needs string heuristics for a face
+  and for silence. One protocol only: it covers llama-server, Ollama,
+  vLLM, z.ai, OpenAI and OpenRouter. The person's config picks the model;
+  a manifest never names one. There is no `chat` intent: a scripted brain
+  that wants a model is a persona ghost.
+- **Decide, then speak.** A turn is a tool-use loop whose terminal
+  decisions are `speak(pose)` and `stay_silent()`, then, after `speak`, a
+  second call for the words with the persona's prefill and thinking off.
+  Silence and the face are decisions the model makes in a schema, not
+  tokens the driver fishes out of prose, and the words are written
+  without tools in front of them, where prefill and sampling do the most
+  for the character. `fold` puts the words in the first call where the
+  round trip costs more than it buys: cloud by default. The decisions are
+  a registry, a name, a schema and an apply function each, so a new
+  behaviour is a new entry and never a new call shape.
+- **Memory is files.** Two always-present files (`self.md`, `you.md`) and
+  topic files whose lines are facts, in Markdown the person can read and
+  edit while the ghost runs; the FTS5 index in `state.db` is derived and
+  rebuilt from them. Facts are lines in topics, never a file per fact, so
+  the index in the prompt stays small. Every line carries its provenance
+  (person, web, file, self; the turn), written by the driver from what
+  the turn read, not by the model. There is no belief store beside it: a
+  correction is the model taking a line back, and there is no
+  confirmation dialogue. Each ghost has its own; two ghosts may disagree
+  about the person.
+- **Trust follows the endpoint.** A model on loopback or a private range
+  is local, any other host cloud, judged from `base_url`'s text and
+  overridable with `trust`. Reads are loose and writes confined: on a
+  local model reading shared folders and the web on the ghost's own turns
+  is free within quiet hours and the ration, since nothing read leaves the
+  machine through the model; on a cloud model it follows the `unprompted`
+  policies. Writes that outlive the turn are labelled on both, and on a
+  cloud model a memory write that echoes a web or file read is refused.
+  What reaches past the person (telling, tool servers, intentions after a
+  read) stays consented and marked on both. No shell and no file writes
+  on any provider.
 - **One interpreter per utterance.** No parser in front of the model
   deciding whether typed text is a command.
 - **The trust line is at the model's output, not the model.** A
@@ -53,9 +78,10 @@ constraint on changes, not a history.
   sending.** The model never sees an event it is not allowed to act on,
   so its only decision is whether this one is worth a word. Silence is
   refunded.
-- **Skills a ghost ships are read-only.** Hermes would let the model
-  patch them; haunt's are haunt's. What the model learns goes to the
-  profile's own skills.
+- **Skills a ghost ships are read-only.** Haunt's and the package's
+  skills are never changed by the model. What it learns goes to its own
+  learned skills, which are checked against the tools it has and
+  archived when they go unused.
 
 ## Effects
 
@@ -102,13 +128,12 @@ constraint on changes, not a history.
   rewrite would be an injection with a long memory. The package seeds it,
   the person can let the ghost change it, and the negative stays the
   author's.
-- **The web is the driver's to hold, not a toolset handed to hermes.**
-  The keys, the consent question, the ration, the refusal texts and the
-  taint all live where the rest of them live. Hermes's own `web` toolset
-  stays off, so there is one way in and one place that says no.
-- **Unprompted searching is bounded by the turn's event kind.** The
-  driver cannot see which skill the model loaded, so it gates on what it
-  can see: the kinds a skill acts on, none of which carry text from the
+- **The web is the driver's to hold.** The keys, the consent question,
+  the ration, the refusal texts and the taint all live where the rest of
+  them live, so there is one way in and one place that says no.
+- **Unprompted searching on a cloud model is bounded by the turn's event
+  kind.** "Only where a skill says to" is not something the driver can
+  check, so it gates on what it can see: the kinds a skill acts on, none of which carry text from the
   person's windows. It is approximate on purpose — the ration and quiet
   hours bound what the approximation costs — and the point it does buy is
   that what is on their screen never becomes a query.
@@ -117,13 +142,11 @@ constraint on changes, not a history.
   in the balloon, and refused outright on a turn the person did not
   start. Showing them something is not one of those verbs; telling
   somebody else is.
-- **Files are the driver's to read, not a toolset handed to hermes.**
-  The grant, the unprompted policy, the ration, the journal and the taint
-  all need the driver to see the read. Hermes's file toolset cannot be
-  split from its writing tools, native hermes would have no confinement,
-  and a read through a bind mount is one the driver never sees. So the
-  person names folders in the config, the model sees only their names,
-  and the driver reads through an `os.Root` per folder.
+- **Files are the driver's to read.** The grant, the unprompted policy,
+  the ration, the journal and the taint all need the driver to see the
+  read, and reading must never come with writing. So the person names
+  folders in the config, the model sees only their names, and the driver
+  reads through an `os.Root` per folder.
 - **Taint records its source.** A file is a stranger's words as much as
   a page is, and marks the turn the same way. What differs is what may
   leave afterwards: after a file, a search query or a page's address is
@@ -199,4 +222,6 @@ constraint on changes, not a history.
 | Manifest | TOML |
 | Screen capture | `grim` |
 | Signing | Ed25519 |
-| Model loop | hermes-agent, over its API server and an MCP stdio server |
+| Model loop | haunt's own, over OpenAI-compatible chat completions |
+| Memory | Markdown files, an FTS5 index derived from them |
+| Skills | the agentskills `SKILL.md` format |

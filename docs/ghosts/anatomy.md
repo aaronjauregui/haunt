@@ -13,10 +13,10 @@ library.
 
 ## Two kinds of ghost
 
-**A persona ghost** declares no `[brain]` section. It runs on hermes-agent,
-which speaks in the persona, remembers the person, takes on reminders,
-draws when asked, uses whatever tool servers the manifest gives it, and
-speaks first now and then. There is nothing to compile. What is left to
+**A persona ghost** declares no `[brain]` section. It thinks with the
+person's model: it speaks in the persona, remembers the person, takes on
+reminders, draws when asked, uses whatever tool servers the manifest
+gives it, and speaks first now and then. There is nothing to compile. What is left to
 do is the art and the character. This is the default, and the kind most
 ghosts should be.
 
@@ -49,9 +49,9 @@ The division of labour is fixed. The **driver** owns everything the ghost
 cannot be trusted with: the screen and its surfaces, input, the balloon
 and its menus, persistence, consent, the AI backends and their keys,
 budgets, quiet hours, the fullscreen rule, and the allowance for speaking
-first. The **ghost**, whether a persona on hermes or a brain, owns the
-judgment: what to say, what to remember, whether a moment is worth a
-word.
+first. The **ghost**, whether a persona on the person's model or a
+brain, owns the judgment: what to say, what to remember, whether a
+moment is worth a word.
 
 So a ghost never draws to the screen, never opens a socket, never holds a
 credential, and never decides when it may interrupt. It asks, and the

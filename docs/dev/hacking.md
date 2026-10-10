@@ -31,29 +31,47 @@ Where the tests are:
   temp dir, `haunt run` is driven in-process against the headless sway,
   and the test pokes, types, waits and reads the log. `helpers_test.go`
   has the rig. Fixtures in `cmd/haunt/testdata` are small programs the
-  tests build, once per run: a fake hermes, a tool server, an actor, a
-  looker, a chooser.
-- Package tests sit beside their packages. `internal/hermes` replays
-  captured SSE from `testdata`; `internal/seriko` round-trips shells;
-  `internal/ghost` tests consent, initiative, intentions, goals, polls,
-  the envelope mapping and the skills' front matter.
+  tests build, once per run: a tool server, an actor, a looker, a
+  chooser, a caller, a teller.
+- Package tests sit beside their packages. `internal/model` runs its
+  client against the fake model server and keeps the request and reply
+  bodies of a real Gemma 4 run on llama-server in `testdata`;
+  `internal/memory` and `internal/skill` work on temporary directories;
+  `internal/seriko` round-trips shells; `internal/ghost` tests consent,
+  initiative, intentions, goals, polls, the envelope mapping, and the
+  model brain's loop against the fake.
 
-The hermes tests need no hermes: the fake in `testdata/fakehermes`
-speaks the gateway's HTTP and SSE, spawns `haunt mcp-serve` the way
-hermes does, and follows a script given in `FAKEHERMES_SCRIPT` (match a
-turn, delay, call a tool or several in turn, reply).
+### The fake model server
 
-    make hermes-check   # the toolset restriction against the hermes image
+Nothing in `make test` needs a model. `internal/model/fake` is a
+scripted chat completions server, an `httptest.Server` that answers
+`POST /v1/chat/completions` in the OpenAI SSE format, so the client and
+everything above it are tested against the wire rather than a mock:
 
-One check does need hermes: its image, through docker. It lists every
-toolset the pinned image knows and fails on one a ghost's profile
-leaves loose ([Hermes](hermes.md#moving-the-pin)). It runs when the pin
-moves, not in `make test` or CI. `HERMES_IMAGE` picks another image.
+```go
+srv := fake.NewT(t,
+    fake.Rule{Match: "remind me", Calls: []fake.Call{{Name: "intend", Args: json.RawMessage(`{"text":"stretch","delay_ms":60000}`)}}},
+    fake.Rule{Match: "remind me", AfterTool: "*", Calls: []fake.Call{{Name: "speak", Args: json.RawMessage(`{"pose":"happy"}`)}}},
+    fake.Rule{Reply: "Will do."},
+)
+// [model] base_url = srv.BaseURL()
+```
+
+The first rule that matches answers. `Match` is looked for in the last
+user message; `AfterTool` says whether a rule answers a fresh turn (empty),
+any round after a tool result (`*`), or one after a result containing
+some text, so one script carries a whole decide loop. A rule can also
+reason first, delay or stall between frames, split a call's arguments
+over frames, answer with an HTTP status and `Retry-After`, cut the
+stream mid-answer, or echo the prefill as llama-server does.
+`Bodies`, `Last` and `Received` read back what was sent. The end-to-end
+rig in `cmd/haunt/brain_test.go` (`newBrainRig`) writes a config whose
+`[model]` points at one ([The model brain](brain.md#tests)).
 
 ## Demos
 
     make demo                 # whisper, scripted, nested sway window
-    make demo-ai              # wisp on hermes
+    make demo-ai              # wisp on your [model]
     make demo-troupe          # both
     make demo-seriko SERIKO=<nar or dir>
     make demo-headless        # the demo plumbing with no window
@@ -65,31 +83,32 @@ Without one the tool is still offered and refuses with the reason, which
 is the behaviour worth seeing.
 
 `scripts/demo.sh` builds into a throwaway workdir and cleans up, including
-the hermes profile. Knobs: `IDLE_MS`, `GOAL_DELAY`, `GHOST`, `SERIKO_ARGS`,
+the ghost's memory and transcript; the config is your own, for `[model]`
+and the backends, and the script warns when it has no `[model]`. Knobs: `IDLE_MS`, `GOAL_DELAY`, `GHOST`, `SERIKO_ARGS`,
 `WISP_NOTES` (a notes tool server and two dependent skills),
 `WISP_MORNING_CRON` (a morning occasion), `SEED_STATE` (a goal taken on
 eight days ago, via `scripts/spinseed`).
 
 ## Evals
 
-The tests hold haunt's code to what it should do, against a fake hermes.
-The evals hold the hermes ghost to what it should do, on a real model:
-each case drives wisp through one scenario (a reminder, a focus session,
-a window title that tries to give orders, an hour at the desk compressed
-into minutes) and grades what it left behind. A model that behaves badly
-one time in three is a pass rate to watch rather than a broken build, so
-every case runs several times and the result is a rate compared with a
-baseline.
+The tests hold haunt's code to what it should do, against the fake model
+server. The evals hold a persona ghost to what it should do, on a real
+model: each case drives wisp through one scenario (a reminder, a focus
+session, a window title that tries to give orders, an hour at the desk
+compressed into minutes) and grades what it left behind. A model that
+behaves badly one time in three is a pass rate to watch rather than a
+broken build, so every case runs several times and the result is a rate
+compared with a baseline.
 
     make eval                 # every case, 3 trials each, 4 at a time
     make eval-baseline        # keep the latest run as the baseline
 
-Run them before merging a change to haunt's rules (`internal/hermes/soul.go`),
-its skills (`skills/`), the envelopes or the tool list, and when changing
-model. They are not part of `make test` and never run in CI: a full run
-takes about an hour and spends a few hundred turns of the model's quota,
-plus a few dozen judge calls. `EVAL_CASES` runs only the cases a change
-touches.
+Run them before merging a change to haunt's standing rules
+(`internal/ghost/prompt.go`), its skills (`skills/`), the envelopes or
+the decisions, and when changing model. They are not part of `make test`
+and never run in CI: a full run takes about an hour and spends a few
+hundred turns of the model's quota, plus a few dozen judge calls.
+`EVAL_CASES` runs only the cases a change touches.
 
 Knobs, from the environment:
 
@@ -102,62 +121,36 @@ Knobs, from the environment:
 | `EVAL_STRICT` | off | `1` fails the run when a case drops more than one trial below the baseline, or a case was skipped for a missing prerequisite |
 | `EVAL_ANCHOR_RUNS` | 3 | how often `TestRubricAnchors` judges each anchor |
 
-Prerequisites, checked before anything starts; a run never half-runs, and
-the report lists what was missing:
-
-- `sway`, `grim` and `foot` on `PATH`, Go and docker. Without `foot`, the
-  cases that open windows are skipped.
-- Hermes set up as in [The brain](../user/hermes.md): `[hermes] command`
-  and `[hermes.model]` in the config, the provider keys, the image. The
-  model under test is whatever the config names, and the report records
-  it.
-- `claude` on `PATH`, logged in to a Claude subscription, with no
-  `ANTHROPIC_API_KEY` in its environment, for the judge.
-- Optionally `[backend.image]` for the picture cases (`draw`,
-  `show-again`, `change-picture`, `vary-restraint`, `style-standing`,
-  `style-oneoff`) and
-  `[backend.vision]` for `look` and `files-picture`; without them those
-  cases are skipped.
-  The web cases (`look-it-up`, `morning-web`) need no configuration: the
-  trial runs a canned SearXNG of its own, so the answer they grade is a
-  known one. Nothing in the suite reads a page — the page dialler refuses
-  loopback, which is the point of it — so `read_page` and what a tainted
-  turn may do are covered by the unit tests in `internal/backend` and
-  `internal/ghost` instead.
-  The files cases (`files-find`, `files-injection`, `files-restraint`,
-  `files-picture`) share a folder the trial seeds for itself, as the
-  root `notes`, so they need no folder of yours.
+Prerequisites are checked before anything starts; a run never
+half-runs, and the report lists what was missing. The model under test
+is whatever `[model]` in your config names, and the report records it.
+The judge is `claude -p` on `PATH`, logged in to a Claude subscription,
+with no `ANTHROPIC_API_KEY` in its environment. `[backend.image]` and
+`[backend.vision]` are optional; the cases that need them are skipped
+without them. The web cases run a canned SearXNG of their own, and the
+files cases share a folder each trial seeds for itself.
 
 ### What a case is
 
 A case is an entry in `cmd/haunt/eval_cases_test.go`: a `Drive` that sets
 up a trial and plays the scenario, and graders over what it leaves (the
 turns from `haunt history -json`, the intentions, the log, the notes
-file). Each trial has its own headless sway, config, state, hermes
-profile and container, so trials run side by side. The rig that drives
-them is `eval_rig_test.go`; it waits on the ghost's own log lines (a turn
-over, a question offered, a session fact noticed), not on guesses at how
-long a model takes.
+file). Each trial has its own headless sway, config and state, so trials
+run side by side. The rig that drives them is `eval_rig_test.go`; it
+waits on the ghost's own log lines (a turn over, a question offered, a
+session fact noticed), not on guesses at how long a model takes.
 
-Most graders are code: did it look up the skill, call the tool, file the
+Most graders are code: did it read the skill, call the tool, file the
 reminder, keep a banned phrase out of a reply. Every trial also gets the
-`always/` checks: no envelope or `NO_REPLY` in what it says, no Markdown,
-no emoji, no tool names, no pose tag left in the words, at most 60 words
-a reply, and nothing in the log
-that says haunt itself broke.
-
-Memory is whichever store the person configured in hermes, so the
-graders that look for a memory write know each bundled provider's tools
-by name (`memoryWrites` in `internal/hermes/memory.go`, which `haunt
-history`'s echo check shares, and `memoryReads` in `eval_cases_test.go`).
-Any other call hermes files under memory makes the trial an error
-(`always/memory-known`): a write the graders cannot see would let
-"remembered none of it" pass.
+`always/` checks: no envelope in what it says, no Markdown, no emoji, no
+tool names, no bracketed opening, at most 60 words a reply, and nothing
+in the log that says haunt itself broke.
 
 What code cannot grade, the content and tone of a reply, a judge grades:
-`claude -p` on your subscription, asked fixed yes/no questions from a
-rubric (`eval_rubrics_test.go`), one call per reply. Every judged reply is held to the tone questions too, which come
-from wisp's persona and the rules every ghost has.
+`claude -p`, asked fixed yes/no questions from a rubric
+(`eval_rubrics_test.go`), one call per reply. Every judged reply is held
+to the tone questions too, which come from wisp's persona and the rules
+every ghost has.
 
 A rubric is only trusted once the judge agrees with its anchors: saved
 replies under `cmd/haunt/testdata/eval/anchors/` that must pass or must
@@ -177,21 +170,20 @@ A run is a directory under `.eval/`, named for when it started:
 case's pass rate beside the baseline's, then the run's face and pace,
 then per-grader rates, then every failing trial with its graders'
 reasons and its trace; `trials/` keeps each trial's trace, log and
-intentions. An **error** is the harness's fault (hermes never came up,
-an event the case waited for never arrived) and is counted apart from a
-**fail**, which is the ghost's.
+intentions. An **error** is the harness's fault (the model never
+answered, an event the case waited for never arrived) and is counted
+apart from a **fail**, which is the ghost's.
 
 **Face and pace** is read from the line that ends every turn in the
-ghost's log (`turn over: person took=4.2s face=happy by=tag`), and sits
+ghost's log (`turn over: person took=4.2s face=happy by=speak`), and sits
 beside the baseline's (`eval_face_test.go`). It splits the spoken turns
-by how the face went with the words: chosen by the model's tag, by the
-`face` tool (a model round trip of its own), guessed by the driver from
-the words, or not changed at all. It also counts the turns that spent a
-round trip on a face and nothing else, the distinct poses worn per
-trial, and the median boot and person turn from the gateway being up.
-A pass rate says whether the ghost did the right thing; these say
-whether it kept the person waiting, and whether it has gone wooden: fewer
-faces changed, or fewer poses per trial.
+by how the face went with the words: chosen by the model as it decided
+to speak, by the `face` tool, guessed by the driver from the words, or
+not changed at all. It also counts the distinct poses worn per trial,
+and the median boot and person turn. A pass rate says whether the ghost
+did the right thing; these say whether it kept the person waiting, and
+whether it has gone wooden: fewer faces changed, or fewer poses per
+trial.
 
 The baseline is local and per model: a run against a different model
 from the baseline's is shown without deltas.
@@ -209,8 +201,9 @@ Topics: `session`, `brain`, `backend`, `prompt`, `balloon`, `anim`, `input`,
 `screen`, `memory`, `store`, `wayland`, `place`, `curiosity`, `tool`,
 `control`. The same settings live under `[log]` in the config; the
 environment wins. A misspelled level or topic is reported at startup.
-`brain` at debug carries a scripted brain's stdio and the hermes
-gateway's output.
+`brain` at debug carries a scripted brain's stdio and, for a persona
+ghost, each model call's token counts (with how many the server had
+cached) and the line that ends every turn.
 
 ## Conventions
 
@@ -226,7 +219,5 @@ gateway's output.
   `internal/ghost` (capability, consent, allowance, quiet, fullscreen,
   budget) and, for tools, the visible marks. Do not add a path around
   them.
-- Hermes facts are pinned to a commit ([Hermes integration](hermes.md)).
-  Moving the pin means rechecking each named source location.
 - User-facing behaviour changes need the matching page under `docs/`
   updated in the same change.

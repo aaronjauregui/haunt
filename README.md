@@ -10,7 +10,7 @@ It remembers you across sessions, takes on reminders, paints a picture when you 
 
 Note that this is not intended to be compatible with Ukagaka, it's a ground-up redesign: there is no SHIORI, SSTP or SakuraScript, and this runs on wlroots-based Wayland compositors (sway, Hyprland) and others that implement `zwlr_layer_shell_v1`.
 
-Haunt controls the body and the conscience: the screen, consent, budgets, quiet hours, and consent gates. A ghost is art plus a persona, with no code to write. One that wants scripted logic ships a sandboxed WASM brain; one that wants to think runs on [hermes-agent](https://github.com/nousresearch/hermes-agent), which owns the model, the conversation and what the ghost remembers.
+Haunt controls the body and the conscience: the screen, consent, budgets, quiet hours, and consent gates. A ghost is art plus a persona, with no code to write. One that wants scripted logic ships a sandboxed WASM brain; one that wants to think does so with the model you choose, local or cloud, over any OpenAI-compatible endpoint, while haunt keeps its conversation, its memory as plain Markdown files, and its skills.
 
 Most of the code here was written by an LLM, under my direction and review.
 
@@ -23,11 +23,11 @@ brain is a WASM module built from `examples/whisper`, so there is no
 model, no key and no network. Poke it, drag it, double-click for a menu,
 right-click to type at it.
 
-    make demo-ai      # the ghost above: also needs hermes-agent and a model
+    make demo-ai      # the ghost above: also needs a model in [model]
     make demo-troupe  # two at once, one scripted and one thinking
 
 `demo-ai` is what the picture shows, and what it asks of you is in
-[The brain](docs/user/hermes.md).
+[The model](docs/user/model.md).
 
 A compositor without `zwlr_layer_shell_v1` cannot keep a ghost, but it can
 still show you one: the demos run sway nested inside whatever session is

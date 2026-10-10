@@ -27,13 +27,10 @@ workdir="$(mktemp -d /tmp/haunt-demo-XXXXXX)"
 runtime="$(mktemp -d /tmp/hd-XXXXXX)"
 # Kill child processes (not the whole group: that would kill this script
 # before the rm runs), wait for them, then remove the workdir. The wait
-# matters for a hermes ghost: its gateway is still closing its database in
-# the workdir for a few seconds after haunt is told to stop.
+# lets a ghost close its databases in the workdir before they go.
 cleanup() {
     kill $(jobs -p) 2>/dev/null || true
     wait 2>/dev/null || true
-    # A hermes profile holds the ghost's skills read-only.
-    chmod -R u+w "$workdir" 2>/dev/null || true
     rm -rf "$workdir" "$runtime"
 }
 trap cleanup EXIT TERM INT
@@ -52,8 +49,9 @@ EOF
 # GHOST="whisper wisp" puts both on screen at once, which is how you watch
 # the multi-ghost behaviour: neither opens on top of the other, and `haunt
 # say` follows whichever you last poked. Whisper is the scripted example
-# brain, built to WASM; wisp declares no brain at all and so runs on hermes
-# ([hermes] in ~/.config/haunt/config.toml), drawing via [backend.image].
+# brain, built to WASM; wisp declares no brain at all and so thinks with
+# your model ([model] in ~/.config/haunt/config.toml, read as it is),
+# drawing via [backend.image].
 seriko="${SERIKO:-}"
 ghosts="${GHOST:-whisper}"
 ghost_dirs=()
@@ -97,10 +95,10 @@ EOF
         ;;
     wisp)
         # No [brain] section and nothing to compile: art and a persona are a
-        # whole ghost, and hermes is its brain (docs/user/hermes.md). Its
-        # profile is made under the demo's own hermes home (below), so give
-        # it a model in [hermes.model] and its keys in the file
-        # scripts/hermes-docker reads.
+        # whole ghost, and the model in your config is its brain
+        # (docs/user/model.md). Its memory, skills and transcript are made
+        # under the demo's own state directory (below), so it starts with
+        # nothing remembered and leaves nothing behind.
         cat > "$workdir/wisp/ghost.toml" <<'EOF'
 [ghost]
 name = "wisp"
@@ -110,14 +108,14 @@ capabilities = ["message", "llm", "imagine", "window", "screen", "web", "tell"]
 [persona]
 system = "You are Wisp, a wry little desktop spirit haunting the user's screen. Reply in one or two short sentences, with dry wit. Let what you remember about them color your mood and callbacks."
 
-# One of hermes's own skills (docs/ghosts/persona-and-skills.md).
-[hermes]
-bundled_skills = ["humanizer"]
+[[persona.example]]
+user = "what are you?"
+ghost = "Something that lives behind your windows. Don't mind me."
 EOF
         # WISP_NOTES=<file> gives wisp a notes tool server (the tests' own,
         # which appends lines to that file) and a skill that is listed only
-        # when the server's tool is there. A second skill names the tool
-        # wrongly, so the driver warns that hermes will hide it.
+        # when the server's tool is there. A second skill names the tool as
+        # the server spells it, so it is hidden and the driver warns.
         if [ -n "${WISP_NOTES:-}" ]; then
             go build -o "$workdir/notes-server" ./cmd/haunt/testdata/toolserver
             sed -i 's/"tell"\]/"tell", "tools"]/' "$workdir/wisp/ghost.toml"
@@ -135,32 +133,29 @@ TOML
 name: shopping-list
 description: "When they want something on their shopping list"
 metadata:
-  hermes:
-    requires_toolsets: [mcp-haunt]
-    requires_tools: [mcp__haunt__notes__append]
+  haunt:
+    requires_tools: [notes__append, notes__read]
 ---
 
 # Shopping list
 
 The list lives in their notes file, a line `buy: <item>` per item.
 
-- To add: call `mcp__haunt__notes__append` with `text` like
-  `buy: <item>`, once per item, then reply in one short sentence
-  naming what you added.
-- To say what is on it: call `mcp__haunt__notes__read` and name the
-  `buy:` items, in one short sentence.
+- To add: call `notes__append` with `text` like `buy: <item>`, once per
+  item, then speak one short sentence naming what you added.
+- To say what is on it: call `notes__read` and name the `buy:` items,
+  in one short sentence.
 SKILL
             cat > "$workdir/wisp/skills/misspelled-notes/SKILL.md" <<'SKILL'
 ---
 name: misspelled-notes
 description: "Never listed: its tool is spelled as the server spells it"
 metadata:
-  hermes:
-    requires_toolsets: [mcp-haunt]
-    requires_tools: [mcp__haunt__notes.append]
+  haunt:
+    requires_tools: [notes.append]
 ---
 
-Hermes hides this skill.
+Haunt hides this skill, and says so in its log.
 SKILL
         fi
         # WISP_MORNING_CRON gives wisp a morning occasion, which haunt's
@@ -174,8 +169,8 @@ cron = "$WISP_MORNING_CRON"
 name = "morning"
 EOF
         fi
-        # A skill of wisp's own: a package's skills/ is installed into its
-        # hermes profile beside haunt's (docs/ghosts/persona-and-skills.md).
+        # A skill of wisp's own: a package's skills/ is listed to the model
+        # beside haunt's (docs/ghosts/persona-and-skills.md).
         mkdir -p "$workdir/wisp/skills/ghost-story"
         cat > "$workdir/wisp/skills/ghost-story/SKILL.md" <<'EOF'
 ---
@@ -184,25 +179,23 @@ description: "When they ask for a ghost story: a tiny spooky tale"
 version: 1.0.0
 author: wisp
 metadata:
-  hermes:
-    tags: [story, spooky, fun]
-    requires_toolsets: [mcp-haunt]
+  haunt:
+    requires_tools: [face, say, recall]
 ---
 
 # Ghost story
 
 Wisp tells ghost stories the way it haunts: briefly, and from the inside.
 
-1. Wear a pose that suits a story, if your shell has one, with
-   `mcp__haunt__face`.
-2. Tell the story in `mcp__haunt__say`, three sentences and at most
-   120 words. It is told in the first person, by a ghost, about the
-   living. It ends on a small twist, never on gore.
-3. Your final reply is one line in which you deny that the story was
-   about anyone the person knows.
+1. Wear a pose that suits a story, if your shell has one, with `face`.
+2. Tell the story with `say`, three sentences and at most 120 words. It
+   is told in the first person, by a ghost, about the living. It ends on
+   a small twist, never on gore.
+3. Then speak one line in which you deny that the story was about anyone
+   the person knows.
 
-Never tell the same story twice. If your session history has one, tell a
-different one.
+Never tell the same story twice. `recall` "ghost story" first, and if
+you have told one, tell a different one.
 EOF
         ;;
     *)
@@ -243,8 +236,15 @@ if [ "$ghost_count" -gt 1 ]; then
     echo ">>   start from a clean slate:  XDG_DATA_HOME=\$(mktemp -d) make demo-troupe"
 fi
 if [[ " $ghosts " == *" wisp "* ]]; then
-    echo ">> wisp runs on hermes. try:  say \"remind me in two minutes to stretch\"  |  say \"draw a whale\"  |  double-click for the menu"
+    # Wisp thinks with the person's own [model]; without one it can only
+    # say that it cannot.
+    config="${HAUNT_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/haunt}/config.toml"
+    if ! grep -q '^\[model\]' "$config" 2>/dev/null; then
+        echo ">> warning: no [model] in $config; wisp has nothing to think with (docs/user/model.md)"
+    fi
+    echo ">> wisp thinks with your [model]. try:  say \"remind me in two minutes to stretch\"  |  say \"draw a whale\"  |  double-click for the menu"
     echo ">>     journal:  go run ./cmd/haunt journal -state $workdir/data/haunt/ghosts/wisp"
+    echo ">>     memory:   go run ./cmd/haunt memory ls -state $workdir/data/haunt/ghosts/wisp"
 fi
 run_args=(run)
 if [ "$ghost_count" -eq 1 ]; then
@@ -267,13 +267,13 @@ if [ -n "${SEED_STATE:-}" ]; then
 fi
 # The ghost's memory and cache go in the workdir, not the real library: a
 # demo is for looking at, and an imported shell you are trying out has no
-# business leaving a state directory behind under somebody's name. The same
-# goes for its hermes profile: a hermes home of its own, so a demo ghost
-# neither resumes the last demo's conversation nor writes into the real
-# ghost of the same name. ([hermes] home in the config would override it.)
-# SWAYSOCK is the nested sway's, so the windows the ghost watches and looks
+# business leaving a state directory behind under somebody's name. Its
+# memory, skills and transcript live there too, so a demo ghost neither
+# resumes the last demo's conversation nor writes into the real ghost of
+# the same name. The config is the person's own, for [model] and the
+# backends. SWAYSOCK is the nested sway's, so the windows the ghost watches and looks
 # at are the ones in the demo window, not the session it was started from.
-XDG_DATA_HOME="$workdir/data" HAUNT_RUNTIME_DIR="$runtime" HERMES_HOME="$workdir/hermes" \
+XDG_DATA_HOME="$workdir/data" HAUNT_RUNTIME_DIR="$runtime" \
     WAYLAND_DISPLAY="$display" SWAYSOCK="$workdir/sway.sock" "$workdir/haunt" "${run_args[@]}" "${ghost_dirs[@]}" &
 
 wait "$sway_pid"

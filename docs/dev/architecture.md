@@ -14,29 +14,34 @@ fullscreen rule and the allowance for acting unprompted. A brain is
 untrusted logic that receives events and emits intents, and the driver
 validates and executes them. What the driver must not own is the ghost's
 cognition: what to remember, what an utterance is about, whether an event
-is worth a word, what to say. For a persona ghost that cognition is
-hermes-agent's, and haunt keeps no parser, memory or belief store of its
-own beside it ([Hermes integration](hermes.md)).
+is worth a word, what to say. For a persona ghost that cognition is the
+person's model's: haunt keeps the model's transcript, memory and skills
+and performs its decisions, but puts no parser or belief store in front
+of it ([The model brain](brain.md)).
 
 ## Packages
 
 ```
 cmd/haunt            the CLI (docs/user/cli.md): run, dev, say, new, shell init, shell check, keygen, pack,
-                     install, ls, rm, switch, add, drop, perms, shush, journal, history, mcp-serve
+                     install, ls, rm, switch, add, drop, perms, shush, journal, history, memory
 cmd/haunt-seriko     ukagaka shell art converter (separate binary on purpose)
 brainkit             public SDK for brains in Go; re-exports proto
-skills/              haunt's own hermes skills, embedded
-third_party/         patched go-wayland; the four hermes skills a manifest may name
+skills/              haunt's own skills, in the agentskills format, embedded
+third_party/         patched go-wayland
 protocol/            Wayland protocol XML the client bindings are generated from
 
 internal/
   proto              the schema: Event and Intent, shared by driver, bus and brains
   bus                the single channel every trigger flows through; records and replays
-  ghost              runs one ghost: manifest, shell, brain, intents, consent, initiative, intentions, awareness, polls, the hermes brain and its tool surface
+  ghost              runs one ghost: manifest, shell, brain, intents, consent, initiative, intentions, awareness, polls,
+                     the model brain: prompt, the decide loop and its registry of decisions, the transcript
   troupe             runs the resident ghosts: supervision, restart, shared placement, shared budgets, the stage
   brain              hosts scripted brains: WASM (wazero) and native processes over stdio JSONL
-  hermes             haunt's side of hermes-agent: profile, gateway, session, turns, envelope, skills install
-  control            the per-ghost Unix socket: inbound messages, and tool_list/tool_call for mcp-serve
+  model              the chat completions client: streaming, tool calls, prefill, sampling, thinking, retries,
+                     deadlines, trust from where the endpoint runs; model/fake is a scripted server for tests
+  memory             a ghost's memory: Markdown files, an FTS5 index in state.db derived from them, the watch
+  skill              the agentskills host: the index, viewing, learned skills, the curator
+  control            the per-ghost Unix socket: inbound messages, the recent marker, memory reindex
   mcp                a small MCP stdio client: start a server, list its tools, call one
   backend            the models and services the driver calls itself, for drawing, looking,
                      searching the web and reading a page, and the hourly budgets
@@ -85,11 +90,11 @@ The three kinds of brain receive the same events:
    no syscalls. The default for distributed ghosts.
 2. **Process** (`brain.ProcessHost`): any language, stdio JSONL, gated by
    the `native-brain` capability.
-3. **Hermes** (`ghost/hermesbrain.go`): a `brain.Runner` hosted in the
+3. **Model** (`ghost/brain_model.go`): a `brain.Runner` hosted in the
    driver for a ghost with no `[brain]`. It decides which events reach the
-   model, sends them as one-line envelopes, streams the reply into the
-   balloon, and offers the ghost's verbs to hermes as MCP tools rather
-   than intents.
+   model, sends them as one-line envelopes, runs the decide loop, streams
+   the words into the balloon, and performs the model's decisions in
+   process, through the same gates as intents.
 
 Intents come back through one dispatcher in `ghost.go`, which validates
 each against the schema, the capability grants, consent, quiet, the
@@ -108,8 +113,9 @@ and each has a long comment at the top of its file:
   not by asking the brain. Within a minute of the person acting, a ghost
   is responding and pays nothing. Otherwise it spends from a persisted
   daily allowance; a second allowance covers things the person put on its
-  books; and the troupe holds a ceiling for the room. On hermes the charge
-  is made before an event is sent and refunded if the reply is silence.
+  books; and the troupe holds a ceiling for the room. For a persona ghost
+  the charge is made before an event is sent and refunded if the turn
+  ends in silence.
 - **`intention.go`**: a purpose the ghost carries. In the store, not a
   timer wheel; listable; discharged by `resolve`, not by coming due. A
   goal is an intention with no moment, watched for its words in window
@@ -139,30 +145,32 @@ ghost's public actions to the others as `observed` events.
 
 | What | Where | Writer |
 |---|---|---|
-| A ghost's memory, intentions, allowances, why-trace, placement, session snapshot | `ghosts/<name>/state.db`, keys under `_haunt/` hidden from brains | the running ghost only |
+| A scripted brain's store, a ghost's intentions, allowances, why-trace, placement, session snapshot | `ghosts/<name>/state.db`, keys under `_haunt/` hidden from brains | the running ghost only |
 | Grants and the pinned author key | `ghosts/<name>/grants.toml` | the CLI; watched by the running ghost |
 | Who is resident | `resident` | the CLI |
 | The room's spend log | `room-curiosity.json` | the troupe |
-| What the model remembers | hermes memory: the profile's `memories/`, or the provider the person chose | hermes only |
-| The conversation | the hermes profile's session database | hermes only |
+| What the model remembers | `ghosts/<name>/memory/`: `self.md`, `you.md`, `topics/*.md`; indexed into `state.db` | the running ghost, and the person by hand |
+| The conversation the model sees | `ghosts/<name>/transcript.db` (WAL), read by `haunt history` while the ghost runs | the running ghost only |
+| The skills the model wrote | `ghosts/<name>/skills/`, unused ones moved to `archive/` | the running ghost only |
 | Control sockets | `XDG_RUNTIME_DIR` (`HAUNT_RUNTIME_DIR`) | |
 | The pictures a ghost has painted | `ghosts/<name>/pictures/<id>.png`, the newest hundred, with their prompts and captions under `_haunt/picture/` in the store | the running ghost only |
 
 **While a ghost runs it is the sole writer of its store.** Everything
 that changes a running ghost goes through its control socket, which is
-why the model's tool calls reach the driver over the socket rather than
-touching the database, and why `haunt perms` writes a file the ghost
-watches rather than the store.
+why `haunt memory reindex` asks the ghost over the socket rather than
+opening the database, and why `haunt perms` writes a file the ghost
+watches rather than the store. The memory files are the exception by
+design: they are the truth, the index is derived, and the ghost watches
+the directory and reindexes.
 
 ## The control socket
 
 `internal/control` listens on a per-ghost Unix socket. It accepts a
 `message` event (`haunt say`, scripts, hooks) and refuses every other
-event type. It also answers two request verbs, `tool_list` and
-`tool_call`, which is how `haunt mcp-serve` hands hermes's tool calls to
-the running ghost; a request makes its connection single-use, and a call
-may block for as long as the tool does. A `recent` marker records which
-ghost was last interacted with, for `haunt say` without `-ghost`.
+event type. It also answers one request, `memory_reindex`, for `haunt
+memory reindex`; a request makes its connection single-use. A `recent`
+marker records which ghost was last interacted with, for `haunt say`
+without `-ghost`.
 
 ## Rendering
 

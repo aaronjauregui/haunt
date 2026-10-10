@@ -131,7 +131,7 @@ granted is asked about or refused.
 - **A poll's answer should become an intention**, not a line. Cron skips
   what it missed while the laptop was closed; an intention does not.
 - **There is no chat intent.** A brain that wants a model is a persona
-  ghost on hermes. A brain can still draw and look through the driver.
+  ghost. A brain can still draw and look through the driver.
 - **Acting is never quiet.** Every `act` shows a working face, a line and
   a journal entry, whatever the brain would prefer.
 
