@@ -21,7 +21,7 @@ func TestWhyRoundTrip(t *testing.T) {
 		Time:   when,
 		User:   "what tea should I get",
 		Reply:  "the smoky one, like last time",
-		Acted:  []string{"mcp__haunt__look"},
+		Acted:  []string{"look"},
 		Window: WhyWindow{App: "firefox", Title: "tea shop"},
 	})
 
@@ -40,7 +40,7 @@ func TestWhyRoundTrip(t *testing.T) {
 	if w.Reply != "the smoky one, like last time" || w.User != "what tea should I get" {
 		t.Errorf("the exchange did not survive: %+v", w)
 	}
-	if len(w.Acted) != 1 || w.Acted[0] != "mcp__haunt__look" {
+	if len(w.Acted) != 1 || w.Acted[0] != "look" {
 		t.Errorf("the tools did not survive: %+v", w.Acted)
 	}
 	if w.Window.App != "firefox" || w.Window.Title != "tea shop" {

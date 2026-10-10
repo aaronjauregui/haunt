@@ -17,7 +17,7 @@ import (
 // is actually needed, the driver asks, in the balloon, about the thing that
 // is happening right now:
 //
-//	Wisp would like to talk with you through your language model (hermes).
+//	Wisp would like to talk with you through your language model.
 //	Allow?
 //	1. Allow
 //	2. Not now

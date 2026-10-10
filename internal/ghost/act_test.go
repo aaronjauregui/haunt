@@ -342,7 +342,7 @@ func TestOfferableNamesAreModelSafe(t *testing.T) {
 // twice.
 func TestUnofferedToolCallIsExplained(t *testing.T) {
 	g, srv, _ := actingGhost(t)
-	res := hermesTools{g}.Call(context.Background(), "send_email", nil)
+	res := g.call(context.Background(), "send_email", nil)
 	if !res.IsError || len(srv.ran()) != 0 {
 		t.Fatal("a tool the model invented ran")
 	}
@@ -355,7 +355,7 @@ func TestUnofferedToolCallIsExplained(t *testing.T) {
 // reason to end the turn.
 func TestBadArgumentsAreExplained(t *testing.T) {
 	g, srv, _ := actingGhost(t)
-	res := hermesTools{g}.Call(context.Background(), "notes__append", json.RawMessage("{not json"))
+	res := g.call(context.Background(), "notes__append", json.RawMessage("{not json"))
 	if !res.IsError || len(srv.ran()) != 0 {
 		t.Fatal("a call with unparseable arguments reached the server")
 	}
@@ -369,7 +369,7 @@ func TestBadArgumentsAreExplained(t *testing.T) {
 func TestEmptyArgumentsMeanNone(t *testing.T) {
 	g, srv, _ := actingGhost(t)
 	answer(t, g, consentAllow)
-	res := hermesTools{g}.Call(context.Background(), "notes__append", json.RawMessage("  "))
+	res := g.call(context.Background(), "notes__append", json.RawMessage("  "))
 	if res.IsError {
 		t.Fatalf("the call did not run: %s", res.Text)
 	}

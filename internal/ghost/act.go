@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aaronjauregui/haunt/internal/control"
 	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/mcp"
+	"github.com/aaronjauregui/haunt/internal/model"
 	"github.com/aaronjauregui/haunt/internal/proto"
 )
 
@@ -40,10 +40,10 @@ import (
 //
 // Two things decide to act, and both come through here:
 //
-//   - The model, during a hermes turn. The driver re-exports the approved
-//     tools through its own MCP server and runs what hermes asks for (see
-//     serverTool in hermestools.go). This is what makes a persona-only
-//     ghost — art, a persona, no code anywhere — able to do things.
+//   - The model, during a turn. The approved tools are offered as decisions
+//     and run when the model decides on one (see serverTool in
+//     decisions_servers.go). This is what makes a persona-only ghost —
+//     art, a persona, no code anywhere — able to do things.
 //   - A brain, through the `act` intent, when it wants a specific thing
 //     done at a specific moment rather than whatever the model decides.
 //
@@ -269,7 +269,7 @@ func (g *Ghost) lookupTool(ref toolRef) (toolEntry, bool) {
 // the map carries the truth, and the translation lives in this one
 // function rather than being reversed by string-splitting at the far end —
 // where a server called "my.notes" would have made it ambiguous.
-func (g *Ghost) offerable() ([]control.ToolSpec, map[string]toolRef) {
+func (g *Ghost) offerable() ([]model.Tool, map[string]toolRef) {
 	g.toolMu.Lock()
 	entries := make([]toolEntry, 0, len(g.toolCat))
 	for _, e := range g.toolCat {
@@ -280,7 +280,7 @@ func (g *Ghost) offerable() ([]control.ToolSpec, map[string]toolRef) {
 		return entries[i].ref.String() < entries[j].ref.String()
 	})
 
-	tools := make([]control.ToolSpec, 0, len(entries))
+	tools := make([]model.Tool, 0, len(entries))
 	back := make(map[string]toolRef, len(entries))
 	for _, e := range entries {
 		wire := wireName(e.ref)
@@ -291,7 +291,7 @@ func (g *Ghost) offerable() ([]control.ToolSpec, map[string]toolRef) {
 			wire = fmt.Sprintf("%s_%d", wireName(e.ref), n)
 		}
 		back[wire] = e.ref
-		tools = append(tools, control.ToolSpec{
+		tools = append(tools, model.Tool{
 			Name:        wire,
 			Description: e.tool.Description,
 			Schema:      e.tool.Schema,
@@ -647,7 +647,7 @@ func clip(s string, n int) string {
 // execAct is a brain asking for one specific thing to be done. The model's
 // own tool calls do not come through here — they are inside an exchange
 // that has already been gated and charged (see serverTool in
-// hermestools.go) — but everything past the gate is the same code.
+// decisions_servers.go) — but everything past the gate is the same code.
 // It runs with the AI lock held and the standing capability already
 // settled; see the act case in execIntent for both.
 func (g *Ghost) execAct(in proto.Intent) {

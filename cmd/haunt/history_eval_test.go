@@ -16,7 +16,7 @@ func TestTraceRecordIsTraceTurn(t *testing.T) {
 	rec := traceRecord{
 		Time: time.Unix(1789614336, 0).UTC(), ProvokedBy: "person", Input: "remind me", Reply: "Done.",
 		SelfPrompt: true, Silent: true,
-		Acted:  []traceCall{{Tool: "intend", Args: `{"text":"oven"}`, Result: "hermes/1"}},
+		Acted:  []traceCall{{Tool: "intend", Args: `{"text":"oven"}`, Result: "model/1"}},
 		Looked: []traceCall{{Tool: "skill_view", Args: `{"name":"x"}`, Result: "…"}},
 		Echoes: []traceEcho{{Tool: "memory", Saved: "a b c", Read: "read_file", ReadArgs: `{"path":"x"}`,
 			TurnsAgo: 1, Shared: []string{"a b c"}}},

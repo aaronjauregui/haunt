@@ -29,7 +29,7 @@ func TestNewScaffoldsAPersonaGhost(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !m.Brain.Builtin() {
-		t.Errorf("scaffolded brain = %+v, want none (hermes)", m.Brain)
+		t.Errorf("scaffolded brain = %+v, want none (the model)", m.Brain)
 	}
 	if m.Persona.System == "" {
 		t.Error("scaffolded ghost has no persona, which is all it is")
@@ -48,7 +48,7 @@ func TestNewScaffoldsAPersonaGhost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(string(skill), "---\nname: wind-down\n") || !strings.Contains(string(skill), "requires_toolsets: [mcp-haunt]") {
+	if !strings.HasPrefix(string(skill), "---\nname: wind-down\n") || !strings.Contains(string(skill), "requires_tools: [intentions, ask, ask_text, intend]") {
 		t.Errorf("example skill:\n%s", skill)
 	}
 }

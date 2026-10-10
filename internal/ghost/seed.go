@@ -59,7 +59,7 @@ func SeedGoal(s Store, text string, watch []string, age time.Duration) error {
 // seedName is a name no intention in list has.
 func seedName(list []Intention) string {
 	for n := len(list) + 1; ; n++ {
-		name := fmt.Sprintf("%sseeded-%d", hermesIntentionPrefix, n)
+		name := fmt.Sprintf("%sseeded-%d", modelIntentionPrefix, n)
 		if !slices.ContainsFunc(list, func(it Intention) bool { return it.Name == name }) {
 			return name
 		}

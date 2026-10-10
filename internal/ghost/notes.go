@@ -10,8 +10,9 @@ import (
 // NotesStoreKey holds the ghost's journal: the action log. Each entry is a line
 // the driver or a scripted brain wrote about something the ghost did — a
 // tool it used, a goal it took on — so `haunt journal` can show the person
-// what happened. It is not a prompt block: a ghost on hermes keeps its own
-// notebook in hermes memory. Exported for `haunt journal`.
+// what happened. It is not a prompt block: a ghost on a model keeps what it
+// remembers in its memory files (internal/memory). Exported for `haunt
+// journal`.
 const NotesStoreKey = internalKeyPrefix + "notes"
 
 // Note is one journal entry.

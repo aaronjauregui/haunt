@@ -21,7 +21,7 @@ minute. You are a companion at the edge of their screen, not a planner.
 - `[haunt event] kind=session shape=morning` (they sat down in the
   morning).
 
-Skip it, and reply `NO_REPLY`, when:
+Skip it, and call `stay_silent`, when:
 
 - you already checked in with them today (your session history says so);
 - your memory says they do not want morning check-ins;
@@ -49,7 +49,7 @@ Skip it, and reply `NO_REPLY`, when:
 4. If they named a thing, call `intend` with it as `text` and
    no `delay_ms`, so it becomes a goal you keep an eye on. Skip this if you
    already hold the same goal.
-5. Your final reply is one short sentence: encouragement, or `NO_REPLY` if
+5. Speak one short sentence of encouragement, or call `stay_silent` if
    the balloons already said enough.
 
 ## Pitfalls

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aaronjauregui/haunt/internal/model/fake"
 	"github.com/aaronjauregui/haunt/internal/testenv"
 )
 
@@ -22,15 +23,13 @@ func TestAnIntentionSurvivesARestart(t *testing.T) {
 	c := testenv.StartT(t)
 	dir := t.TempDir()
 	// The model takes the errand on through intend, and says it when it
-	// comes due, echoing the envelope so the test can see which errand came
-	// back rather than only that something did.
-	rig := newHermesRig(t, dir, []fakeRule{
-		{Match: "kind=intention_due", Reply: "reminding you: {input}"},
-		{Match: "[haunt event]", Reply: "NO_REPLY"},
-		{Match: "remind me", Tool: "intend",
-			Args:  map[string]any{"text": "check the build", "delay_ms": 2000},
-			Reply: "I will: {tool}"},
-	}, "")
+	// comes due.
+	rig := newBrainRig(t, dir, rules(
+		says("kind=intention_due", "Reminding you: check the build."),
+		[]fake.Rule{silentOn("[haunt event]")},
+		acts("remind me", []fake.Call{decision("intend",
+			map[string]any{"text": "check the build", "delay_ms": 2000})}, "I will."),
+	), "")
 	bin := rig.Bin
 	gDir := filepath.Join(dir, "wisp")
 	writeGhost(t, gDir, `[ghost]
@@ -104,9 +103,9 @@ func waitIntentions(t *testing.T, bin, state, rt, want string) {
 	}
 }
 
-// startWisp runs the ghost on the rig's fake hermes until the returned
+// startWisp runs the ghost on the rig's fake model until the returned
 // function is called.
-func startWisp(t *testing.T, c *testenv.Compositor, rig hermesRig, gDir, state, record string) func() {
+func startWisp(t *testing.T, c *testenv.Compositor, rig brainRig, gDir, state, record string) func() {
 	t.Helper()
 	cmd := exec.Command(rig.Bin, "run", "-x", "100", "-y", "100",
 		"-state", state, "-record", record, gDir)

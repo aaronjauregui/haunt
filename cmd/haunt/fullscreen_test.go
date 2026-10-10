@@ -10,6 +10,7 @@ import (
 
 	"github.com/aaronjauregui/haunt/internal/desktop"
 	"github.com/aaronjauregui/haunt/internal/hlog"
+	"github.com/aaronjauregui/haunt/internal/model/fake"
 	"github.com/aaronjauregui/haunt/internal/testenv"
 )
 
@@ -74,10 +75,10 @@ func TestGhostKeepsQuietOverFullscreen(t *testing.T) {
 
 	dir := t.TempDir()
 	// A model that would speak, so staying quiet is the driver's doing.
-	rig := newHermesRig(t, dir, []fakeRule{
-		{Match: "kind=idle", Reply: "Still there?"},
-		{Match: "[haunt event]", Reply: "NO_REPLY"},
-	}, "")
+	rig := newBrainRig(t, dir, rules(
+		says("kind=idle", "Still there?"),
+		[]fake.Rule{silentOn("[haunt event]")},
+	), "")
 	bin := rig.Bin
 	gDir := filepath.Join(dir, "wisp")
 	writeGhost(t, gDir, `[ghost]

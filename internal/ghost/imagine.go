@@ -56,7 +56,7 @@ type drawRequest struct {
 	// style applies the ghost's house style on top of the prompt.
 	style bool
 	// reuse accepts a picture already painted from exactly this prompt.
-	// The hermes brain never asks for it: it has the gallery and says
+	// The model brain never asks for it: it has the gallery and says
 	// which picture it wants by name.
 	reuse bool
 	// seed paints from the number an earlier picture came out of, so that

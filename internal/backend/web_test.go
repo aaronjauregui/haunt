@@ -507,9 +507,9 @@ func TestExcerptPaging(t *testing.T) {
 
 	first := p.Excerpt(0)
 	// The domain leads: it is what the model weighs a claim by, and the
-	// one thing the wrapper hermes puts around every tool result cannot
-	// say, since that one calls the ghost's own reminder list external
-	// too.
+	// one thing a generic "this came from outside" wrapper around every
+	// tool result cannot say, since that one would call the ghost's own
+	// reminder list external too.
 	if !strings.HasPrefix(first, `[page from example.com — "Long"`) {
 		t.Fatalf("envelope = %q", strings.SplitN(first, "\n", 2)[0])
 	}

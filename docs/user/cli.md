@@ -19,7 +19,6 @@ haunt shush [duration] | unshush
 haunt journal [-intentions] [-echoes] [-skills] [-style [-reset]] [name | -state DIR]
 haunt history [-n N] [-why | -json] [name | -state DIR]
 haunt memory ls|show|rm|reindex [-ghost NAME | -state DIR] [topic [line-number]]
-haunt mcp-serve -ghost NAME
 ```
 
 | Command | What it does |
@@ -37,10 +36,9 @@ haunt mcp-serve -ghost NAME
 | `switch`, `add`, `drop` | This ghost alone; this one as well; this one no longer. The set is read when `run` starts. |
 | `perms` | What a ghost asked for and what it has. `grant` and `revoke` take a capability, or `tool:<server>.<tool>`, and apply to a running ghost within seconds. |
 | `shush`, `unshush` | Quiet now, for an hour or the given duration; and back. |
-| `journal` | What the ghost did. `-intentions` is what it is still meaning to do; `-echoes` lists what it saved to memory in the words of a page or a file it read, and like `history` needs the gateway running; `-skills` lists its routines by source, including the ones it wrote itself; `-style` is the style it draws its pictures in, and `-style -reset` puts it back to the one its package ships. |
-| `history` | The conversation, read from the ghost's hermes gateway, which must be running. `-why` adds what woke it, what it saw and what it did before each reply, with a `!` under a memory write that repeats a page or a file; `-json` gives the turns as JSON with every tool call whole ([memory](memory.md#why-did-it-say-that)). |
-| `memory` | The ghost's topic files, under `memory/topics/` in its state directory. `ls` lists the topics with their line counts; `show <topic>` prints a topic's lines, numbered, each with where it came from (person, web, file or self), the turn and the date; `rm <topic>` deletes a topic and `rm <topic> <n>` its nth line. These work on the files whether the ghost runs or not. `reindex` rebuilds the search index in `state.db`: a running ghost is asked over its control socket, and its answer is printed; with no ghost running, `state.db` is opened and rebuilt here. Flags go before the topic; without `-ghost` or `-state`, the resident ghost. |
-| `mcp-serve` | The MCP stdio server hermes spawns to reach a running ghost. Not meant to be run by hand. |
+| `journal` | What the ghost did. `-intentions` is what it is still meaning to do; `-echoes` lists what it saved to memory in the words of a page or a file it read; `-skills` lists its routines by source, including the ones it wrote itself; `-style` is the style it draws its pictures in, and `-style -reset` puts it back to the one its package ships. |
+| `history` | The conversation, read from the ghost's transcript (`transcript.db` in its state directory), running or not; a summary of older turns shows as `summary:`. `-why` adds what woke it, what it saw and what it did before each reply, with a `!` under a memory write that repeats a page or a file; `-json` gives the turns as JSON with every decision whole ([memory](memory.md#why-did-it-say-that)). |
+| `memory` | The ghost's topic files, under `memory/topics/` in its state directory. `ls` lists the topics with their line counts; `show <topic>` prints a topic's lines, numbered, each with where it came from (person, web, file or self), the turn and the date; `rm <topic>` deletes a topic and `rm <topic> <n>` its nth line. These work on the files whether the ghost runs or not. `reindex` rebuilds the search index in `state.db`: a running ghost is asked over its control socket, and its answer is printed; with no ghost running, `state.db` is opened and rebuilt here. A running ghost also picks up edits to its memory files by itself, within a second. Flags go before the topic; without `-ghost` or `-state`, the resident ghost. |
 
 ## haunt-seriko
 

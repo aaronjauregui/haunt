@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/aaronjauregui/haunt/internal/backend"
 	"github.com/aaronjauregui/haunt/internal/hlog"
@@ -42,34 +41,13 @@ import (
 //
 // The web is not the only way in: a file in a folder the person shared is
 // a stranger's words as much as a page is. So the turn records where what
-// it read came from (turnState), and the gate asks by source. After a
+// it read came from (turn.tainted), and the gate asks by source. After a
 // file, the web verbs themselves are gated too, since a query or a URL is
 // a way for a file's contents to leave the machine.
 
-// turnState is what the reading tools need to know about the turn in
-// flight: who started it, and what it has read.
-//
-// The tools do not run on the turn's goroutine: each call arrives over the
-// control socket and is served on a connection of its own, so two calls in
-// one turn can overlap if hermes ever issues them in parallel. Hence the
-// mutex rather than a plain field — taint is a security decision, and one
-// that depends on the client's issuing discipline is not one.
-type turnState struct {
-	mu sync.Mutex
-	// person is whether somebody is waiting on this turn, and kind is the
-	// event kind of one they are not ("occasion", "idle", ""). Both are
-	// recorded when the turn starts, because a tool call cannot see the
-	// turn it belongs to. The web gate and the file gate both read them.
-	person bool
-	kind   string
-	// tainted is where the text nobody in the room wrote came from, if
-	// any has entered this turn.
-	tainted taintSource
-}
-
 // taintSource is a set of the places a turn has read from. The source
 // matters as well as the fact: what may leave the machine afterwards
-// depends on what came in (hermestools.go, leaves).
+// depends on what came in (verb.leaves).
 type taintSource uint8
 
 const (
@@ -108,8 +86,8 @@ var taintingReads = map[string]taintSource{
 // UntrustedRead reports whether the ghost's verb tool brings somebody
 // else's words into a turn, and from where, as the object of "read": "the
 // web" or "a file". It is the taint table read from outside the turn, for
-// `haunt history`, which checks what hermes saved to memory against what
-// these returned (docs/dev/hermes.md, Taint). A result that carried no
+// `haunt history`, which checks what the ghost saved to memory against
+// what these returned. A result that carried no
 // such words, such as a refusal, shares none with anything saved, so the
 // table needs no finer test than the name.
 func UntrustedRead(tool string) (from string, ok bool) {
@@ -118,29 +96,6 @@ func UntrustedRead(tool string) (from string, ok bool) {
 		return "", false
 	}
 	return src.what(), true
-}
-
-// startTurn records what the turn is, and that nothing it did not write
-// has entered it yet.
-func (g *Ghost) startTurn(person bool, kind string) {
-	g.turn.mu.Lock()
-	defer g.turn.mu.Unlock()
-	g.turn.person, g.turn.kind, g.turn.tainted = person, kind, 0
-}
-
-// taint marks the turn as carrying text from src. Only content does it: a
-// refusal or a failed read brought nothing in.
-func (g *Ghost) taint(src taintSource) {
-	g.turn.mu.Lock()
-	defer g.turn.mu.Unlock()
-	g.turn.tainted |= src
-}
-
-// thisTurn reads the three facts back.
-func (g *Ghost) thisTurn() (person bool, kind string, tainted taintSource) {
-	g.turn.mu.Lock()
-	defer g.turn.mu.Unlock()
-	return g.turn.person, g.turn.kind, g.turn.tainted
 }
 
 // unpromptedKinds are the events a ghost may look something up about
@@ -256,27 +211,27 @@ func toolReadPage(g *Ghost, ctx context.Context, args json.RawMessage) (string, 
 // Taint, applied.
 //
 // gatedAfter is the whole of the rule, in one place rather than in fifteen
-// tool functions: which sources, once read, put this call to the person.
+// decisions: which sources, once read, put this call to the person.
 // A verb that reaches past the person is gated after anything was read,
 // and `style` is one only when it is being changed rather than read. A
 // verb that leaves the machine is gated after a file, so that what a file
 // said cannot become a query or a URL sent to somebody else's server; it
 // stays free after the web, because a search built from a search result
 // sends nothing that was not already out there.
-func gatedAfter(name string, bt builtinTool, args json.RawMessage) taintSource {
+func gatedAfter(name string, sideEffect, leaves bool, args json.RawMessage) taintSource {
 	switch {
-	case sideEffecting(name, bt, args):
+	case sideEffecting(name, sideEffect, args):
 		return taintAny
-	case bt.leaves:
+	case leaves:
 		return taintFile
 	}
 	return 0
 }
 
 // sideEffecting reports whether a call reaches past the person: a verb
-// marked in the table, with `style` counting only as a set or a reset.
-func sideEffecting(name string, bt builtinTool, args json.RawMessage) bool {
-	if !bt.sideEffect {
+// marked so, with `style` counting only as a set or a reset.
+func sideEffecting(name string, sideEffect bool, args json.RawMessage) bool {
+	if !sideEffect {
 		return false
 	}
 	if name == "style" {
@@ -311,13 +266,17 @@ func styleChanges(args json.RawMessage) bool {
 // nobody to ask, and the act is simply refused — a background loop that
 // has just read somebody else's words is the worst possible moment to take
 // somebody's word for anything.
-func (g *Ghost) allowAfterReading(what string, after taintSource) error {
-	person, _, tainted := g.thisTurn()
+//
+// The state is read from the turn itself: decisions are applied one at a
+// time on the turn's own goroutine, so what a call sees is what that turn
+// read, and nothing else's.
+func (g *Ghost) allowAfterReading(t *turn, what string, after taintSource) error {
+	tainted := t.taintedBy()
 	if tainted&after == 0 {
 		return nil
 	}
 	read := tainted.what()
-	if !person {
+	if !t.person {
 		return refuse("not after reading %s on your own; ask them first", read)
 	}
 	if !g.canAskNow() {

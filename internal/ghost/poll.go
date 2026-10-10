@@ -62,9 +62,9 @@ import (
 // does is make it the easy thing: the poll's answer arrives as an ordinary
 // event with no window opened for speaking on its own account, and an
 // intention taken on in the moments after it inherits the obligation the
-// trigger carries (see markObliged, and Asked in execIntend). The hermes
+// trigger carries (see markObliged, and Asked in execIntend). The model
 // brain does exactly this and nothing else — see the EventCron case in
-// hermesbrain.go's Deliver.
+// brain_model.go's Deliver.
 //
 // # Never the source of truth
 //

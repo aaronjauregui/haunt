@@ -2,8 +2,8 @@
 // performs itself: drawing a picture, looking at the screen, and searching
 // the web and reading a page, plus the hourly ration on tool calls. Brains
 // never hold API keys or talk to backends; the driver calls the
-// user-configured backend within budget. Conversation is hermes's
-// (internal/hermes). Local-first: any OpenAI-compatible endpoint works
+// user-configured backend within budget. Conversation is the model brain's
+// (internal/model, [model] in the config). Local-first: any OpenAI-compatible endpoint works
 // (Ollama, llama.cpp server, vLLM, cloud providers), ComfyUI for images,
 // and a SearXNG of the person's own for search.
 package backend
@@ -21,8 +21,8 @@ import (
 // Config is the [backend] portion of the user config. The *user* chooses
 // backends; ghosts only declare that they want the capability.
 //
-// Conversation is not here: a ghost talks through hermes, which owns the
-// model, its key and its bill ([hermes] in the config). What is left are the
+// Conversation is not here: a ghost talks through the model the person
+// names under [model] (internal/model), with its own key. What is left are the
 // driver's own verbs that need a backend — drawing and looking — and the
 // ration on acting through tools.
 type Config struct {

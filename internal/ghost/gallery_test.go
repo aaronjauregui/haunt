@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"image"
 	"image/png"
 	"net/http"
@@ -206,7 +207,7 @@ func TestTheStyleChangesOnlyWhenThePersonAsks(t *testing.T) {
 	g := drawingGhost(t)
 	_, err := toolStyle(g, context.Background(), json.RawMessage(`{"set":"pixel art"}`))
 	var r refusal
-	if !asRefusal(err, &r) || !strings.Contains(r.why, "the person asks") {
+	if !errors.As(err, &r) || !strings.Contains(r.why, "the person asks") {
 		t.Fatalf("err = %v, want a refusal", err)
 	}
 	if got := g.effectiveStyle(); got != "soft watercolour" {

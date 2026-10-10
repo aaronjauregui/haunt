@@ -18,7 +18,7 @@ they make the calls. Keep it under five minutes and five questions.
 
 - They ask for a review, or ask how their week went.
 - `[haunt event] kind=occasion name=weekly` (a cron occasion the ghost was
-  given). Reply `NO_REPLY` instead if you already reviewed with them in
+  given). Call `stay_silent` instead if you already reviewed with them in
   the last few days, or they are plainly busy (a call, a game, a
   fullscreen window).
 
@@ -43,8 +43,8 @@ they make the calls. Keep it under five minutes and five questions.
    week?" and choices "I'll tell you" and "Nothing new".
    - "I'll tell you": `ask_text`, then `intend`
      with what they said and no `delay_ms`, so it becomes a goal.
-6. Finish with one short sentence. Or `NO_REPLY`, if the balloons already
-   said it.
+6. Finish with one short sentence. Or call `stay_silent`, if the balloons
+   already said it.
 
 ## Pitfalls
 

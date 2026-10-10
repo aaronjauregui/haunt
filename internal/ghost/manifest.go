@@ -9,6 +9,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/aaronjauregui/haunt/internal/model"
 	"github.com/aaronjauregui/haunt/internal/proto"
 	"github.com/aaronjauregui/haunt/internal/shell"
 )
@@ -21,31 +22,37 @@ type Manifest struct {
 	Shell    ShellSection     `toml:"shell"`
 	Brain    BrainSection     `toml:"brain"`
 	Persona  PersonaSection   `toml:"persona"`
-	Hermes   HermesSection    `toml:"hermes"`
 	Imagine  ImagineSection   `toml:"imagine"`
 	Triggers []TriggerSection `toml:"trigger"`
 	Tools    []ToolSection    `toml:"tool"`
 }
 
-// PersonaSection is the character a ghost on hermes plays. Only
-// meaningful with the llm capability.
+// PersonaSection is the character a ghost with no [brain] plays, on the
+// person's model. Only meaningful with the llm capability. Every field is
+// a lever on character that works on any provider; the model itself is
+// the person's choice, in their config, never the manifest's.
 type PersonaSection struct {
-	// System is the character's text, which leads the hermes profile's
-	// SOUL.md (docs/ghosts/persona-and-skills.md).
+	// System is the character's text, which leads the system prompt
+	// (docs/ghosts/persona-and-skills.md).
 	System string `toml:"system"`
+	// Examples are example exchanges in the character's voice
+	// ([[persona.example]]), shown after the standing rules as how it
+	// sounds, not as things that happened.
+	Examples []Exchange `toml:"example"`
+	// Prefill opens every reply: the speak call's words continue it.
+	// A few words in the character's voice ("Hm. ") hold a small model to
+	// the voice better than any instruction does.
+	Prefill string `toml:"prefill"`
+	// Sampling is laid over the person's [model] sampling, field by field.
+	Sampling model.Sampling `toml:"sampling"`
 }
 
-// HermesSection is what a ghost on hermes asks of hermes itself.
-type HermesSection struct {
-	// BundledSkills names skills from hermes's own library to install in
-	// the ghost's profile. Profiles opt out of that library, since nearly
-	// all of it needs a shell, files or the web; only bundledSkillNames
-	// may be named, and none is installed.
-	BundledSkills []string `toml:"bundled_skills"`
+// Exchange is one example exchange: what the person says, and what the
+// ghost answers.
+type Exchange struct {
+	User  string `toml:"user"`
+	Ghost string `toml:"ghost"`
 }
-
-// bundledSkillNames are the names bundled_skills accepts.
-var bundledSkillNames = []string{"humanizer", "meeting-action-items", "songwriting-and-ai-music", "weekly-review-planning"}
 
 // ToolSection declares one MCP tool server the ghost would like to act
 // through. The driver runs it, so the ghost package never contains a
@@ -137,7 +144,7 @@ var KnownCapabilities = map[string]string{
 	"message":      "receive text messages from outside (haunt say, scripts)",
 	"tell":         "send messages to other running ghosts",
 	"native-brain": "run its brain as a native process instead of the WASM sandbox",
-	"llm":          "talk with you through your language model (hermes)",
+	"llm":          "talk with you through your language model",
 	"imagine":      "generate images with your configured image model",
 	// The two screen-awareness capabilities are deliberately separate:
 	// knowing which window you have open is a different order of intrusion
@@ -165,7 +172,7 @@ type GhostSection struct {
 // ImagineSection is the ghost's house style: the look its pictures have
 // before the model writes a word of prompt. It is the package author's
 // taste, seeded into the driver, and the person can let the ghost change it
-// from there (hermestools.go, the style tool).
+// from there (decisions_pictures.go, the style decision).
 type ImagineSection struct {
 	// Style is appended to every prompt the ghost draws, so that a ghost
 	// looks like itself across pictures rather than like whatever the
@@ -215,10 +222,16 @@ func (m *Manifest) Warnings() []string {
 // with named poses. See internal/shell.
 type ShellSection = shell.Manifest
 
+// manifestSections are the top-level tables a ghost.toml may have.
+var manifestSections = map[string]bool{
+	"ghost": true, "shell": true, "brain": true, "persona": true,
+	"imagine": true, "trigger": true, "tool": true,
+}
+
 // BrainSection selects the ghost's logic. Omit it entirely — no [brain]
-// section at all — and the ghost runs on hermes (hermesbrain.go), so a
-// ghost can be art plus a persona with no compiler anywhere in the
-// authoring path.
+// section at all — and the ghost runs on the person's model
+// (brain_model.go), so a ghost can be art plus a persona with no compiler
+// anywhere in the authoring path.
 type BrainSection struct {
 	// Wasm is the brain module path, relative to the ghost directory.
 	Wasm string `toml:"wasm"`
@@ -229,7 +242,7 @@ type BrainSection struct {
 }
 
 // Builtin reports whether the ghost declares no brain of its own and so
-// runs on hermes.
+// runs on the person's model.
 func (b BrainSection) Builtin() bool { return b.Wasm == "" && len(b.Command) == 0 }
 
 // LoadManifest reads and validates <dir>/ghost.toml.
@@ -240,8 +253,17 @@ func LoadManifest(dir string) (*Manifest, error) {
 		return nil, err
 	}
 	var m Manifest
-	if err := toml.Unmarshal(data, &m); err != nil {
+	md, err := toml.Decode(string(data), &m)
+	if err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
+	}
+	// A section the manifest does not have is refused rather than ignored:
+	// it is a manifest written for some other driver, or for an older
+	// haunt, and the ghost would run without whatever it asked for there.
+	for _, key := range md.Undecoded() {
+		if top := key[0]; !manifestSections[top] {
+			return nil, fmt.Errorf("%s: [%s] is not a section of ghost.toml; remove it (docs/ghosts/manifest.md lists them)", path, top)
+		}
 	}
 	if m.Ghost.Name == "" {
 		return nil, fmt.Errorf("%s: ghost.name is required", path)
@@ -251,13 +273,13 @@ func LoadManifest(dir string) (*Manifest, error) {
 	if hasWasm && hasCmd {
 		return nil, fmt.Errorf("%s: brain.wasm and brain.command are mutually exclusive", path)
 	}
-	// No brain at all is the persona-only ghost, and hermes runs it. That
-	// brain is a model, so a ghost asking for it without the llm capability
+	// No brain at all is the persona-only ghost, and the person's model
+	// runs it. That brain is a model, so a ghost asking for it without the llm capability
 	// would work only in the sense that clicking it produces a quip —
 	// better to say so at load than to have every sentence come back as a
 	// capability error in the balloon.
 	if !hasWasm && !hasCmd && !slices.Contains(m.Ghost.Capabilities, "llm") {
-		return nil, fmt.Errorf("%s: a ghost with no [brain] section runs on hermes, which needs the llm capability", path)
+		return nil, fmt.Errorf("%s: a ghost with no [brain] section runs on your language model, which needs the llm capability", path)
 	}
 	if hasCmd && !slices.Contains(m.Ghost.Capabilities, "native-brain") {
 		return nil, fmt.Errorf("%s: brain.command requires the native-brain capability", path)
@@ -269,12 +291,6 @@ func LoadManifest(dir string) (*Manifest, error) {
 	}
 	if err := m.Imagine.validate(path); err != nil {
 		return nil, err
-	}
-	for _, name := range m.Hermes.BundledSkills {
-		if !slices.Contains(bundledSkillNames, name) {
-			return nil, fmt.Errorf("%s: hermes.bundled_skills: %q is not one a ghost may use (%s)",
-				path, name, strings.Join(bundledSkillNames, ", "))
-		}
 	}
 	seenTool := map[string]bool{}
 	for i, t := range m.Tools {

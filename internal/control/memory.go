@@ -6,11 +6,10 @@ package control
 // asks it rather than opening the file itself.
 //
 // The request is one line, {"type":"memory_reindex"}, answered with one
-// line: "ok" and what was indexed, or "error: ...". The driver's handler
-// for it belongs with the brain that owns the memory store; until a
-// running ghost installs one, the socket reads the line as an event and
-// answers that the type is not accepted, and the CLI reports that answer
-// as it is.
+// line: "ok" and what was indexed, or "error: ...". The model brain
+// installs the handler (Handle); a ghost without one, such as one with a
+// scripted brain, reads the line as an event and answers that the type is
+// not accepted, and the CLI reports that answer as it is.
 
 import (
 	"bufio"

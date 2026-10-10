@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aaronjauregui/haunt/internal/model/fake"
 	"github.com/aaronjauregui/haunt/internal/testenv"
 )
 
@@ -69,26 +70,22 @@ func (p *imagePrompts) all() []string {
 	return append([]string(nil), p.seen...)
 }
 
-// TestHermesGhostDraws: the model paints by calling draw. The picture shows
+// TestModelGhostDraws: the model paints by deciding on draw. The picture shows
 // in the balloon and joins the gallery under a name; the same words again
 // paint again; showing one by name costs nothing; and the hourly image
 // budget is the driver's, told to the model in words when it runs out.
-func TestHermesGhostDraws(t *testing.T) {
+func TestModelGhostDraws(t *testing.T) {
 	c := testenv.StartT(t)
 	prompts := &imagePrompts{}
 	backend := fakeImageBackend(t, prompts)
 
 	dir := t.TempDir()
-	rig := newHermesRig(t, dir, []fakeRule{
-		{Match: "[haunt event]", Reply: "NO_REPLY"},
-		{Match: "show me that sunset", Tool: "show", Args: map[string]any{"id": "p1"},
-			Reply: "here it is again: {tool}"},
-		{Match: "draw it again", Tool: "draw", Args: map[string]any{"prompt": "a sunset, watercolour"},
-			Reply: "again: {tool}"},
-		{Match: "draw a sunset", Tool: "draw", Args: map[string]any{"prompt": "a sunset, watercolour"},
-			Reply: "there: {tool}"},
-		{Match: "", Reply: "echo: {input}"},
-	}, `
+	rig := newBrainRig(t, dir, rules(
+		[]fake.Rule{silentOn("[haunt event]")},
+		acts("show me that sunset", []fake.Call{decision("show", map[string]any{"id": "p1"})}, "Here it is again."),
+		acts("draw it again", []fake.Call{decision("draw", map[string]any{"prompt": "a sunset, watercolour"})}, "Again."),
+		acts("draw a sunset", []fake.Call{decision("draw", map[string]any{"prompt": "a sunset, watercolour"})}, "There."),
+	), `
 [backend.image]
 base_url = "`+backend.URL+`/v1"
 model = "fake"
@@ -122,8 +119,7 @@ system = "You are Wisp, a wry desktop spirit."
 	})
 	waitFor(t, stdout, "READY")
 	galleryGlob := filepath.Join(state, "pictures", "*.png")
-	draws := func(e fakeEntry) bool { return e.Kind == "tool_call" && e.Name == "draw" }
-	shows := func(e fakeEntry) bool { return e.Kind == "tool_call" && e.Name == "show" }
+	draws, shows := decided("draw"), decided("show")
 
 	// The picture is painted, shown beside the ghost, and kept under a name
 	// the model is told.

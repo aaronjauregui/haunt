@@ -1,4 +1,4 @@
-package hermes
+package ghost
 
 import "testing"
 
@@ -24,38 +24,6 @@ func TestEnvelope(t *testing.T) {
 	}
 	if IsEnvelope("remind me to check the oven") {
 		t.Error("the person's words were taken for an envelope")
-	}
-}
-
-func TestSilent(t *testing.T) {
-	silent := []string{"NO_REPLY", "  NO_REPLY\n", "", "NO_REPLY — nothing to add", "Nothing to say. NO_REPLY", "NO_REPLY."}
-	for _, s := range silent {
-		if !Silent(s) {
-			t.Errorf("%q should be silence", s)
-		}
-	}
-	long := "NO_REPLY"
-	for len(long) < silentMax {
-		long += " and then a great deal more"
-	}
-	spoken := []string{"Hello!", "I said NO_REPLY to them, then left.", long}
-	for _, s := range spoken {
-		if Silent(s) {
-			t.Errorf("%q should be spoken", s)
-		}
-	}
-}
-
-func TestMaybeSilent(t *testing.T) {
-	for _, s := range []string{"", "NO", "NO_REP", "NO_REPLY", "NO_REPLY and"} {
-		if !MaybeSilent(s) {
-			t.Errorf("%q could still be silence", s)
-		}
-	}
-	for _, s := range []string{"No", "Hello", "NOPE"} {
-		if MaybeSilent(s) {
-			t.Errorf("%q cannot be silence by its opening", s)
-		}
 	}
 }
 

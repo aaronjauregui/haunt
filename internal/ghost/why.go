@@ -11,11 +11,11 @@ import (
 //
 // A ghost says things whose reasons are invisible, and a companion you
 // cannot interrogate is one you end up either over-trusting or quietly
-// distrusting. So every hermes turn keeps a record of what went into it and
-// what came of it: what provoked it (the person's words or the event
-// envelope), what the ghost could see on screen, which tools ran, and
-// whether it chose to say nothing. What hermes recalled and prompted with is
-// in hermes's own session; `haunt history -why` matches the two up.
+// distrusting. So every turn on the model keeps a record of what went into
+// it and what came of it: what provoked it (the person's words or the
+// event envelope), what the ghost could see on screen, which decisions it
+// made, and whether it chose to say nothing. The conversation itself is in
+// the transcript (transcript.go); `haunt history -why` matches the two up.
 //
 // Two deliberate limits:
 //
@@ -42,11 +42,11 @@ type Why struct {
 	// to, so User is an envelope and not something the person said.
 	SelfPrompt bool   `json:"self_prompt,omitempty"`
 	Reply      string `json:"reply"`
-	// Suppressed says the model answered with silence (NO_REPLY): nothing
+	// Suppressed says the model chose silence (stay_silent): nothing
 	// reached the balloon, and the record says so rather than leaving a
 	// turn that seems to have vanished.
 	Suppressed bool `json:"suppressed,omitempty"`
-	// Acted is the tools that ran in the course of the turn, in order.
+	// Acted is the decisions made in the course of the turn, in order.
 	// When a ghost has *done* something, "why did you say that" and "what
 	// did you do" are the same question, and the answer should not have to
 	// be pieced together from the journal.

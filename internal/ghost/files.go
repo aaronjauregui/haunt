@@ -15,7 +15,7 @@ import (
 // around them.
 //
 // The folders are the person's to name, in haunt's config, and the reading
-// is the driver's to do (internal/files): hermes never sees a file or a
+// is the driver's to do (internal/files): the model never sees a file or a
 // path on the host, only what these tools hand back, in root/rel form.
 // That is what lets the rules here apply at all — a read the driver does
 // not see is one it cannot taint a turn with, journal, or refuse on a turn

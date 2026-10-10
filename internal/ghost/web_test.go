@@ -31,14 +31,14 @@ func searchingGhost(t *testing.T, unprompted string) *Ghost {
 }
 
 // A ghost whose package never asked for the web is not told the web tools
-// exist. A skill that needs one is then hidden by hermes, rather than the
+// exist. A skill that needs one is then hidden, rather than the
 // ghost offering to look something up and being refused.
 func TestTheWebToolsAreOfferedOnlyWhenDeclared(t *testing.T) {
 	g := searchingGhost(t, "")
 	offered := func() []string {
 		var names []string
-		for _, s := range (hermesTools{g}).List() {
-			names = append(names, s.Name)
+		for name := range g.offered(false) {
+			names = append(names, name)
 		}
 		return names
 	}
@@ -54,7 +54,7 @@ func TestTheWebToolsAreOfferedOnlyWhenDeclared(t *testing.T) {
 		}
 	}
 	// And asking for it anyway is answered as what it is.
-	res := (hermesTools{g}).Call(t.Context(), "search", json.RawMessage(`{"query":"anything"}`))
+	res := g.call(t.Context(), "search", json.RawMessage(`{"query":"anything"}`))
 	if !res.IsError || !strings.Contains(res.Text, "no tool called search") {
 		t.Errorf("calling a tool that is not offered answered %q", res.Text)
 	}
@@ -138,15 +138,16 @@ func TestTaintGatesOnlyWhatReachesPastThePerson(t *testing.T) {
 	gated := map[string]bool{
 		"tell": true, "intend": true, "resolve": true, "set_aside": true,
 	}
-	for name, bt := range builtinTools {
-		if name == "style" {
+	for name, d := range decisions {
+		v, ok := d.(verb)
+		if name == "style" || !ok {
 			continue
 		}
-		if got := sideEffecting(name, bt, json.RawMessage(`{}`)); got != gated[name] {
+		if got := sideEffecting(name, v.sideEffect, json.RawMessage(`{}`)); got != gated[name] {
 			t.Errorf("%s: side-effecting=%v, want %v", name, got, gated[name])
 		}
 	}
-	style := builtinTools["style"]
+	style := decisions["style"].(verb)
 	for args, want := range map[string]bool{
 		`{}`:                     false,
 		`{"set":"pixel art"}`:    true,
@@ -154,7 +155,7 @@ func TestTaintGatesOnlyWhatReachesPastThePerson(t *testing.T) {
 		`{"set":"  "}`:           false,
 		`{"set":["not a text"]}`: true,
 	} {
-		if got := sideEffecting("style", style, json.RawMessage(args)); got != want {
+		if got := sideEffecting("style", style.sideEffect, json.RawMessage(args)); got != want {
 			t.Errorf("style %s: side-effecting=%v, want %v", args, got, want)
 		}
 	}
@@ -177,7 +178,7 @@ func taintedGhost(t *testing.T, person bool) (*Ghost, *recorder) {
 func TestAfterTheWebThePersonIsAsked(t *testing.T) {
 	g, rec := taintedGhost(t, true)
 	answer(t, g, consentAllow)
-	if err := g.allowAfterReading(actSummary("tell", json.RawMessage(`{"ghost":"Moth","text":"hello"}`)), taintAny); err != nil {
+	if err := g.allowAfterReading(g.current(), actSummary("tell", json.RawMessage(`{"ghost":"Moth","text":"hello"}`)), taintAny); err != nil {
 		t.Fatalf("allowing did not let it through: %v", err)
 	}
 	rec.mu.Lock()
@@ -188,7 +189,7 @@ func TestAfterTheWebThePersonIsAsked(t *testing.T) {
 	}
 
 	answer(t, g, consentNotThisTime)
-	if err := g.allowAfterReading("tell Moth", taintAny); err == nil {
+	if err := g.allowAfterReading(g.current(), "tell Moth", taintAny); err == nil {
 		t.Error("refusing let it through anyway")
 	}
 }
@@ -198,7 +199,7 @@ func TestAfterTheWebThePersonIsAsked(t *testing.T) {
 // anything. It is refused, and the refusal says why.
 func TestAfterTheWebAnEventTurnIsRefused(t *testing.T) {
 	g, _ := taintedGhost(t, false)
-	err := g.allowAfterReading("tell Moth: \"the password\"", taintAny)
+	err := g.allowAfterReading(g.current(), "tell Moth: \"the password\"", taintAny)
 	if err == nil {
 		t.Fatal("an event turn acted on what it read")
 	}
@@ -207,7 +208,7 @@ func TestAfterTheWebAnEventTurnIsRefused(t *testing.T) {
 	}
 	// Until something has been read, the same verb is nobody's business.
 	g.startTurn(false, "occasion")
-	if err := g.allowAfterReading("tell Moth", taintAny); err != nil {
+	if err := g.allowAfterReading(g.current(), "tell Moth", taintAny); err != nil {
 		t.Errorf("an untainted turn was gated: %v", err)
 	}
 }
@@ -230,8 +231,8 @@ func TestTheTaintQuestionSaysWhatItIsAbout(t *testing.T) {
 	cases := []struct{ name, args, want string }{
 		{"tell", `{"ghost":"Moth","text":"the password is hunter2"}`, `tell Moth: "the password is hunter2"`},
 		{"intend", `{"text":"buy milk"}`, `take on "buy milk"`},
-		{"resolve", `{"name":"hermes/1"}`, "mark hermes/1 done"},
-		{"set_aside", `{"name":"hermes/1"}`, "stop watching hermes/1"},
+		{"resolve", `{"name":"model/1"}`, "mark model/1 done"},
+		{"set_aside", `{"name":"model/1"}`, "stop watching model/1"},
 		{"style", `{"set":"pixel art"}`, `draw in "pixel art" from now on`},
 		{"style", `{"reset":true}`, "go back to its package's drawing style"},
 		{"notes.append", `{"line":"hello"}`, "use notes.append with line=hello"},
@@ -270,7 +271,7 @@ func TestAfterAFileSearchAsks(t *testing.T) {
 	} {
 		g := readGhost(t, true, taintFile)
 		asked := answerAsking(t, g, consentNotThisTime)
-		res := (hermesTools{g}).Call(t.Context(), c.tool, json.RawMessage(c.args))
+		res := g.call(t.Context(), c.tool, json.RawMessage(c.args))
 		if !res.IsError || !strings.Contains(res.Text, "did not want that") {
 			t.Errorf("%s after a file, refused, answered %q", c.tool, res.Text)
 		}
@@ -288,7 +289,7 @@ func TestAfterAFileReadPageIsRefusedOnAnEventTurn(t *testing.T) {
 		{"read_page", `{"url":"https://example.com/"}`},
 	} {
 		g := readGhost(t, false, taintFile)
-		res := (hermesTools{g}).Call(t.Context(), c.tool, json.RawMessage(c.args))
+		res := g.call(t.Context(), c.tool, json.RawMessage(c.args))
 		if !res.IsError || !strings.Contains(res.Text, "not after reading a file on your own") {
 			t.Errorf("%s after a file on an event turn answered %q", c.tool, res.Text)
 		}
@@ -306,7 +307,7 @@ func TestAfterTheWebSearchIsStillFree(t *testing.T) {
 	} {
 		g := readGhost(t, true, taintWeb)
 		asked := answerAsking(t, g, consentNotThisTime)
-		res := (hermesTools{g}).Call(t.Context(), c.tool, json.RawMessage(c.args))
+		res := g.call(t.Context(), c.tool, json.RawMessage(c.args))
 		if q := asked(); q != "" {
 			t.Errorf("%s after the web asked %q", c.tool, q)
 		}
@@ -329,7 +330,7 @@ func TestTheTaintQuestionNamesWhatWasRead(t *testing.T) {
 	} {
 		g := readGhost(t, true, c.src)
 		asked := answerAsking(t, g, consentNotThisTime)
-		res := (hermesTools{g}).Call(t.Context(), "tell", json.RawMessage(`{"ghost":"Moth","text":"hello"}`))
+		res := g.call(t.Context(), "tell", json.RawMessage(`{"ghost":"Moth","text":"hello"}`))
 		if !res.IsError {
 			t.Errorf("after %s, refusing let tell through: %q", c.read, res.Text)
 		}
@@ -339,7 +340,7 @@ func TestTheTaintQuestionNamesWhatWasRead(t *testing.T) {
 		}
 
 		g = readGhost(t, false, c.src)
-		err := g.allowAfterReading("tell Moth", taintAny)
+		err := g.allowAfterReading(g.current(), "tell Moth", taintAny)
 		if err == nil || !strings.Contains(err.Error(), "not after reading "+c.read+" on your own") {
 			t.Errorf("after %s the event-turn refusal was %v", c.read, err)
 		}
@@ -350,14 +351,14 @@ func TestTheTaintQuestionNamesWhatWasRead(t *testing.T) {
 // ghost's own.
 func TestUntrustedRead(t *testing.T) {
 	for tool, from := range map[string]string{"search": "the web", "read_page": "the web", "read_file": "a file", "search_files": "a file"} {
-		if _, ok := builtinTools[tool]; !ok {
+		if _, ok := decisions[tool]; !ok {
 			t.Errorf("%s is not one of the ghost's verbs", tool)
 		}
 		if got, ok := UntrustedRead(tool); !ok || got != from {
 			t.Errorf("UntrustedRead(%s) = %q, %v", tool, got, ok)
 		}
 	}
-	for _, tool := range []string{"list_files", "look", "say", "memory"} {
+	for _, tool := range []string{"list_files", "look", "say", "remember"} {
 		if _, ok := UntrustedRead(tool); ok {
 			t.Errorf("%s counted as reading somebody else's words", tool)
 		}

@@ -27,9 +27,9 @@ import (
 	"github.com/aaronjauregui/haunt/internal/control"
 	"github.com/aaronjauregui/haunt/internal/desktop"
 	"github.com/aaronjauregui/haunt/internal/files"
-	"github.com/aaronjauregui/haunt/internal/hermes"
 	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/mcp"
+	"github.com/aaronjauregui/haunt/internal/model"
 	"github.com/aaronjauregui/haunt/internal/proto"
 	"github.com/aaronjauregui/haunt/internal/quiet"
 	"github.com/aaronjauregui/haunt/internal/session"
@@ -243,25 +243,28 @@ type Ghost struct {
 	waitMu  sync.Mutex
 	waiters []*waiter
 	// blnPicture says the balloon on screen is a picture the ghost drew, so
-	// a hermes reply streaming in after the draw does not paint over it
-	// (see hermesBrain.run).
+	// words streaming in after the draw do not paint over it (see
+	// modelBrain.run).
 	blnPicture bool
 
 	bus   *bus.Bus
 	brain brain.Runner
-	// onHermes says the brain is hermes (hermesbrain.go): the model's tool
-	// calls arrive over the control socket, and its memory is hermes's own.
-	onHermes bool
-	// hermesCfg is the [hermes] config, and hermesGW the gateway it
-	// started, if it has.
-	hermesCfg hermes.Config
-	hermesMu  sync.Mutex
-	hermesGW  *hermes.Gateway
-	// hermesLate is the brain's turner until the gateway is up.
-	hermesLate *lateTurner
-	store      Store
-	quiet      *quiet.Checker
-	desktop    *desktop.Watcher
+	// mind is the model brain when the ghost runs on one (brain_model.go),
+	// and nil for a scripted brain. Its decisions reach the transcript,
+	// memory and skills through it.
+	mind *modelBrain
+	// modelCfg is the model this ghost thinks with ([model] and its
+	// [model.ghost.<name>] table).
+	modelCfg model.Config
+	// cur is the turn in flight on the model brain, nil between turns.
+	cur     atomic.Pointer[turn]
+	store   Store
+	quiet   *quiet.Checker
+	desktop *desktop.Watcher
+
+	// stateDir is the ghost's own state directory: state.db, the
+	// transcript, memory, learned skills, pictures.
+	stateDir string
 
 	// dir is the ghost's own directory, kept because tool servers may be
 	// launched from it (see act.go).
@@ -273,9 +276,6 @@ type Ghost struct {
 	toolsUp bool
 	servers []*mcp.Server
 	toolCat map[string]toolEntry
-	// skillsWarned is the package skills already reported as hidden
-	// (hermestools.go), so a gateway restart does not repeat them.
-	skillsWarned map[string]bool
 
 	backend *backend.Service
 	// expressionMode is [animation] expression_inference (expression.go).
@@ -283,17 +283,13 @@ type Ghost struct {
 	cacheDir       string
 	// picturesDir holds the gallery's PNGs (gallery.go); picMu guards the
 	// pictures this turn has shown, which become their caption, and the
-	// counter that names a new one. Two draws in one turn can overlap —
-	// tool calls are served a connection each — and two pictures given
-	// the same name would be one picture, the second written over the
-	// first.
+	// counter that names a new one. A draw intent and a decision can
+	// overlap, and two pictures given the same name would be one picture,
+	// the second written over the first.
 	picturesDir string
 	picMu       sync.Mutex
 	turnPics    []string
-	// turn is what the turn in flight is, and what it has read that
-	// nobody in the room wrote (web.go).
-	turn turnState
-	aiMu sync.Mutex // one AI request at a time per ghost
+	aiMu        sync.Mutex // one AI request at a time per ghost
 
 	// Typed input (see input.go).
 	inputMu sync.Mutex
@@ -486,11 +482,10 @@ func Run(ctx context.Context, dir string, opts Options) error {
 	}
 	defer ctl.Close()
 	defer control.Forget(m.Ghost.Name)
-	// On hermes, the socket is also how the model's tool calls arrive, and
-	// the gateway is started only now that there is a socket for them.
-	if g.onHermes {
-		ctl.SetTools(hermesTools{g})
-		g.startHermes(g.hermesLate)
+	// A model brain's memory is reindexed on request: `haunt memory
+	// reindex` asks the running ghost, the one writer of state.db.
+	if g.mind != nil {
+		ctl.Handle(control.ReqMemoryReindex, g.mind.reindexMemory)
 	}
 
 	stopTriggers, err := g.startTriggers(opts.IdleTimeoutMS)
@@ -576,6 +571,7 @@ func (g *Ghost) openStore() error {
 		}
 		stateDir = filepath.Join(base, "haunt", "ghosts", g.manifest.Ghost.Name)
 	}
+	g.stateDir = stateDir
 	g.cacheDir = filepath.Join(stateDir, "cache")
 	g.picturesDir = filepath.Join(stateDir, "pictures")
 
@@ -725,7 +721,7 @@ func (g *Ghost) logShellScale(m shell.Manifest, factor float64) {
 
 // applySettings takes the parsed config file and everything derived from
 // it: do-not-disturb, what the ghost may notice, its daily allowances, the
-// AI service for pictures, sight and tools, and where hermes is.
+// AI service for pictures, sight and tools, and the model it thinks with.
 func (g *Ghost) applySettings(cfg *config.File) error {
 	var err error
 	// Quiet hours (config windows + manual shush).
@@ -750,11 +746,11 @@ func (g *Ghost) applySettings(cfg *config.File) error {
 	// what the ghost thought of.
 	g.obligation = newObligation(cfg.ObligationsPerDay(), g.store, g.log)
 
-	// AI services: images, vision and the tool budget. Conversation is
-	// hermes's (backends are user-configured; absent config just means the
-	// capabilities error out when used).
+	// AI services: images, vision and the tool budget (backends are
+	// user-configured; absent config just means the capabilities error
+	// out when used). Conversation is the model's, [model].
 	g.backend = backend.NewServiceWith(cfg.Backend, g.log, g.opts.Budgets)
-	g.hermesCfg = cfg.Hermes
+	g.modelCfg = cfg.ModelFor(g.manifest.Ghost.Name)
 
 	// The folders the person shared. One that cannot be opened (a drive
 	// not mounted) is a warning, not a failure: it is listed as
@@ -769,31 +765,28 @@ func (g *Ghost) applySettings(cfg *config.File) error {
 	return nil
 }
 
-// startBrain starts the ghost's logic: hermes when the manifest declares no
-// brain (hermesbrain.go), sandboxed WASM when it does, a native process only
-// when the manifest declares (and the user granted) the native-brain
-// capability. The scripted two speak the event/intent schema down a pipe;
-// hermes is hosted in the driver and acts through tools.
+// startBrain starts the ghost's logic: the model brain when the manifest
+// declares no brain (brain_model.go), sandboxed WASM when it does, a
+// native process only when the manifest declares (and the user granted)
+// the native-brain capability. The scripted two speak the event/intent
+// schema down a pipe; the model brain is hosted in the driver and acts
+// through decisions.
 func (g *Ghost) startBrain(ctx context.Context) error {
 	m := g.manifest
 	var err error
 	switch {
 	case m.Brain.Builtin():
-		g.log.Info(hlog.Brain, "no brain declared; running on hermes")
-		g.onHermes = true
-		late := newLateTurner()
-		g.brain = newHermesBrain(g, late, func() error {
-			// Set by startHermes on its own goroutine, which teardown has
-			// already waited for (waitForBackground) — but only for so long.
-			g.hermesMu.Lock()
-			gw := g.hermesGW
-			g.hermesMu.Unlock()
-			if gw == nil {
-				return nil
-			}
-			return gw.Stop()
-		})
-		g.hermesLate = late
+		g.log.Info(hlog.Brain, "no brain declared; thinking with %s at %s", g.modelCfg.Name, g.modelCfg.BaseURL)
+		stateDir := g.stateDir
+		if g.opts.Store != nil {
+			// A store handed in is a test's or a host's: the ghost keeps
+			// nothing of its own on disk beside it.
+			stateDir = ""
+		}
+		g.mind, err = newModelBrain(g, brainParts{client: model.New(g.modelCfg), cfg: g.modelCfg, stateDir: stateDir})
+		if err == nil {
+			g.brain = g.mind
+		}
 	case len(m.Brain.Command) > 0:
 		if !g.capabilityActive("native-brain") {
 			return fmt.Errorf("ghost %q wants a native brain but the native-brain capability is not granted", m.Ghost.Name)

@@ -13,19 +13,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aaronjauregui/haunt/internal/model/fake"
 	"github.com/aaronjauregui/haunt/internal/testenv"
 )
 
 // The person's files, end to end: a folder shared in config, a ghost on
-// the fake hermes whose script calls list_files, read_file and
-// search_files through the real MCP server, and the driver's gates between
-// them and the disk (internal/ghost/files.go). What the model was handed
+// the fake model whose script decides on list_files, read_file and
+// search_files, and the driver's gates between them and the disk
+// (internal/ghost/files.go). What the model was handed
 // back is in the fake's log, word for word, so each test reads it there.
 
 // filesRun is a ghost with a shared folder called notes, and what the
 // tests need to drive and read it.
 type filesRun struct {
-	rig   hermesRig
+	rig   brainRig
 	c     *testenv.Compositor
 	dir   string
 	notes string // the shared folder's host path, which must never reach the model
@@ -36,7 +37,7 @@ type filesRun struct {
 // filesOptions shapes a filesRun.
 type filesOptions struct {
 	// Rules are the fake model's script.
-	Rules []fakeRule
+	Rules []fake.Rule
 	// Caps are declared besides message, llm and files.
 	Caps []string
 	// Manifest is appended to the ghost's manifest: a trigger, say.
@@ -72,7 +73,7 @@ func startFilesGhost(t *testing.T, c *testenv.Compositor, o filesOptions) filesR
 	}
 
 	config := fmt.Sprintf("\n[files]\nunprompted = \"never\"\n\n[files.roots]\nnotes = %q\n%s", notes, o.Config)
-	rig := newHermesRig(t, dir, o.Rules, config)
+	rig := newBrainRig(t, dir, o.Rules, config)
 	r := filesRun{rig: rig, c: c, dir: dir, notes: notes, state: filepath.Join(dir, "state"), log: &syncBuffer{}}
 
 	caps := `"message", "llm", "files"`
@@ -110,7 +111,7 @@ system = "You are Wisp."
 	}
 
 	cmd := exec.Command(rig.Bin, args...)
-	cmd.Env = append(c.Env(), append(env, "HAUNT_DEBUG=session")...)
+	cmd.Env = append(c.Env(), append(env, "HAUNT_DEBUG=session,balloon")...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -186,13 +187,28 @@ func (r filesRun) noHostPath(t *testing.T, what, s string) {
 
 // answer presses the digit for a question's option (1-based) once the
 // question is on screen and holding the keyboard.
+//
+// The panel can be on screen a moment before the compositor gives it the
+// keyboard, and a key pressed in between goes nowhere, so the key is
+// pressed again until the answer is taken.
 func (r filesRun) answer(t *testing.T, kb *testenv.Keyboard, option int) {
 	t.Helper()
 	waitBalloon(t, r.c, r.dir, 100, 100, true)
-	// Evdev's KEY_1 is 2.
-	if err := kb.Key(uint32(option + 1)); err != nil {
-		t.Fatal(err)
+	taken := strings.Count(r.log.String(), "choice taken")
+	for try := 0; try < 10; try++ {
+		// Evdev's KEY_1 is 2.
+		if err := kb.Key(uint32(option + 1)); err != nil {
+			t.Fatal(err)
+		}
+		deadline := time.Now().Add(time.Second)
+		for time.Now().Before(deadline) {
+			if strings.Count(r.log.String(), "choice taken") > taken {
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
 	}
+	t.Fatalf("the question never took the answer:\n%s", r.log.String())
 }
 
 // fakeSearch is a SearXNG that answers every query with one result, so a
@@ -217,12 +233,10 @@ func fakeSearch(t *testing.T) string {
 // looks are in the journal where the person can see them.
 func TestAGhostReadsTheNotesItIsAskedAbout(t *testing.T) {
 	c := testenv.StartT(t)
-	r := startFilesGhost(t, c, filesOptions{Rules: []fakeRule{
-		{Match: "[haunt event]", Reply: "NO_REPLY"},
-		{Match: "what's in my notes", Tool: "list_files",
-			Then:  []fakeStep{{Tool: "read_file", Args: map[string]any{"path": "notes/todo.md"}}},
-			Reply: "Your notes say: {tool}"},
-	}})
+	r := startFilesGhost(t, c, filesOptions{Rules: rules([]fake.Rule{silentOn("[haunt event]")},
+		acts("what's in my notes", []fake.Call{decision("list_files", nil),
+			decision("read_file", map[string]any{"path": "notes/todo.md"})}, "Your notes say: buy oat milk."),
+	)})
 
 	r.rig.say(t, "what's in my notes")
 
@@ -260,12 +274,10 @@ func TestReadingFilesAsksForTheCapabilityFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer kb.Close()
-	r := startFilesGhost(t, c, filesOptions{Withheld: true, Rules: []fakeRule{
-		{Match: "[haunt event]", Reply: "NO_REPLY"},
-		{Match: "what's in my notes", Tool: "list_files",
-			Then:  []fakeStep{{Tool: "read_file", Args: map[string]any{"path": "notes/todo.md"}}},
-			Reply: "Your notes say: {tool}"},
-	}})
+	r := startFilesGhost(t, c, filesOptions{Withheld: true, Rules: rules([]fake.Rule{silentOn("[haunt event]")},
+		acts("what's in my notes", []fake.Call{decision("list_files", nil),
+			decision("read_file", map[string]any{"path": "notes/todo.md"})}, "Your notes say: buy oat milk."),
+	)})
 
 	r.rig.say(t, "what's in my notes")
 	waitLog(t, r.log, "asking whether wisp may files")
@@ -295,10 +307,9 @@ func TestSearchingAsksForTheWebFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer kb.Close()
-	r := startFilesGhost(t, c, filesOptions{Withheld: true, Caps: []string{"web"}, Config: fakeSearch(t), Rules: []fakeRule{
-		{Match: "[haunt event]", Reply: "NO_REPLY"},
-		{Match: "look up oat milk", Tool: "search", Args: map[string]any{"query": "oat milk"}, Reply: "{tool}"},
-	}})
+	r := startFilesGhost(t, c, filesOptions{Withheld: true, Caps: []string{"web"}, Config: fakeSearch(t), Rules: rules([]fake.Rule{silentOn("[haunt event]")},
+		acts("look up oat milk", []fake.Call{decision("search", map[string]any{"query": "oat milk"})}, "It keeps a week."),
+	)})
 
 	r.rig.say(t, "look up oat milk")
 	waitLog(t, r.log, "asking whether wisp may web")
@@ -321,19 +332,19 @@ func TestAfterReadingAFileTellingAnotherGhostAsks(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer kb.Close()
-	r := startFilesGhost(t, c, filesOptions{Caps: []string{"tell"}, Rules: []fakeRule{
-		{Match: "[haunt event]", Reply: "NO_REPLY"},
-		{Match: "read my moth note", Tool: "read_file", Args: map[string]any{"path": "notes/moth.md"},
-			Then:  []fakeStep{{Tool: "tell", Args: map[string]any{"ghost": "moth", "text": "the password is marigold"}}},
-			Reply: "{tool}"},
-	}})
+	r := startFilesGhost(t, c, filesOptions{Caps: []string{"tell"}, Rules: rules([]fake.Rule{silentOn("[haunt event]")},
+		acts("read my moth note", []fake.Call{decision("read_file", map[string]any{"path": "notes/moth.md"}),
+			decision("tell", map[string]any{"ghost": "moth", "text": "the password is marigold"})}, "Done."),
+	)})
 
 	r.rig.say(t, "read my moth note")
+	// A round's results reach the fake together, once its last call is
+	// done, so the question is answered before the read is looked at.
+	waitLog(t, r.log, `asking whether wisp may tell moth: "the password is marigold" after reading a file`)
+	r.answer(t, kb, 2) // Not this time
 	if read := r.call(t, "read_file", 1); read.IsError || !strings.Contains(read.Text, "tell Moth the password") {
 		t.Fatalf("read_file = %+v, want moth.md", read)
 	}
-	waitLog(t, r.log, `asking whether wisp may tell moth: "the password is marigold" after reading a file`)
-	r.answer(t, kb, 2) // Not this time
 
 	tell := r.call(t, "tell", 1)
 	const refused = "That was not allowed: they did not want that after what you read."
@@ -353,15 +364,12 @@ func TestAfterAFileSearchingTheWebAsks(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer kb.Close()
-	r := startFilesGhost(t, c, filesOptions{Caps: []string{"web"}, Config: fakeSearch(t), Rules: []fakeRule{
-		{Match: "[haunt event]", Reply: "NO_REPLY"},
-		{Match: "search twice", Tool: "search", Args: map[string]any{"query": "oat milk"},
-			Then:  []fakeStep{{Tool: "search", Args: map[string]any{"query": "how long does oat milk keep"}}},
-			Reply: "{tool}"},
-		{Match: "check my todo", Tool: "read_file", Args: map[string]any{"path": "notes/todo.md"},
-			Then:  []fakeStep{{Tool: "search", Args: map[string]any{"query": "oat milk"}}},
-			Reply: "{tool}"},
-	}})
+	r := startFilesGhost(t, c, filesOptions{Caps: []string{"web"}, Config: fakeSearch(t), Rules: rules([]fake.Rule{silentOn("[haunt event]")},
+		acts("search twice", []fake.Call{decision("search", map[string]any{"query": "oat milk"}),
+			decision("search", map[string]any{"query": "how long does oat milk keep"})}, "A week."),
+		acts("check my todo", []fake.Call{decision("read_file", map[string]any{"path": "notes/todo.md"}),
+			decision("search", map[string]any{"query": "oat milk"})}, "A week."),
+	)})
 
 	// The web, then the web: nothing to ask.
 	r.rig.say(t, "search twice")
@@ -377,11 +385,11 @@ func TestAfterAFileSearchingTheWebAsks(t *testing.T) {
 
 	// A file, then the web: asked, in the file's name.
 	r.rig.say(t, "check my todo")
+	waitLog(t, r.log, `asking whether wisp may search the web for "oat milk" after reading a file`)
+	r.answer(t, kb, 1) // Allow
 	if read := r.call(t, "read_file", 1); read.IsError {
 		t.Fatalf("read_file = %+v", read)
 	}
-	waitLog(t, r.log, `asking whether wisp may search the web for "oat milk" after reading a file`)
-	r.answer(t, kb, 1) // Allow
 	if s := r.call(t, "search", 3); s.IsError || !strings.Contains(s.Text, "keeps for a week") {
 		t.Errorf("search after a file, allowed = %+v, want the results", s)
 	}
@@ -394,9 +402,10 @@ func TestAnOccasionMayNotReadFilesByDefault(t *testing.T) {
 	c := testenv.StartT(t)
 	r := startFilesGhost(t, c, filesOptions{
 		Manifest: "\n[[trigger]]\ncron = \"@every 2s\"\nname = \"peek\"\n",
-		Rules: []fakeRule{
-			{Match: "kind=occasion", Tool: "read_file", Args: map[string]any{"path": "notes/todo.md"}, Reply: "NO_REPLY"},
-			{Match: "[haunt event]", Reply: "NO_REPLY"},
+		Rules: []fake.Rule{
+			{Match: "kind=occasion", AfterTool: "*", Calls: []fake.Call{{Name: "stay_silent"}}},
+			{Match: "kind=occasion", Calls: []fake.Call{decision("read_file", map[string]any{"path": "notes/todo.md"})}},
+			silentOn("[haunt event]"),
 		},
 	})
 
@@ -415,11 +424,10 @@ func TestAnOccasionMayNotReadFilesByDefault(t *testing.T) {
 // nor the reply built on it says where anything is on the host.
 func TestASymlinkOutOfTheFolderIsRefused(t *testing.T) {
 	c := testenv.StartT(t)
-	r := startFilesGhost(t, c, filesOptions{Rules: []fakeRule{
-		{Match: "[haunt event]", Reply: "NO_REPLY"},
-		{Match: "read the escape", Tool: "read_file", Args: map[string]any{"path": "notes/escape/passwd"},
-			Reply: "It said: {tool}"},
-	}})
+	r := startFilesGhost(t, c, filesOptions{Rules: rules([]fake.Rule{silentOn("[haunt event]")},
+		acts("read the escape", []fake.Call{decision("read_file", map[string]any{"path": "notes/escape/passwd"})},
+			"It would not open."),
+	)})
 
 	r.rig.say(t, "read the escape")
 	read := r.call(t, "read_file", 1)

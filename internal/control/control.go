@@ -48,20 +48,20 @@ func SocketPath(name string) (string, error) {
 }
 
 // Server accepts inbound events and forwards them to a publish function,
-// and answers tool requests from whatever SetTools installed.
+// and answers the requests the ghost installed handlers for (Handle).
 type Server struct {
 	ln      net.Listener
 	path    string
 	publish func(proto.Event) error
 	log     *hlog.Logger
 
-	// ctx is cancelled by Close, which is how a tool call still running
-	// when the ghost shuts down is told to stop.
+	// ctx is cancelled by Close, which is how a request still being
+	// answered when the ghost shuts down is told to stop.
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu    sync.RWMutex
-	tools Tools
+	mu       sync.RWMutex
+	handlers map[string]Handler
 }
 
 // Listen starts the control server for the named ghost. Stale sockets from
@@ -100,8 +100,8 @@ func (s *Server) accept() {
 }
 
 // serve reads JSONL events; each line is either accepted and published or
-// answered with an error line. The reply is "ok" or "error: ...". A tool
-// request (see tools.go) is answered in its own format and ends the
+// answered with an error line. The reply is "ok" or "error: ...". A
+// request (requests.go) is answered with its handler's line and ends the
 // connection.
 // idleTimeout is how long a connected client may say nothing before the
 // connection is dropped. Generous: `haunt say` writes immediately, and the
@@ -123,8 +123,11 @@ func (s *Server) serve(conn net.Conn) {
 		if len(sc.Bytes()) == 0 {
 			continue
 		}
-		if isRequest(sc.Bytes()) {
-			s.serveRequest(conn, sc.Bytes())
+		if h := s.handler(sc.Bytes()); h != nil {
+			conn.SetReadDeadline(time.Time{})
+			reply := h(s.ctx)
+			conn.SetWriteDeadline(time.Now().Add(replyTimeout))
+			fmt.Fprintln(conn, reply)
 			return
 		}
 		reply := "ok"

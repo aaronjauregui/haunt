@@ -12,7 +12,8 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/aaronjauregui/haunt/internal/hermes"
+	"github.com/aaronjauregui/haunt/internal/model/fake"
+	"github.com/aaronjauregui/haunt/internal/skill"
 	"github.com/aaronjauregui/haunt/internal/testenv"
 )
 
@@ -21,11 +22,11 @@ import (
 // ghost actually did something.
 //
 // Both paths are covered, because they are different decisions: the model
-// asking for a tool in the middle of a hermes turn, and a brain asking for
-// one specific thing at one specific moment.
+// deciding on a tool in the middle of a turn, and a brain asking for one
+// specific thing at one specific moment.
 
 // actingRun is a ghost with one tool server, and the paths the test needs.
-// startActingGhost's brain is a testdata program, or empty for hermes.
+// startActingGhost's brain is a testdata program, or empty for the model.
 type actingRun struct {
 	dir     string
 	bin     string
@@ -38,12 +39,12 @@ type actingRun struct {
 func startActingGhost(t *testing.T, c *testenv.Compositor, brain string) actingRun {
 	t.Helper()
 	dir := t.TempDir()
-	// On hermes, the model asks for the re-exported tool by its wire name.
-	rig := newHermesRig(t, dir, []fakeRule{
-		{Match: "[haunt event]", Reply: "NO_REPLY"},
-		{Match: "note that", Tool: "notes__append", Args: map[string]any{"text": "milk"},
-			Reply: "there, it is written down"},
-	}, "")
+	// The model decides on the server's tool by its wire name.
+	rig := newBrainRig(t, dir, rules(
+		[]fake.Rule{silentOn("[haunt event]")},
+		acts("note that", []fake.Call{decision("notes__append", map[string]any{"text": "milk"})},
+			"there, it is written down"),
+	), "")
 	bin := rig.Bin
 	server := filepath.Join(dir, "toolserver")
 	build(t, server, "./testdata/toolserver")
@@ -115,8 +116,8 @@ func (r actingRun) say(t *testing.T, text string) {
 }
 
 // TestGhostActsThroughTheModel: art, a persona, a tool server and no code
-// anywhere. Hermes is offered the tool through haunt's MCP server, the
-// driver runs it, and a file on disk changes — which is the difference
+// anywhere. The model is offered the tool as a decision, the driver runs
+// it, and a file on disk changes — which is the difference
 // between a companion that can do things and one that can describe doing
 // them.
 func TestGhostActsThroughTheModel(t *testing.T) {
@@ -130,19 +131,18 @@ func TestGhostActsThroughTheModel(t *testing.T) {
 	// And then the model answered, with the tool's result in front of it.
 	waitFakeLog(t, run.fakeLog, 10*time.Second, repliedTo("note that"))
 
-	list := waitFakeLog(t, run.fakeLog, time.Second, func(e fakeEntry) bool { return e.Kind == "tools_list" })
+	list := waitFakeLog(t, run.fakeLog, time.Second, turnsAbout("note that"))
 	if !slices.Contains(list.Tools, "notes__append") {
 		t.Errorf("the tools never reached the model: %v", list.Tools)
 	}
-	// A package skill that needs the server's tool names it the way
-	// hermes does, and the tools the model was offered satisfy it
-	// (docs/dev/hermes.md, "Skills").
-	skill := fstest.MapFS{"shopping/SKILL.md": {Data: []byte("---\nname: shopping\ndescription: x\n" +
-		"metadata:\n  hermes:\n    requires_toolsets: [mcp-haunt]\n    requires_tools: [mcp__haunt__notes__append]\n---\n")}}
-	if unmet, err := hermes.Unmet(skill, list.Tools); err != nil || len(unmet) > 0 {
-		t.Errorf("a skill needing notes.append is hidden: %v %v", unmet, err)
+	// A package skill that needs the server's tool names it as the model
+	// is offered it, and the tools the model was offered satisfy it.
+	pkg := fstest.MapFS{"shopping/SKILL.md": {Data: []byte("---\nname: shopping\ndescription: x\n" +
+		"metadata:\n  haunt:\n    requires_tools: [notes__append]\n---\n")}}
+	if h, err := skill.Open(pkg, "", list.Tools); err != nil || len(h.List()) != 1 {
+		t.Errorf("a skill needing notes__append is hidden (%v)", err)
 	}
-	call := waitFakeLog(t, run.fakeLog, time.Second, func(e fakeEntry) bool { return e.Kind == "tool_call" })
+	call := waitFakeLog(t, run.fakeLog, time.Second, decided("notes__append"))
 	if call.IsError || !strings.Contains(call.Text, "appended milk") {
 		t.Errorf("tool result = %+v, want what the server said", call)
 	}

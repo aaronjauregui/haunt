@@ -2,8 +2,9 @@
 
 `ghost.toml` is the whole description of a ghost. Every path in it is
 relative to the ghost directory and must stay inside it. Unknown
-capability names are refused at load, so a typo fails early and an older
-driver refuses a package built for a newer one.
+capability names and unknown top-level sections are refused at load, so a
+typo fails early and an older driver refuses a package built for a newer
+one.
 
 ```toml
 [ghost]
@@ -17,13 +18,19 @@ scale = 1.0                     # how large the art is drawn
 sprite = "shell.png"            # one image, or:
 # [[shell.layer]] ... [shell.pose.happy] ... [[shell.clip]] ... [shell.masks] ...
 
-[persona]                       # a ghost on hermes; see persona-and-skills.md
+[persona]                       # a ghost on the person's model; see persona-and-skills.md
 system = """
 You are Wisp, a wry little desktop spirit. Reply in one or two short sentences.
 """
+prefill = "Hm. "                # optional; every reply starts from it
 
-[hermes]
-bundled_skills = ["humanizer"]  # hermes's own skills the ghost may use
+[[persona.example]]             # optional; how it sounds
+user = "hello"
+ghost = "Oh. It's you. Good."
+
+[persona.sampling]              # optional; laid over the person's [model] sampling
+temperature = 0.9
+min_p = 0.05
 
 [imagine]                       # the look of its pictures; needs the imagine capability
 style = "soft watercolour, muted palette, paper texture"
@@ -54,7 +61,7 @@ args = { within = "2h" }
 
 | Field | Meaning |
 |---|---|
-| `name` | Required. The ghost's identity: its library directory, its socket, its hermes profile (`haunt-<name>`). |
+| `name` | Required. The ghost's identity: its library directory, its state directory, its socket, its `[model.ghost.<name>]` table in the person's config. |
 | `version`, `author` | Shown at install. |
 | `capabilities` | What the ghost would like to be allowed. Declaring one only means it may ask; the person grants. |
 
@@ -63,7 +70,7 @@ The capabilities:
 | Name | Allows | Needed for |
 |---|---|---|
 | `message` | text from outside: typing, `haunt say`, scripts | any ghost that is talked to |
-| `llm` | thinking through hermes | every persona ghost; the manifest is refused without it |
+| `llm` | thinking through the person's model | every persona ghost; the manifest is refused without it |
 | `imagine` | drawing with the person's image backend | the `draw` tool, the `imagine` intent |
 | `window` | which application and window is focused | session facts, goals watched on screen |
 | `screen` | a picture of the focused window, to a vision model | the `look` tool, the `look` intent |
@@ -97,17 +104,21 @@ it; the manifest is refused otherwise.
 
 ## `[persona]`
 
-`system` is the character's text. It leads the hermes profile's `SOUL.md`;
-haunt appends its standing rules after it. Only meaningful with `llm`.
-See [Persona and skills](persona-and-skills.md).
+The character a ghost with no `[brain]` plays on the person's model. Only
+meaningful with `llm`. Which model, and where it runs, is the person's
+choice in their config (`[model]`); a manifest never names one. Every
+field here works on any provider. See
+[Persona and skills](persona-and-skills.md).
 
-## `[hermes]`
+| Field | Meaning |
+|---|---|
+| `system` | The character's text. It leads the system prompt; haunt's standing rules follow it. |
+| `example` | Example exchanges, `[[persona.example]]` with `user` and `ghost`, shown to the model after the rules as how the character sounds, not as things that happened. Two or three are plenty. |
+| `prefill` | Words every reply starts from, in the character's voice. They are the opening of what is said and shown with it. Optional. |
+| `sampling` | `[persona.sampling]`: `temperature`, `top_p`, `min_p`, `repeat_penalty`, `dry_multiplier`, `xtc_probability`. Each one set is laid over the person's `[model]` sampling; a provider ignores a field it does not know. |
 
-`bundled_skills` names skills from hermes's own library to install in the
-ghost's profile. Profiles opt out of that library, since nearly all of it
-needs a shell, files or the web; only `humanizer`, `weekly-review-planning`,
-`meeting-action-items` and `songwriting-and-ai-music` may be named, and
-any other name is refused at load.
+The model also sees, every turn, a two-line reminder after the turn's
+input: the first sentence of `system`, and "Stay in character."
 
 ## `[imagine]`
 
@@ -180,5 +191,6 @@ review. With `tool` it is a **poll**. See
 
 Not a manifest field. A `skills/` directory next to the manifest, one
 subdirectory per skill holding a `SKILL.md`, is packed with the ghost and
-installed into its hermes profile. See
+listed to the model beside haunt's own skills; one with the name of one of
+haunt's replaces it. See
 [Persona and skills](persona-and-skills.md).

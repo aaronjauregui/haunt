@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aaronjauregui/haunt/internal/model/fake"
 	"github.com/aaronjauregui/haunt/internal/testenv"
 )
 
@@ -16,15 +17,16 @@ import (
 // and took the reply with it — the balloon's lifetime was being timed from
 // when the question was asked rather than from when the answer arrived.
 //
-// The ghost here is on hermes, poked (a four-second line from the driver's
+// The ghost here thinks with the model, poked (a four-second line from the driver's
 // table) and then asked something the model answers slowly.
 func TestSlowReplyOutlivesAnOlderLine(t *testing.T) {
 	c := testenv.StartT(t)
 	const think = 6 * time.Second
 	dir := t.TempDir()
-	rig := newHermesRig(t, dir, []fakeRule{
-		{Match: "[haunt event]", Reply: "NO_REPLY"},
-		{Match: "a question", DelayMS: int(think / time.Millisecond), Reply: "here at last, after some thought"},
+	rig := newBrainRig(t, dir, []fake.Rule{
+		silentOn("[haunt event]"),
+		{Match: "a question", AfterTool: speakCue, Reply: "here at last, after some thought"},
+		{Match: "a question", DelayMS: int(think / time.Millisecond), Calls: []fake.Call{{Name: "speak"}}},
 	}, "first_token_timeout = 60\n")
 	bin := rig.Bin
 	gDir := filepath.Join(dir, "wisp")

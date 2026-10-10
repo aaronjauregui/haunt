@@ -16,7 +16,7 @@ func testGhostDir(t *testing.T) string {
 		"ghost.toml":    "[ghost]\nname = \"spook\"\n\n[brain]\nwasm = \"brain.wasm\"\n",
 		"brain.wasm":    "\x00asm-fake",
 		"art/shell.png": "not-really-png",
-		// A ghost on hermes carries its routines as skills.
+		// A persona ghost carries its routines as skills.
 		"skills/tidy/SKILL.md":           "---\nname: tidy\n---\n",
 		"skills/tidy/references/desk.md": "reference",
 		".hidden":                        "excluded",

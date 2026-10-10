@@ -14,8 +14,8 @@ import (
 // there is no author present to tag anything, which is the whole reason
 // this exists.
 //
-// A lexicon runs on scripted lines, and on a hermes reply when the model
-// did not wear a face itself (its face tool). It is free and instant, so a
+// A lexicon runs on scripted lines, and on a model's words when the model
+// chose no face itself (with speak or the face tool). It is free and instant, so a
 // ghost with no model at all still animates.
 //
 // A brain that sets an expression explicitly always wins: manual tags
@@ -102,13 +102,13 @@ func (g *Ghost) inferExpression(text string) string {
 	return pose
 }
 
-// wearTag puts on the pose a reply's tag names (hermes.CutPose),
-// reporting whether it did: not for a pose the shell does not have, and
-// not where the face stays still, as for the face tool.
-func (g *Ghost) wearTag(pose string) bool {
+// wearPose puts on the pose the model chose to speak with, reporting
+// whether it did: not for a pose the shell does not have, and not where
+// the face stays still, as for the face tool.
+func (g *Ghost) wearPose(pose string) bool {
 	if pose == "" || g.shell == nil || !slices.Contains(g.shell.Poses(), pose) {
 		if pose != "" {
-			g.log.Debug(hlog.Anim, "tag [%s] is not one of the shell's poses", pose)
+			g.log.Debug(hlog.Anim, "pose %q is not one of the shell's", pose)
 		}
 		return false
 	}

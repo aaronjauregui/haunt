@@ -18,7 +18,6 @@ import (
 
 	"github.com/aaronjauregui/haunt/internal/backend"
 	"github.com/aaronjauregui/haunt/internal/config"
-	"github.com/aaronjauregui/haunt/internal/control"
 	"github.com/aaronjauregui/haunt/internal/files"
 )
 
@@ -105,19 +104,19 @@ func fakeDescriber(t *testing.T) (url string, asked *int) {
 	return srv.URL, &n
 }
 
-func call(t *testing.T, g *Ghost, name, args string) control.ToolResult {
-	return (hermesTools{g}).Call(t.Context(), name, json.RawMessage(args))
+func call(t *testing.T, g *Ghost, name, args string) toolResult {
+	return g.call(t.Context(), name, json.RawMessage(args))
 }
 
 // A ghost whose package never asked for files is not told the file tools
-// exist, and a skill that needs one is hidden by hermes rather than the
+// exist, and a skill that needs one is hidden rather than the
 // ghost offering to read a note and being refused.
 func TestFileToolsAreOfferedOnlyWhenDeclared(t *testing.T) {
 	g, _ := readingGhost(t, "", backend.BudgetConfig{}, "")
 	offered := func() []string {
 		var names []string
-		for _, s := range (hermesTools{g}).List() {
-			names = append(names, s.Name)
+		for name := range g.offered(false) {
+			names = append(names, name)
 		}
 		return names
 	}
@@ -139,7 +138,7 @@ func TestFileToolsAreOfferedOnlyWhenDeclared(t *testing.T) {
 	}
 }
 
-// Each tool, driven the way hermes drives it, against a real folder.
+// Each tool, driven the way the decide loop drives it, against a real folder.
 func TestTheFileToolsWorkThroughCall(t *testing.T) {
 	url, _ := fakeDescriber(t)
 	g, _ := readingGhost(t, "", backend.BudgetConfig{}, url)
@@ -454,11 +453,11 @@ func TestReadFileJournals(t *testing.T) {
 	}
 }
 
-// SOUL.md is told the ghost can read files only when there is something
+// The standing rules say the ghost can read files only when there is something
 // to read, and is told neither the folders' names nor where they are.
 func TestThePersonaNamesNoFolders(t *testing.T) {
 	g, dir := readingGhost(t, "skills", backend.BudgetConfig{}, "")
-	p := g.hermesPersona()
+	p := g.standing(false)
 	if !p.Files || p.FilesUnprompted != "skills" {
 		t.Errorf("persona files = %v %q", p.Files, p.FilesUnprompted)
 	}
@@ -470,7 +469,7 @@ func TestThePersonaNamesNoFolders(t *testing.T) {
 	}
 
 	shareFolders(t, g, config.FilesConfig{})
-	if p := g.hermesPersona(); p.Files || len(p.Abilities) != 0 {
+	if p := g.standing(false); p.Files || len(p.Abilities) != 0 {
 		t.Errorf("with nothing shared the persona says files=%v, abilities %q", p.Files, p.Abilities)
 	}
 }

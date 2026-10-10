@@ -242,20 +242,52 @@ args = { within = "2h" }
 	}
 }
 
-// A ghost may ask for a few of hermes's bundled skills by name, and only
-// those: the rest assume a shell, files or the web.
-func TestManifestBundledSkills(t *testing.T) {
-	const head = "[ghost]\nname = \"wisp\"\ncapabilities = [\"message\", \"llm\"]\n\n[hermes]\n"
-	m, err := LoadManifest(writeManifest(t, head+`bundled_skills = ["humanizer", "weekly-review-planning"]`+"\n"))
+// The persona's levers: example exchanges, a prefill, and sampling laid
+// over the person's.
+func TestManifestPersonaFields(t *testing.T) {
+	m, err := LoadManifest(writeManifest(t, `[ghost]
+name = "wisp"
+capabilities = ["message", "llm"]
+
+[persona]
+system = "You are Wisp."
+prefill = "Hm. "
+
+[persona.sampling]
+temperature = 0.9
+min_p = 0.05
+
+[[persona.example]]
+user = "hello"
+ghost = "Oh. You again."
+
+[[persona.example]]
+user = "what time is it?"
+ghost = "Late, by the look of you."
+`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := m.Hermes.BundledSkills; len(got) != 2 || got[0] != "humanizer" {
-		t.Errorf("bundled_skills = %v", got)
+	p := m.Persona
+	if p.Prefill != "Hm. " || len(p.Examples) != 2 || p.Examples[1].Ghost != "Late, by the look of you." {
+		t.Errorf("persona = %+v", p)
 	}
-	_, err = LoadManifest(writeManifest(t, head+`bundled_skills = ["google-workspace"]`+"\n"))
-	if err == nil || !strings.Contains(err.Error(), "google-workspace") || !strings.Contains(err.Error(), "humanizer") {
-		t.Fatalf("err = %v, want google-workspace refused and the allowed ones listed", err)
+	if p.Sampling.Temperature == nil || *p.Sampling.Temperature != 0.9 || p.Sampling.MinP == nil || p.Sampling.TopP != nil {
+		t.Errorf("sampling = %+v", p.Sampling)
+	}
+}
+
+// A section ghost.toml does not have is refused, by name: a manifest
+// written for another driver would otherwise run without what it asked
+// for there.
+func TestManifestRefusesUnknownSections(t *testing.T) {
+	_, err := LoadManifest(writeManifest(t, "[ghost]\nname = \"wisp\"\ncapabilities = [\"message\", \"llm\"]\n\n[agent]\nskills = [\"x\"]\n"))
+	if err == nil || !strings.Contains(err.Error(), "[agent]") {
+		t.Fatalf("err = %v, want the section named", err)
+	}
+	// An unknown key inside a known section is not a section.
+	if _, err := LoadManifest(writeManifest(t, "[ghost]\nname = \"wisp\"\ncapabilities = [\"message\", \"llm\"]\nflavour = \"mint\"\n")); err != nil {
+		t.Errorf("an unknown key in [ghost] was refused: %v", err)
 	}
 }
 

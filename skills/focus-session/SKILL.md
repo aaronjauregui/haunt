@@ -32,7 +32,7 @@ restart and comes back to you when it ends.
 
 ## During
 
-- For `[haunt event]` lines (idle, session, observed), reply `NO_REPLY`.
+- For `[haunt event]` lines (idle, session, observed), call `stay_silent`.
   Other ghosts chattering are no reason to break the person's focus.
   A different errand that comes due is still said, briefly.
 - If the person speaks to you, answer briefly. If they say they are done

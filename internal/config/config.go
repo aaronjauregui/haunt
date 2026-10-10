@@ -29,7 +29,6 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/aaronjauregui/haunt/internal/backend"
-	"github.com/aaronjauregui/haunt/internal/hermes"
 	"github.com/aaronjauregui/haunt/internal/model"
 	"github.com/aaronjauregui/haunt/internal/quiet"
 	"github.com/aaronjauregui/haunt/internal/session"
@@ -44,14 +43,12 @@ type File struct {
 	// to name the file a person should go and edit.
 	Path string
 
-	Quiet     quiet.Config
-	Backend   *backend.Config
-	Animation AnimationConfig
-	Awareness AwarenessConfig
-	Curiosity CuriosityConfig
-	Files     FilesConfig
-	// Hermes is where the ghosts' brain lives (docs/dev/hermes.md).
-	Hermes     hermes.Config
+	Quiet      quiet.Config
+	Backend    *backend.Config
+	Animation  AnimationConfig
+	Awareness  AwarenessConfig
+	Curiosity  CuriosityConfig
+	Files      FilesConfig
 	Appearance AppearanceConfig
 	// Model is the model persona ghosts think with; ModelFor is one
 	// ghost's.
@@ -67,7 +64,6 @@ type root struct {
 	Awareness  AwarenessConfig  `toml:"awareness"`
 	Curiosity  CuriosityConfig  `toml:"curiosity"`
 	Files      FilesConfig      `toml:"files"`
-	Hermes     hermes.Config    `toml:"hermes"`
 	Appearance AppearanceConfig `toml:"appearance"`
 	Model      ModelConfig      `toml:"model"`
 }
@@ -115,7 +111,6 @@ func Load() (*File, error) {
 		Awareness:  r.Awareness,
 		Curiosity:  r.Curiosity,
 		Files:      r.Files,
-		Hermes:     r.Hermes,
 		Appearance: r.Appearance,
 		Model:      r.Model,
 	}
@@ -149,8 +144,9 @@ type AnimationConfig struct {
 	ReducedMotion bool `toml:"reduced_motion"`
 	// ExpressionInference chooses how scripted dialogue is mapped to shell
 	// poses: "lexicon" (default) uses the driver's free word table, and
-	// "off" leaves the face alone entirely. A ghost on hermes wears a face
-	// by calling its face tool; the lexicon is the fallback when it did not.
+	// "off" leaves the face alone entirely. A ghost on a model chooses its
+	// face as it decides to speak; the lexicon is the fallback when it did
+	// not.
 	ExpressionInference string `toml:"expression_inference"`
 }
 

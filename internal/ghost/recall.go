@@ -26,7 +26,7 @@ import (
 // never replaces a balloon somebody is reading, leaves it alone.
 //
 // This is the session's memory of the screen, not the conversation's
-// record — `haunt history` reads that from hermes. It holds only what
+// record — `haunt history` reads that from the transcript. It holds only what
 // reached the screen, so a line quiet hours kept off it is not here.
 
 // recallKeep is how many lines are kept to scroll back through.

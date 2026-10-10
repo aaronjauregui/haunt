@@ -1,25 +1,22 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
 	"unicode"
 
 	"github.com/aaronjauregui/haunt/internal/ghost"
-	"github.com/aaronjauregui/haunt/internal/hermes"
-	"github.com/aaronjauregui/haunt/internal/store"
 )
 
 // The echo check: a memory write that repeats what a page or a file said.
 //
-// Hermes memory is not haunt's to gate (docs/dev/decisions.md), so nothing
-// stops the model saving a planted line as the person's. What haunt can do
-// is show it: `haunt history` and `haunt journal -echoes` flag a write
-// whose words are a read's words, and the person decides. It flags and
-// never gates, and it sees only wording: a write that says the same thing
-// in other words passes, and so does anything hermes saves outside the
-// session (its background review, a provider that records every turn).
+// Every line the ghost remembers is labelled with where it came from, but
+// a model that has read a page can still save the page's claim as the
+// person's. `haunt history` and `haunt journal -echoes` flag a write whose
+// words are a read's words, and the person decides. It sees only wording:
+// a write that says the same thing in other words passes.
 //
 // Wording is compared as runs of words. Both texts are lowercased and cut
 // into words (letters and digits; everything else separates), and every
@@ -54,16 +51,16 @@ type echo struct {
 }
 
 // markEchoes flags every memory write in turns that echoes a read of the
-// web or a file in its window. The calls must be whole (Client.Transcript):
-// what history shows a person is cut to a line, and a planted line can sit
-// anywhere in a page. A read before the first turn is not seen, so the
+// web or a file in its window. The calls must be whole, as the transcript
+// keeps them: what history shows a person is cut to a line, and a planted
+// line can sit anywhere in a page. A read before the first turn is not seen, so the
 // check is only as good as the window read back.
 func markEchoes(turns []historyTurn) {
 	for i := range turns {
 		t := &turns[i]
 		for ri, m := range t.replies {
 			for ci, c := range m.Looked {
-				saved, ok := hermes.MemoryWrite(c.Tool, c.Args)
+				saved, ok := ghost.MemoryWrite(c.Tool, json.RawMessage(c.Args))
 				if !ok || saved == "" {
 					continue
 				}
@@ -84,7 +81,7 @@ func echoOf(turns []historyTurn, at int, saved string) (traceEcho, bool) {
 	// many pages said it too.
 	own := map[string]bool{}
 	for _, t := range turns[first : at+1] {
-		if t.input != nil && !hermes.IsEnvelope(t.input.Text) {
+		if t.input != nil && t.input.Role == "user" && !ghost.IsEnvelope(t.input.Text) {
 			for _, r := range wordRuns(t.input.Text) {
 				own[r] = true
 			}
@@ -191,20 +188,10 @@ func echoLine(e traceEcho) string {
 }
 
 // printEchoes is `haunt journal -echoes`: every memory write in the ghost's
-// conversation that repeats a page or a file. The conversation is hermes's,
-// so like `haunt history` it needs the gateway running. It reads the whole
-// session, since a write is only checked against the reads read back with
-// it.
-func printEchoes(w io.Writer, s *store.Store, name string) error {
-	session, onHermes, err := s.Get(ghost.HermesSessionStoreKey)
-	if err != nil {
-		return err
-	}
-	if !onHermes {
-		fmt.Fprintln(w, "(it has no hermes conversation, so nothing it saved came from one)")
-		return nil
-	}
-	msgs, err := hermesHistory(name, session, 0, true)
+// transcript that repeats a page or a file. It reads the whole transcript,
+// since a write is only checked against the reads read back with it.
+func printEchoes(w io.Writer, stateDir string) error {
+	msgs, err := readTranscript(stateDir)
 	if err != nil {
 		return fmt.Errorf("journal: %w", err)
 	}
@@ -214,7 +201,7 @@ func printEchoes(w io.Writer, s *store.Store, name string) error {
 
 // writeEchoes lists the flagged writes in msgs, oldest first: when, what
 // was saved, and the read it repeats.
-func writeEchoes(w io.Writer, msgs []hermes.Message) {
+func writeEchoes(w io.Writer, msgs []message) {
 	turns := mergeTurns(msgs, nil)
 	markEchoes(turns)
 	n := 0

@@ -1,34 +1,36 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
-	"github.com/aaronjauregui/haunt/internal/config"
 	"github.com/aaronjauregui/haunt/internal/ghost"
-	"github.com/aaronjauregui/haunt/internal/hermes"
 	"github.com/aaronjauregui/haunt/internal/library"
+	"github.com/aaronjauregui/haunt/internal/skill"
 	"github.com/aaronjauregui/haunt/internal/store"
+	"github.com/aaronjauregui/haunt/skills"
 )
 
 // cmdJournal prints a ghost's journal: the action log, a line for each thing
-// it did. What a ghost on hermes remembers about the person is hermes
-// memory, which haunt does not read: `hermes -p haunt-<ghost> memory
-// status` says where it is, and telling the ghost edits it. -echoes lists
-// what it saved there in the words of a page or a file it read, from the
-// conversation hermes keeps. -skills lists the routines it has on hermes,
-// and which of them it wrote itself. -style is the look its pictures have,
-// and whether the ghost was asked for one of its own.
+// it did. What it remembers is its memory files (`haunt memory`). -echoes
+// lists what it saved there in the words of a page or a file it read, from
+// its transcript. -skills lists the routines it has, and which of them it
+// wrote itself. -style is the look its pictures have, and whether the
+// ghost was asked for one of its own.
 func cmdJournal(args []string) error {
 	fs := flag.NewFlagSet("journal", flag.ExitOnError)
 	state := fs.String("state", "", "override state directory")
 	intentions := fs.Bool("intentions", false, "print what it is still meaning to do")
-	echoes := fs.Bool("echoes", false, "list what it saved to memory in the words of a page or a file it read (needs its hermes gateway running)")
-	skills := fs.Bool("skills", false, "list its hermes skills: the ones it learned, the package's and haunt's")
+	echoes := fs.Bool("echoes", false, "list what it saved to memory in the words of a page or a file it read")
+	listSkills := fs.Bool("skills", false, "list its skills: the ones it learned, the package's and haunt's")
 	style := fs.Bool("style", false, "the style it draws in, and where that came from")
 	reset := fs.Bool("reset", false, "with -style: go back to the style its package ships")
 	fs.Parse(args)
@@ -38,12 +40,16 @@ func cmdJournal(args []string) error {
 		return fmt.Errorf("journal: %w", err)
 	}
 
-	if *skills {
+	if *listSkills {
 		name := filepath.Base(stateDir)
 		if len(fs.Args()) == 1 {
 			name = fs.Args()[0]
 		}
-		return printSkills(name)
+		pkg, _ := library.PkgDir(name)
+		return printSkills(os.Stdout, stateDir, pkg)
+	}
+	if *echoes {
+		return printEchoes(os.Stdout, stateDir)
 	}
 
 	s, err := store.Open(filepath.Join(stateDir, "state.db"))
@@ -60,13 +66,6 @@ func cmdJournal(args []string) error {
 	}
 	if *intentions {
 		return printIntentions(s)
-	}
-	if *echoes {
-		name := filepath.Base(stateDir)
-		if len(fs.Args()) == 1 {
-			name = fs.Args()[0]
-		}
-		return printEchoes(os.Stdout, s, name)
 	}
 	raw, ok, err := s.Get(ghost.NotesStoreKey)
 	if err != nil {
@@ -86,57 +85,73 @@ func cmdJournal(args []string) error {
 	return nil
 }
 
-// printSkills lists a ghost's hermes skills, grouped by where they came
-// from. The learned ones come first: they are the ones nobody reviewed.
-// Reading the profile is enough; the gateway need not be running.
-func printSkills(name string) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
+// printSkills lists a ghost's skills, grouped by where they came from: the
+// ones it wrote itself first, since nobody reviewed them, then its
+// package's, then haunt's. Reading the files is enough; the ghost need not
+// be running.
+func printSkills(w io.Writer, stateDir, pkgDir string) error {
+	decisions := ghost.DecisionNames()
+	groups := []struct {
+		title   string
+		fsys    fs.FS
+		learned bool
+	}{
+		{"Learned (it wrote these itself)", os.DirFS(filepath.Join(stateDir, "skills")), true},
+		{"From its package", nil, false},
+		{"From haunt", skills.Haunt, false},
 	}
-	list, err := cfg.Hermes.Skills(name)
-	if err != nil {
-		return fmt.Errorf("journal: %w", err)
-	}
-	groups := []struct{ source, title string }{
-		{hermes.SkillLearned, "Learned (it wrote these itself)"},
-		{"ghost", "From its package"},
-		{"haunt", "From haunt"},
-		{hermes.SkillHermes, "From hermes"},
+	if pkgDir != "" {
+		groups[1].fsys = os.DirFS(filepath.Join(pkgDir, "skills"))
 	}
 	for i, g := range groups {
 		if i > 0 {
-			fmt.Println()
+			fmt.Fprintln(w)
 		}
-		fmt.Println(g.title + ":")
+		fmt.Fprintln(w, g.title+":")
 		n := 0
-		for _, s := range list {
-			if s.Source != g.source {
+		var entries []fs.DirEntry
+		if g.fsys != nil {
+			var err error
+			entries, err = fs.ReadDir(g.fsys, ".")
+			if err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return fmt.Errorf("journal: %w", err)
+			}
+		}
+		for _, e := range entries {
+			if !e.IsDir() || e.Name() == skill.ArchiveDir {
+				continue
+			}
+			raw, err := fs.ReadFile(g.fsys, e.Name()+"/SKILL.md")
+			if err != nil {
+				continue
+			}
+			f, body, err := skill.Parse(raw)
+			if err != nil {
+				fmt.Fprintf(w, "  %s: ! cannot be read: %v\n", e.Name(), err)
 				continue
 			}
 			n++
-			fmt.Printf("  %s", s.Name)
-			if s.Description != "" {
-				fmt.Printf(": %s", s.Description)
+			fmt.Fprintf(w, "  %s", f.Name)
+			if f.Description != "" {
+				fmt.Fprintf(w, ": %s", f.Description)
 			}
-			fmt.Println()
-			if s.Source == hermes.SkillLearned {
-				fmt.Printf("    %s\n", s.Dir)
-				if len(s.Assumes) > 0 {
-					// Hermes's review writes skills for an agent with a
-					// shell; one that needs one is dead weight here.
-					fmt.Printf("    ! names tools a ghost does not have: %s\n", strings.Join(s.Assumes, ", "))
+			fmt.Fprintln(w)
+			if g.learned {
+				var unknown []string
+				for _, tool := range append(f.RequiresTools(), skill.ToolRefs(body)...) {
+					if !slices.Contains(decisions, tool) && !slices.Contains(unknown, tool) && !strings.Contains(tool, "__") {
+						unknown = append(unknown, tool)
+					}
 				}
-				if len(s.Deps) > 0 {
-					// Hermes would install these when the skill is
-					// viewed; a ghost's profile has installs off, so
-					// a skill that needs them is dead weight here.
-					fmt.Printf("    ! needs packages a ghost does not get: %s\n", strings.Join(s.Deps, ", "))
+				if len(unknown) > 0 {
+					// A skill written for an agent with a shell is dead
+					// weight here.
+					fmt.Fprintf(w, "    ! names tools a ghost does not have: %s\n", strings.Join(unknown, ", "))
 				}
 			}
 		}
 		if n == 0 {
-			fmt.Println("  (none)")
+			fmt.Fprintln(w, "  (none)")
 		}
 	}
 	return nil

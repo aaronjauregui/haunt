@@ -61,7 +61,7 @@ type Picture struct {
 	Seed int64     `json:"seed,omitempty"`
 	At   time.Time `json:"at"`
 	// Caption is what the ghost said about it, filled in when the turn
-	// that drew it has finished saying it (hermesbrain.go).
+	// that drew it has finished saying it (brain_model.go).
 	Caption string `json:"caption,omitempty"`
 	// Seen is the vision model's one sentence about it, when the ghost
 	// asked to look at what it had painted.

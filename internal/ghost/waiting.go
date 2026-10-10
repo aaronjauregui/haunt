@@ -62,18 +62,6 @@ func (g *Ghost) sessionContext() context.Context {
 // stoppingC is the teardown signal, nil-safe for tests.
 func (g *Ghost) stoppingC() <-chan struct{} { return g.stopping }
 
-// firstTokenTimeout is how long a hermes turn may go without a sign of
-// life before the driver abandons it, from [hermes] first_token_timeout.
-func (g *Ghost) firstTokenTimeout() time.Duration {
-	return g.hermesCfg.FirstTokenTimeout()
-}
-
-// stallTimeout is how long a hermes turn that has shown a sign of life may
-// then go quiet before the driver abandons it, from [hermes] stall_timeout.
-func (g *Ghost) stallTimeout() time.Duration {
-	return g.hermesCfg.StallTimeout()
-}
-
 // waiter is one in-flight "the ghost is thinking" indicator.
 type waiter struct {
 	stop chan struct{}

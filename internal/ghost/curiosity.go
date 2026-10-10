@@ -9,9 +9,10 @@ import (
 	"github.com/aaronjauregui/haunt/internal/proto"
 )
 
-// Initiative: the ghost acting without being addressed. On hermes that is
-// an event reaching the model at all (hermesbrain.go's unprompted), charged
-// before it is sent and refunded if the ghost says nothing.
+// Initiative: the ghost acting without being addressed. On the model brain
+// that is an event reaching the model at all (brain_model.go's
+// unprompted), charged before it is sent and refunded if the ghost says
+// nothing.
 //
 // The driver decides what counts as unprompted by causality rather than by
 // asking the brain, which cannot be trusted to report its own motives. Two
@@ -289,7 +290,7 @@ func noRefund() {}
 // chargeInitiative is allowInitiative for a caller that may want its money
 // back: a wake that the model answered with silence interrupted nobody, and
 // attention is charged when the ghost speaks, not when it is woken (see
-// hermesbrain.go). The refund puts back whichever allowance paid, and is a
+// brain_model.go). The refund puts back whichever allowance paid, and is a
 // no-op when none did.
 func (g *Ghost) chargeInitiative(what string) (bool, func()) {
 	if g.responding() {

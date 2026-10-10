@@ -37,11 +37,12 @@ actions_per_day = 3
 base_url = "http://localhost:11434/v1"
 model = "qwen2.5vl"
 
-[hermes]
+[model]
+base_url = "http://127.0.0.1:8080/v1"
 first_token_timeout = 45
 
-# Sections from before hermes was the brain are ignored, not refused, so an
-# old config keeps working.
+# Sections haunt no longer reads are ignored, not refused, so an old config
+# keeps working.
 [memory]
 consolidations_per_day = 1
 
@@ -67,8 +68,8 @@ model = "qwen2.5"
 	if f.Backend.Vision.Model != "qwen2.5vl" {
 		t.Errorf("[backend.vision] model = %q", f.Backend.Vision.Model)
 	}
-	if got := f.Hermes.FirstTokenTimeout().Seconds(); got != 45 {
-		t.Errorf("[hermes] first_token_timeout = %vs, want 45", got)
+	if got := f.ModelFor("wisp").FirstToken().Seconds(); got != 45 {
+		t.Errorf("[model] first_token_timeout = %vs, want 45", got)
 	}
 	// Filled in at load, so nothing downstream re-derives them.
 	if f.Backend.Budget.VisionRequestsPerHour == 0 {

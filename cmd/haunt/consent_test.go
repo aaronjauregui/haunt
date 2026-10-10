@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aaronjauregui/haunt/internal/model/fake"
 	"github.com/aaronjauregui/haunt/internal/testenv"
 )
 
@@ -21,10 +22,10 @@ import (
 func TestConsentInTheBalloon(t *testing.T) {
 	c := testenv.StartT(t)
 	dir := t.TempDir()
-	rig := newHermesRig(t, dir, []fakeRule{
-		{Match: "[haunt event]", Reply: "NO_REPLY"},
-		{Match: "", Reply: "allowed at last: {input}"},
-	}, "")
+	rig := newBrainRig(t, dir, rules(
+		[]fake.Rule{silentOn("[haunt event]")},
+		says("", "Allowed at last."),
+	), "")
 	bin := rig.Bin
 	envAll := append(rig.env(), "HAUNT_DATA_DIR="+filepath.Join(dir, "data"))
 	run := func(args ...string) string {
@@ -151,7 +152,7 @@ func TestNeverAskAgainIsRecorded(t *testing.T) {
 	dir := t.TempDir()
 	// A model that would answer, so a refusal is the only reason nothing
 	// happens.
-	rig := newHermesRig(t, dir, nil, "")
+	rig := newBrainRig(t, dir, nil, "")
 	bin := rig.Bin
 	envAll := append(rig.env(), "HAUNT_DATA_DIR="+filepath.Join(dir, "data"))
 	run := func(args ...string) string {

@@ -105,7 +105,7 @@ func waitFileContains(t *testing.T, path, want string) {
 	}
 }
 
-// waitFake waits until the fake hermes has logged want entries matching.
+// waitFake waits until the fake model has logged want entries matching.
 func waitFake(t *testing.T, path string, want int, d time.Duration, match func(fakeEntry) bool) []fakeEntry {
 	t.Helper()
 	deadline := time.Now().Add(d)
@@ -116,7 +116,7 @@ func waitFake(t *testing.T, path string, want int, d time.Duration, match func(f
 		}
 		if time.Now().After(deadline) {
 			data, _ := os.ReadFile(path)
-			t.Fatalf("fakehermes logged %d matching entries, want %d; its log:\n%s", len(got), want, data)
+			t.Fatalf("the fake model logged %d matching entries, want %d; its log:\n%s", len(got), want, data)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}

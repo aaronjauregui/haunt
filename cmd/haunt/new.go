@@ -11,13 +11,13 @@ import (
 var namePattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
 // cmdNew scaffolds a ghost project. By default that is a manifest and a
-// persona and nothing else — hermes is its brain, so there
+// persona and nothing else — the person's model is its brain, so there
 // is no compiler in the authoring path and the only thing left to do is the
 // art. `-brain` scaffolds the other kind: a brain in Go with a Makefile
 // that builds it to WASM, for a ghost whose logic is its own.
 func cmdNew(args []string) error {
 	fs := flag.NewFlagSet("new", flag.ExitOnError)
-	withBrain := fs.Bool("brain", false, "scaffold a Go brain compiled to WASM instead of running on hermes")
+	withBrain := fs.Bool("brain", false, "scaffold a Go brain compiled to WASM instead of running on your model")
 	fs.Parse(args)
 	if fs.NArg() != 1 {
 		return fmt.Errorf("new: exactly one ghost name expected")
@@ -78,15 +78,30 @@ capabilities = ["message", "llm", "window"]
 # style = "soft watercolour, muted palette, paper texture"
 # negative = "photorealistic"
 
-# No [brain] section: this ghost runs on hermes-agent, which talks in the
-# persona below, remembers what you tell it, takes on reminders, and speaks
-# first now and then. Add one when you want scripted logic instead — see
+# No [brain] section: this ghost thinks with the model in your haunt config
+# ([model] in ~/.config/haunt/config.toml). It talks in the persona below,
+# remembers what you tell it, takes on reminders, and speaks first now and
+# then. Add a [brain] when you want scripted logic instead — see
 # `+"`haunt new -brain`"+`.
 [persona]
 system = """
 You are %s, a small spirit resident on this desktop.
 Reply in one or two short sentences. Be specific rather than effusive.
 """
+# Words every reply starts from, in its voice. A few words hold a small
+# model to the character better than any instruction.
+# prefill = "Hm. "
+
+# How it sounds, shown to the model as examples, never as things that
+# happened. Two or three are plenty.
+[[persona.example]]
+user = "hello"
+ghost = "Oh, it's you. Good."
+
+# Sampling for this character, laid over the model's own settings.
+# [persona.sampling]
+# temperature = 0.9
+# min_p = 0.05
 
 # Things it can do, rather than only say. Each server is an MCP program the
 # driver runs — so the ghost never holds your credentials — and each of its
@@ -110,15 +125,16 @@ Talk to it by right-clicking it, or from a script with `+"`haunt say`"+`.
 Ask it anything, tell it things to remember, or ask it to remind you;
 double-click it for its menu.
 
-Its brain is [hermes-agent](https://github.com/nousresearch/hermes-agent):
-install hermes, and give the ghost's profile a model with
-`+"`hermes -p haunt-%s model`"+` (or `+"`[hermes.model]`"+` in
-`+"`~/.config/haunt/config.toml`"+`). The model needs a context window of
-at least 64K.
+It thinks with the model you name under `+"`[model]`"+` in
+`+"`~/.config/haunt/config.toml`"+`: any OpenAI-compatible endpoint, a
+local llama-server or a cloud provider. A context of 32K or more is
+comfortable.
 
 ## Making it yours
 
-- **The persona** is in `+"`ghost.toml`"+`. It is the character.
+- **The persona** is in `+"`ghost.toml`"+`. It is the character: its
+  system text, a few example exchanges, and optionally a prefill and its
+  own sampling.
 - **The art** is a PNG with transparency: set `+"`sprite`"+` under [shell],
   or a stack of layers with named poses for expressions and animation.
 - **Doing things** means a tool server: uncomment the `+"`[[tool]]`"+`
@@ -127,23 +143,23 @@ at least 64K.
   nothing to write.
 - **Routines** are skills: a directory under `+"`skills/`"+` with a
   `+"`SKILL.md`"+` that says, in plain words, when the routine applies and
-  which of the ghost's tools to use (`+"`mcp__haunt__ask`"+`,
-  `+"`mcp__haunt__intend`"+` …). The model sees each skill's name and
-  description (cut at 60 characters, so put the cue first), and reads the
-  rest when one fits. `+"`skills/wind-down`"+`
-  is an example; haunt adds its own (a morning check-in, a focus session),
-  and one here with the same name replaces haunt's. Only Markdown is
-  installed. Keep `+"`requires_toolsets: [mcp-haunt]`"+` in each.
+  which of the ghost's tools to use (`+"`ask`"+`, `+"`intend`"+` …). The
+  model sees each skill's name and description (cut at 60 characters, so
+  put the cue first), and reads the rest when one fits.
+  `+"`skills/wind-down`"+` is an example; haunt adds its own (a morning
+  check-in, a focus session), and one here with the same name replaces
+  haunt's. List the tools a skill cannot do without under
+  `+"`requires_tools`"+`, and it is hidden from a ghost without them.
 - **Logic of its own** — reactions, commands, state — means a brain:
   `+"`haunt new -brain <name>`"+` scaffolds one in Go.
-`, name, name),
+`, name),
 
 		"skills/wind-down/SKILL.md": `---
 name: wind-down
 description: "End of the day: note what is left for tomorrow"
 metadata:
-  hermes:
-    requires_toolsets: [mcp-haunt]
+  haunt:
+    requires_tools: [intentions, ask, ask_text, intend]
 ---
 
 # Wind-down
@@ -151,14 +167,15 @@ metadata:
 Use when they say they are done for the day, or on
 [haunt event] kind=session shape=late.
 
-1. Call mcp__haunt__intentions, and mention at most one thing still open.
-2. Ask with mcp__haunt__ask: "Anything to pick up tomorrow?", with the
+1. Call ` + "`intentions`" + `, and mention at most one thing still open.
+2. Call ` + "`ask`" + ` with "Anything to pick up tomorrow?" and the
    choices "Yes" and "No, all done".
-3. On "Yes", ask mcp__haunt__ask_text what it is, then call
-   mcp__haunt__intend with it and delay_ms set to reach tomorrow morning.
-4. Say good night in a few words.
+3. On "Yes", call ` + "`ask_text`" + ` for what it is, then call
+   ` + "`intend`" + ` with it and delay_ms set to reach tomorrow morning.
+4. Speak: good night, in a few words.
 
-If they are clearly still working, reply NO_REPLY and try nothing.
+If they are clearly still working, call ` + "`stay_silent`" + ` and try
+nothing.
 `,
 	}, "cd " + name + " && haunt run ."
 }

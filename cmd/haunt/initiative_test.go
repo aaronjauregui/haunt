@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aaronjauregui/haunt/internal/model/fake"
 	"github.com/aaronjauregui/haunt/internal/testenv"
 )
 
@@ -20,11 +21,11 @@ func TestInitiative(t *testing.T) {
 	dir := t.TempDir()
 	// One unprompted action per day: enough to prove it happens, few enough
 	// to prove it stops.
-	rig := newHermesRig(t, dir, []fakeRule{
-		{Match: "kind=idle", Reply: "Still there?"},
-		{Match: "[haunt event]", Reply: "NO_REPLY"},
-		{Match: "", Reply: "echo: {input}"},
-	}, "[curiosity]\nactions_per_day = 1\n")
+	rig := newBrainRig(t, dir, rules(
+		says("kind=idle", "Still there?"),
+		[]fake.Rule{silentOn("[haunt event]")},
+		says("", "I hear you."),
+	), "[curiosity]\nactions_per_day = 1\n")
 	bin := rig.Bin
 	gDir := filepath.Join(dir, "wisp")
 	writeGhost(t, gDir, `[ghost]

@@ -42,8 +42,8 @@ func (s *Service) DescribeImage(ctx context.Context, png []byte, question string
 // something a ghost can actually use.
 //
 // Charged against its own hourly budget: a look costs about what a reply
-// costs, and the model the ghost talks through is billed by hermes, not
-// here.
+// costs, and the model the ghost talks through is billed by its own
+// provider, not here.
 func (s *Service) Look(ctx context.Context, question string, png []byte) (string, error) {
 	if !s.VisionEnabled() {
 		return "", errNoVision

@@ -216,7 +216,7 @@ func TestToolRefs(t *testing.T) {
 		raw, _ := fs.ReadFile(skills.Haunt, e.Name()+"/SKILL.md")
 		_, body, _ := Parse(raw)
 		for _, tool := range ToolRefs(body) {
-			if !slices.Contains(allTools, tool) && !slices.Contains([]string{"face", "look", "say"}, tool) {
+			if !slices.Contains(allTools, tool) && !slices.Contains([]string{"face", "look", "say", "speak", "stay_silent"}, tool) {
 				t.Errorf("%s names %s", e.Name(), tool)
 			}
 		}
