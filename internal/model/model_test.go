@@ -1,6 +1,9 @@
 package model
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestTrust(t *testing.T) {
 	for _, tc := range []struct {
@@ -68,9 +71,12 @@ func TestOver(t *testing.T) {
 }
 
 func TestDeadlineDefaults(t *testing.T) {
-	var c Config
-	if c.FirstToken() != DefaultFirstToken || c.Stall() != DefaultStall {
-		t.Errorf("defaults = %v, %v", c.FirstToken(), c.Stall())
+	c := Config{BaseURL: "https://api.z.ai/api/paas/v4"}
+	if c.FirstToken() != 30*time.Second || c.Stall() != DefaultStall {
+		t.Errorf("cloud defaults = %v, %v", c.FirstToken(), c.Stall())
+	}
+	if l := (Config{BaseURL: "http://127.0.0.1:8080/v1"}); l.FirstToken() != 120*time.Second {
+		t.Errorf("local first-token default = %v", l.FirstToken())
 	}
 	c.FirstTokenSeconds, c.StallSeconds = 5, 7
 	if c.FirstToken().Seconds() != 5 || c.Stall().Seconds() != 7 {

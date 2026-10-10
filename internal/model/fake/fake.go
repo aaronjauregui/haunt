@@ -63,6 +63,10 @@ type Rule struct {
 	// Cut ends the stream after the reply and calls with no finish and no
 	// [DONE], as a server that died mid-answer.
 	Cut bool `json:"cut"`
+	// EchoPrefill puts the request's prefill (a trailing assistant
+	// message) back at the start of the first content delta, as
+	// llama-server does.
+	EchoPrefill bool `json:"echo_prefill"`
 }
 
 // Call is one scripted tool call.
@@ -227,7 +231,11 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rule.Status, rule.RetryAfter, rule.Reply)
 		return
 	}
-	stream(w, r, rule, req.StreamOptions.IncludeUsage, len(body))
+	prefill := ""
+	if n := len(req.Messages); n > 0 && req.Messages[n-1].Role == "assistant" {
+		prefill = text(req.Messages[n-1].Content)
+	}
+	stream(w, r, rule, req.StreamOptions.IncludeUsage, len(body), prefill)
 }
 
 func writeError(w http.ResponseWriter, status int, retryAfter, msg string) {
@@ -240,7 +248,7 @@ func writeError(w http.ResponseWriter, status int, retryAfter, msg string) {
 }
 
 // stream writes rule as a chat completions SSE stream.
-func stream(w http.ResponseWriter, r *http.Request, rule Rule, usage bool, size int) {
+func stream(w http.ResponseWriter, r *http.Request, rule Rule, usage bool, size int, prefill string) {
 	fl, _ := w.(http.Flusher)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -290,7 +298,14 @@ func stream(w http.ResponseWriter, r *http.Request, rule Rule, usage bool, size 
 	if rule.Reasoning != "" && !send(map[string]any{"reasoning_content": rule.Reasoning}, nil) {
 		return
 	}
-	for _, piece := range splitWords(rule.Reply) {
+	pieces := splitWords(rule.Reply)
+	if rule.EchoPrefill && prefill != "" {
+		if len(pieces) == 0 {
+			pieces = []string{""}
+		}
+		pieces[0] = prefill + pieces[0]
+	}
+	for _, piece := range pieces {
 		words++
 		if !send(map[string]any{"content": piece}, nil) {
 			return

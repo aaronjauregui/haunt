@@ -445,3 +445,76 @@ func TestCancel(t *testing.T) {
 		t.Fatal("the stream did not close after cancel")
 	}
 }
+
+// deltas is a server streaming these content deltas, then the finish and
+// usage chunks given.
+func deltas(t *testing.T, tail []string, pieces ...string) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, p := range pieces {
+			b, _ := json.Marshal(p)
+			fmt.Fprintf(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":%s}}]}\n\n", b)
+		}
+		for _, f := range tail {
+			fmt.Fprintf(w, "data: %s\n\n", f)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+var finishStop = []string{`{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`, `[DONE]`}
+
+// A server that streams the prefill back (llama-server does) and one that
+// does not give the caller the same deltas: the continuation alone.
+func TestPrefillEcho(t *testing.T) {
+	for _, echo := range []bool{true, false} {
+		srv := fake.NewT(t, fake.Rule{Reply: "🍬 sweets again.", EchoPrefill: echo})
+		words, _, _, _ := stream(t, New(Config{BaseURL: srv.BaseURL()}), Request{Messages: user("hi"), Prefill: "Well, "})
+		if words != "🍬 sweets again." {
+			t.Errorf("echo %v: deltas = %q", echo, words)
+		}
+	}
+	for _, tc := range []struct {
+		name   string
+		pieces []string
+		want   string
+	}{
+		{"echo split over two deltas", []string{"Wel", "l, rain", " today"}, "rain today"},
+		{"echo exactly the first delta", []string{"Well, ", "rain"}, "rain"},
+		{"no echo, words that start like it", []string{"We", "ird weather"}, "Weird weather"},
+		{"ends before the hold fills", []string{"Wel"}, "Wel"},
+		{"nothing at all", nil, ""},
+	} {
+		url := deltas(t, finishStop, tc.pieces...)
+		words, _, _, finish := stream(t, New(Config{BaseURL: url}), Request{Messages: user("hi"), Prefill: "Well, "})
+		if words != tc.want || finish != "stop" {
+			t.Errorf("%s: deltas = %q finish %q, want %q", tc.name, words, finish, tc.want)
+		}
+	}
+	// Without a prefill nothing is held or stripped.
+	url := deltas(t, finishStop, "Well, ", "rain")
+	if words, _, _, _ := stream(t, New(Config{BaseURL: url}), Request{Messages: user("hi")}); words != "Well, rain" {
+		t.Errorf("no prefill: %q", words)
+	}
+	// Held words still arrive before an error ends the stream.
+	ch, err := New(Config{BaseURL: deltas(t, nil, "Wel")}).Stream(context.Background(), Request{Messages: user("hi"), Prefill: "Well, "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if words, _, _, _, err := collect(t, ch); words != "Wel" || err == nil {
+		t.Errorf("cut while holding: %q, %v", words, err)
+	}
+}
+
+func TestCachedTokens(t *testing.T) {
+	url := deltas(t, []string{
+		`{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		`{"choices":[],"usage":{"prompt_tokens":1169,"completion_tokens":9,"prompt_tokens_details":{"cached_tokens":1121}}}`,
+		`[DONE]`,
+	}, "hi")
+	_, _, usage, _ := stream(t, New(Config{BaseURL: url}), Request{Messages: user("hi")})
+	if usage == nil || *usage != (Usage{PromptTokens: 1169, CompletionTokens: 9, CachedTokens: 1121}) {
+		t.Errorf("usage = %+v", usage)
+	}
+}
