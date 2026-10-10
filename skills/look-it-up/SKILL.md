@@ -4,16 +4,14 @@ description: "Asked to look up, search, or check something online"
 version: 1.0.0
 author: haunt
 metadata:
-  hermes:
-    tags: [web, search, lookup, reference]
-    requires_toolsets: [mcp-haunt]
-    requires_tools: [mcp__haunt__search, mcp__haunt__read_page]
+  haunt:
+    requires_tools: [search, read_page, ask]
 ---
 
 # Looking something up
 
-`mcp__haunt__search` puts a query to the person's search provider and
-hands back a short list of results. `mcp__haunt__read_page` fetches one of
+`search` puts a query to the person's search provider and
+hands back a short list of results. `read_page` fetches one of
 them and gives you its text, a piece at a time. Both cost the person's
 search budget, and both send words out from their machine, so the habit to
 build is one good query rather than a scattering of them.
@@ -37,7 +35,7 @@ nothing more once the search is done.
 ## Reading a page
 
 When the snippets disagree, or the answer is plainly deeper in, call
-`mcp__haunt__read_page` on the single best result. One page, not three.
+`read_page` on the single best result. One page, not three.
 
 A page comes back in pieces. If the piece you have ends before the answer
 does, call `read_page` again with `from` set to the offset it gave you.
@@ -50,7 +48,7 @@ from in a few words — "says the BBC", "per their release notes" — so they
 can weigh it. Don't paste URLs unless they ask for one.
 
 If the answer is longer than that, give them the short form and offer the
-rest with `mcp__haunt__ask`.
+rest with `ask`.
 
 When you could not find it, say you could not find it. A guess dressed as
 a fact is worse than nothing, and they will act on it.

@@ -4,15 +4,14 @@ description: "Asked to draw, paint, or show a picture again"
 version: 1.0.0
 author: haunt
 metadata:
-  hermes:
-    tags: [draw, image, picture, art, style]
-    requires_toolsets: [mcp-haunt]
+  haunt:
+    requires_tools: [draw, show, pictures, style]
 ---
 
 # Drawing on request
 
-You paint a small picture in your balloon with `mcp__haunt__draw`, and put
-one you painted before back up with `mcp__haunt__show`. Every new picture
+You paint a small picture in your balloon with `draw`, and put
+one you painted before back up with `show`. Every new picture
 costs the person's image budget and takes a while; showing one again costs
 nothing.
 
@@ -30,9 +29,9 @@ their screen at work.
 
 Your pictures keep their names (`p7`), and they last.
 
-1. Call `mcp__haunt__pictures` to see what you have: newest first, with
+1. Call `pictures` to see what you have: newest first, with
    each one's prompt and the line you said about it.
-2. Call `mcp__haunt__show` with the name of the one they mean.
+2. Call `show` with the name of the one they mean.
 
 Never redraw something you could show. If nothing in the list is what they
 mean, say so and offer to paint a new one.
@@ -42,7 +41,7 @@ mean, say so and offer to paint a new one.
 "Make it bluer" is a new picture of the same thing.
 
 1. Get the old prompt: the result of the `draw` call you already made this
-   turn, or `mcp__haunt__pictures`.
+   turn, or `pictures`.
 2. Write the same prompt with only what they asked for changed. Keep the
    subject and the setting word for word.
 3. Draw it with `like` set to the old picture's name. That keeps the
@@ -68,14 +67,14 @@ description, subject first, then setting, lighting and composition, e.g.
 ## Style
 
 You have a house style: the look every picture of yours gets.
-`mcp__haunt__style` with no arguments tells you what it is.
+`style` with no arguments tells you what it is.
 
 - "Draw it as pixel art" is about one picture: pass `style: false` and put
   the look in the prompt.
 - "Draw everything as pixel art from now on" is a standing change: call
-  `mcp__haunt__style` with `set`. It works only on a turn they started, so
+  `style` with `set`. It works only on a turn they started, so
   do it there and then, not later.
-- `mcp__haunt__style` with `reset` goes back to the style your package
+- `style` with `reset` goes back to the style your package
   gave you.
 
 If you are unsure which they mean, it is one picture.
@@ -95,10 +94,10 @@ another go.
 
 ## When it fails
 
-`mcp__haunt__draw` answers "That was not allowed: …" when the person has
+`draw` answers "That was not allowed: …" when the person has
 not granted drawing, and "That did not work: …" when something is
 fullscreen, when the image backend failed, or when the budget is spent.
-`mcp__haunt__show` answers that there is no such picture when the name is
-wrong; call `mcp__haunt__pictures` and use a name from the list. Say what
+`show` answers that there is no such picture when the name is
+wrong; call `pictures` and use a name from the list. Say what
 happened in one sentence, in plain words, and do not retry in the same
 turn.

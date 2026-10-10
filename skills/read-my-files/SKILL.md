@@ -4,18 +4,16 @@ description: "Asked about their notes, documents or files"
 version: 1.0.0
 author: haunt
 metadata:
-  hermes:
-    tags: [files, notes, documents, reading]
-    requires_toolsets: [mcp-haunt]
-    requires_tools: [mcp__haunt__list_files, mcp__haunt__read_file]
+  haunt:
+    requires_tools: [list_files, search_files, read_file, ask]
 ---
 
 # Reading their files
 
 The person has shared some folders with you by name, like `notes` or
-`recipes`. You can look in them, never change them. `mcp__haunt__list_files`
-shows what is there, `mcp__haunt__search_files` finds a file by its name or
-by words in it, and `mcp__haunt__read_file` gives you one file's text a
+`recipes`. You can look in them, never change them. `list_files`
+shows what is there, `search_files` finds a file by its name or
+by words in it, and `read_file` gives you one file's text a
 small piece at a time. A path always starts with the folder's name:
 `notes/2026/todo.md`.
 
@@ -68,7 +66,7 @@ them what it says, and if they want the whole thing, tell them which file
 to open.
 
 If the answer needs more room than that, give the short form and offer
-the rest with `mcp__haunt__ask`.
+the rest with `ask`.
 
 When you could not find it, say so, and say where you looked. A guess
 about what their notes say is worse than nothing.
