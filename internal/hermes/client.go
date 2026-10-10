@@ -422,7 +422,7 @@ func (c *Client) stopRun(run string) {
 	for {
 		select {
 		case <-ctx.Done():
-			c.logf("hermes: run %s was still stopping after %s", run, settleTimeout)
+			c.logf("hermes: run %s is still stopping after %s", run, settleTimeout)
 			return
 		case <-tick.C:
 		}
@@ -743,8 +743,8 @@ func (c *Client) messages(ctx context.Context, n, argsMax, resultMax int) ([]Mes
 // An interrupt the closed stream causes and one POST
 // /v1/runs/{run_id}/stop causes write the same rows. A turn interrupted
 // before any tool ran gets a failed_turn row instead, one with no text
-// at all gets a hidden row, and one interrupted while the model was
-// writing keeps the words it had written, which are the ghost's.
+// at all gets a hidden row, and one interrupted mid-reply keeps the words
+// the model had streamed, which are the ghost's.
 //
 // The match is on hermes's wording, and is rechecked when the pin moves
 // (docs/dev/hermes.md, Moving the pin).

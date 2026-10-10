@@ -445,7 +445,7 @@ func TestTurnReportsEveryEvent(t *testing.T) {
 type stoppableHermes struct {
 	mu      sync.Mutex
 	stops   []string  // the runs asked to stop
-	ended   time.Time // when the run was over
+	ended   time.Time // when the run is over
 	status  string
 	stopErr int // a status to fail the stop with
 	settle  time.Duration
