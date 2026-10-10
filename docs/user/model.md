@@ -118,8 +118,9 @@ A turn is two calls by default on a local model: one in which the model
 decides what to do (look something up, take on a reminder, wear a face,
 say something or nothing), and one in which it writes the words, with
 thinking off and the ghost's prefill. On a cloud model the words come in
-the first call, saving a round trip. `fold` in `[model]` says which:
-`true` for one call, `false` for two.
+the first call, saving a round trip: the model writes its words and
+names the face to wear with them in one reply. `fold` in `[model]` says
+which: `true` for one call, `false` for two.
 
 `thinking` caps the model's reasoning: `off`, `low`, `medium` or `high`,
 or unset for the provider's default. The deciding call thinks on your
@@ -136,7 +137,7 @@ picture that takes a while to paint shows its own words while it runs.
 A provider that answers 429 or 5xx is tried three times, a second and
 then two apart, or after the wait it asks for when that is under a
 minute. A call that says nothing for `first_token_timeout` seconds (120
-local, 30 cloud), or goes quiet for `stall_timeout` (120) once under way,
+local, 90 cloud), or goes quiet for `stall_timeout` (120) once under way,
 is given up on. A turn that fails says why in the balloon ("the model
 said nothing for 2m0s — is it running?"), `haunt history` marks it
 `(the turn failed)`, and anything you said meanwhile goes to the model
@@ -166,7 +167,7 @@ All under `[model]` ([Configuration](config.md)):
 | `trust` | by `base_url` | `local` or `cloud` |
 | `fold` | `false` local, `true` cloud | the words in the deciding call |
 | `thinking` | the provider's | `off`, `low`, `medium`, `high` |
-| `first_token_timeout` | 120 local, 30 cloud | seconds a call may go without a sign of life |
+| `first_token_timeout` | 120 local, 90 cloud | seconds a call may go without a sign of life |
 | `stall_timeout` | 120 | seconds a call under way may go quiet |
 | `[model.sampling]` | the provider's | `temperature`, `top_p`, `min_p`, `repeat_penalty`, `dry_multiplier`, `xtc_probability` |
 | `[model.ghost.<name>]` | none | any key above, for one ghost |

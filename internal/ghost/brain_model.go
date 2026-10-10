@@ -871,6 +871,20 @@ func (p *parts) interim(text string) {
 	p.stopTalkingLocked()
 }
 
+// retract takes back a part that turned out not to be words, a call the
+// model wrote out as text, leaving rest (the words before the call) to be
+// shown in its place. When there are none, words of it already shown come
+// down.
+func (p *parts) retract(rest string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.acc = rest
+	if strings.TrimSpace(rest) == "" && p.shown {
+		p.g.hideBalloon()
+		p.shown = false
+	}
+}
+
 // speaking starts the reply proper: the model decided to speak, with this
 // pose, and the words may stream whoever started the turn unless the room
 // is quiet.
@@ -934,11 +948,6 @@ func (b *modelBrain) skillHost() skill.Host {
 	names := make([]string, 0)
 	for name := range b.g.offered(b.cfg.Fold()) {
 		names = append(names, name)
-	}
-	// speak is always the ghost's to decide, folded or not; a skill that
-	// says to speak is followed either way.
-	if !slices.Contains(names, speakName) {
-		names = append(names, speakName)
 	}
 	sort.Strings(names)
 	key := strings.Join(names, ",")

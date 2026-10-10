@@ -265,30 +265,123 @@ func TestDecideTerminal(t *testing.T) {
 	}
 }
 
-// TestFold: with fold on, the decide call's text is the words, speak is
-// not offered, and there is no second call.
+// TestFold: with fold on, speak is offered to be called beside the words.
+// Text and speak in one round is the words in the pose, in one call; text
+// alone is the words with the face as it was; speak alone has the words
+// written in a speak call, as unfolded.
 func TestFold(t *testing.T) {
 	on := true
+	happy, _ := json.Marshal(map[string]string{"pose": "happy"})
 	g, b, srv := modelGhostWith(t, 0, model.Config{FoldOverride: &on},
-		fake.Rule{Match: "hello", Reply: "Hello yourself."})
+		fake.Rule{Match: "hello", Reply: "Hello yourself."},
+		fake.Rule{Match: "news", Reply: "Wonderful news.", Calls: []fake.Call{{Name: speakName, Args: happy}}},
+		fake.Rule{Match: "quiet", AfterTool: speakCue, Reply: "Shh."},
+		fake.Rule{Match: "quiet", Calls: []fake.Call{{Name: speakName, Args: happy}}})
+	withPoses(t, g, "neutral", "happy")
+	g.surface = nil
 	g.markPrompted()
+
+	// Text alone.
 	b.Deliver(proto.Event{Type: proto.EventMessage, Text: "hello"})
 	waitTurns(t, b, 1)
 	reqs := requests(t, srv)
 	if len(reqs) != 1 {
 		t.Fatalf("%d calls, want one", len(reqs))
 	}
+	offered := false
 	for _, tool := range reqs[0].Tools {
-		if tool.Function.Name == speakName {
-			t.Error("speak is offered with fold on")
-		}
+		offered = offered || tool.Function.Name == speakName
+	}
+	if !offered || !strings.Contains(string(srv.Bodies()[0]), "this same reply") {
+		t.Error("speak is not offered folded, for the words in the same reply")
+	}
+	if got := g.currentPose(); got == "happy" {
+		t.Errorf("face = %q with no speak", got)
 	}
 	whys, _ := DecodeWhy(mustGet(t, g, WhyStoreKey))
 	if len(whys) != 1 || whys[0].Reply != "Hello yourself." || whys[0].Suppressed {
 		t.Errorf("why = %+v", whys)
 	}
-	if !g.blnShowing() {
-		t.Error("the words did not reach the balloon")
+
+	// Text and speak in one round.
+	g.endResponding()
+	b.Deliver(proto.Event{Type: proto.EventMessage, Text: "good news"})
+	waitTurns(t, b, 2)
+	if n := len(srv.Bodies()); n != 2 {
+		t.Fatalf("%d calls after text and speak, want one more", n)
+	}
+	if got := g.currentPose(); got != "happy" {
+		t.Errorf("face = %q, want speak's happy", got)
+	}
+	rows, _ := b.tr.live()
+	n := len(rows)
+	if n < 3 || rows[n-3].Kind != rowCalls || rows[n-3].Text != "" ||
+		rows[n-2].Kind != rowResult || rows[n-2].Text != saidCue ||
+		rows[n-1].Kind != rowWords || rows[n-1].Text != "Wonderful news." || rows[n-1].Pose != "happy" {
+		t.Errorf("transcript ends %+v", rows[max(0, n-3):])
+	}
+
+	// Speak alone: the words in a call of their own.
+	g.endResponding()
+	b.Deliver(proto.Event{Type: proto.EventMessage, Text: "quiet please"})
+	waitTurns(t, b, 3)
+	reqs = requests(t, srv)
+	if len(reqs) != 4 || len(reqs[3].Tools) != 0 {
+		t.Fatalf("%d calls after speak alone, want decide then speak", len(reqs))
+	}
+	whys, _ = DecodeWhy(mustGet(t, g, WhyStoreKey))
+	if len(whys) != 3 || whys[2].Reply != "Shh." {
+		t.Errorf("why = %+v", whys)
+	}
+}
+
+// A call the model wrote out as text, in Gemma's notation, is made: the
+// words before it are interim, its result goes back as a tool result, and
+// the call's text never becomes the words.
+func TestModelCallWrittenAsText(t *testing.T) {
+	leaked := `On it.<tool_call|><|tool_call>call:intend{text:<|"|>water the plants<|"|>,delay_ms:600000}<tool_call|>`
+	g, b, srv := modelGhost(t, 0,
+		fake.Rule{Match: "plants", AfterTool: "*", Reply: "Done."},
+		fake.Rule{Match: "plants", Reply: leaked})
+	g.markPrompted()
+	b.Deliver(proto.Event{Type: proto.EventMessage, Text: "remind me about the plants"})
+	waitTurns(t, b, 1)
+	if r := g.call(context.Background(), "intentions", nil); !strings.Contains(r.Text, "water the plants") {
+		t.Errorf("the call was not made: %+v", r)
+	}
+	reqs := requests(t, srv)
+	if len(reqs) != 2 {
+		t.Fatalf("%d calls, want the call's result to go back", len(reqs))
+	}
+	msgs := reqs[1].Messages
+	if last := msgs[len(msgs)-1]; last.Role != "tool" || last.Name != "intend" {
+		t.Errorf("the second round ends %+v, want intend's result", last)
+	}
+	whys, _ := DecodeWhy(mustGet(t, g, WhyStoreKey))
+	if len(whys) != 1 || whys[0].Reply != "Done." || len(whys[0].Acted) != 1 || whys[0].Acted[0] != "intend" {
+		t.Errorf("why = %+v", whys)
+	}
+	rows, _ := b.tr.live()
+	if rows[1].Kind != rowCalls || rows[1].Text != "On it." || len(rows[1].Calls) != 1 {
+		t.Errorf("the calls row is %+v", rows[1])
+	}
+}
+
+// A call written as text that cannot be read goes as words, and the log
+// says so.
+func TestModelUnreadableCallAsText(t *testing.T) {
+	leaked := `<|tool_call>call:ask{choices:[<|"|>Yes<|"|>,<|"|>No`
+	g, b, _ := modelGhost(t, 3, fake.Rule{Match: "kind=idle", Reply: leaked})
+	var buf bytes.Buffer
+	g.log = hlog.Open(&buf)
+	b.Deliver(proto.Event{Type: proto.EventIdle})
+	waitTurns(t, b, 1)
+	whys, _ := DecodeWhy(mustGet(t, g, WhyStoreKey))
+	if len(whys) != 1 || whys[0].Reply != leaked {
+		t.Errorf("why = %+v, want the text as words", whys)
+	}
+	if !strings.Contains(buf.String(), "the model wrote a call as text that could not be read") {
+		t.Errorf("no warning:\n%s", buf.String())
 	}
 }
 
@@ -870,8 +963,8 @@ func TestModelDecisionsOffered(t *testing.T) {
 			t.Errorf("%s should not be offered", not)
 		}
 	}
-	if g.offered(true)[speakName] != nil {
-		t.Error("speak is offered with fold on")
+	if d := g.offered(true)[speakName]; d == nil || !strings.Contains(d.describe(), "same reply") {
+		t.Error("speak is not offered folded, for the words in the same reply")
 	}
 	r := g.call(context.Background(), "nope", nil)
 	if !r.IsError || !strings.Contains(r.Text, "no tool called nope") {

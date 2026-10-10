@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -22,8 +23,13 @@ import (
 // with the face to wear, and the words are then a second call, prose only,
 // with the persona's prefill and thinking off. `stay_silent` ends it with
 // nothing said. A provider with fold on (cloud by default) takes the words
-// from the decide call itself, so there `speak` is not offered and the
-// call's text is what the ghost says.
+// from the decide call itself: the reply that calls `speak` carries them as
+// its text, so the pose and the words come in one round, and a reply of
+// text with no call is the words with the face left as it is.
+//
+// A model that writes a call out as text instead of making it (Gemma's
+// own call syntax, leaked into the content) has the call read back out of
+// the text and applied as if it had been made (textCalls).
 //
 // The registry is how the ghost grows new behaviour without a new call
 // shape. A decision is a name, a description, a JSON schema and an apply
@@ -292,14 +298,14 @@ func decode(args json.RawMessage, v any) error {
 }
 
 // offered is every decision this ghost may make on a turn, by name: the
-// registry less what its package never asked for, and less speak when the
-// words come in the decide call; then what its tool servers offer, when
-// it may use them at all.
+// registry less what its package never asked for, with speak described
+// for the words in the same reply when they come in the decide call; then
+// what its tool servers offer, when it may use them at all.
 func (g *Ghost) offered(fold bool) map[string]decision {
 	out := map[string]decision{}
 	for name, d := range decisions {
 		if fold && name == speakName {
-			continue
+			d = foldedSpeak
 		}
 		if n, ok := d.(needsDeclared); ok && n.declared() != "" && !g.declares(n.declared()) {
 			continue
@@ -345,6 +351,7 @@ func (g *Ghost) callDecision(ctx context.Context, t *turn, ds map[string]decisio
 	if !json.Valid(args) {
 		return toolResult{Text: "Those arguments are not valid JSON.", IsError: true}
 	}
+	args = unalias(name, args)
 	g.log.Debug(hlog.Tool, "the model decided %s %s", name, clip(string(args), 200))
 	d, ok := ds[name]
 	if !ok {
@@ -371,6 +378,49 @@ func (g *Ghost) callDecision(ctx context.Context, t *turn, ds map[string]decisio
 		}
 	}
 	return toolResult{Text: text}
+}
+
+// argAliases are the argument names a model guesses for a decision in
+// place of the ones its schema has, by decision: alias to name. Seen from
+// Gemma 4 writing calls out as text. Kept to the guesses seen or nearly
+// so; a wrong key anywhere else is answered as a failure to retry.
+var argAliases = map[string]map[string]string{
+	"ask":         {"question": "text"},
+	"skill_view":  {"skill": "name"},
+	"skill_write": {"skill": "name"},
+	"recall":      {"topic": "query"},
+}
+
+// unalias renames a decision's guessed argument names to its own, where
+// the right name is not also there. Anything that is not an object goes
+// as it came.
+func unalias(name string, args json.RawMessage) json.RawMessage {
+	aliases := argAliases[name]
+	if len(aliases) == 0 {
+		return args
+	}
+	var m map[string]json.RawMessage
+	if json.Unmarshal(args, &m) != nil {
+		return args
+	}
+	changed := false
+	for from, to := range aliases {
+		if v, ok := m[from]; ok {
+			if _, has := m[to]; !has {
+				m[to] = v
+				delete(m, from)
+				changed = true
+			}
+		}
+	}
+	if !changed {
+		return args
+	}
+	out, err := json.Marshal(m)
+	if err != nil {
+		return args
+	}
+	return out
 }
 
 // call is callDecision on the turn in flight with everything the ghost is
@@ -425,8 +475,9 @@ type ending struct {
 	// silent: the model chose to say nothing, or ran out of rounds.
 	silent bool
 	// words is what to say when the decide call carried them (fold, or a
-	// round of text with no calls); speak is set when the words are still
-	// to be written by the speak call.
+	// round of text with no calls), with pose the face from a speak call
+	// beside them, if any; speak is set when the words are still to be
+	// written by the speak call.
 	words string
 	speak bool
 	pose  string
@@ -453,10 +504,15 @@ func (b *modelBrain) decide(ctx context.Context, t *turn, msgs []model.Message, 
 		// The person's turn streams as it comes; an event's words wait
 		// until the model has decided they are words.
 		var onDelta func(string)
+		var held *heldCalls
 		if t.person {
-			onDelta = p.delta
+			held = &heldCalls{out: p.delta}
+			onDelta = held.delta
 		}
 		r, err := stream(ctx, b.client, req, onDelta)
+		if held != nil {
+			held.flush()
+		}
 		if r.usage != nil {
 			g.log.Debug(hlog.Brain, "decide: %d prompt tokens (%d cached), %d out",
 				r.usage.PromptTokens, r.usage.CachedTokens, r.usage.CompletionTokens)
@@ -465,8 +521,22 @@ func (b *modelBrain) decide(ctx context.Context, t *turn, msgs []model.Message, 
 			return ending{}, err
 		}
 		if len(r.calls) == 0 {
-			// Text and no call: the words. With fold on that is the
-			// contract; without it the model wrote its reply instead of
+			calls, rest, found, err := textCalls(r.text, ds)
+			switch {
+			case found && err == nil:
+				// Calls written out as text: made, and the text they
+				// were written in is not words.
+				g.log.Debug(hlog.Brain, "the model wrote %d call(s) as text; making them", len(calls))
+				p.retract(rest)
+				r.calls, r.text = calls, rest
+			case found:
+				g.log.Warn(hlog.Brain, "the model wrote a call as text that could not be read (%v); "+
+					"it goes as words: %s", err, clip(r.text, 160))
+			}
+		}
+		if len(r.calls) == 0 {
+			// Text and no call: the words. With fold on the face is left
+			// as it is; without it the model wrote its reply instead of
 			// deciding to, and asking it again would put its own words
 			// last, where a server reads them as a prefill to continue.
 			if strings.TrimSpace(r.text) == "" {
@@ -474,11 +544,20 @@ func (b *modelBrain) decide(ctx context.Context, t *turn, msgs []model.Message, 
 			}
 			return ending{words: r.text}, nil
 		}
+		// Folded, text beside speak is the words, and the pose is speak's.
+		// They go on the words row, not on this one, so the transcript
+		// reads as it does unfolded and the words are not replayed twice.
+		folded := fold && strings.TrimSpace(r.text) != "" && slices.ContainsFunc(r.calls,
+			func(c model.ToolCall) bool { return c.Name == speakName })
+		rowText := r.text
+		if folded {
+			rowText = ""
+		}
 		// The calls, in order. Every call gets its result message, the
 		// terminal one included, since the provider expects an answer to
 		// each.
-		assistant := model.Message{Role: "assistant", Content: r.text, ToolCalls: r.calls}
-		row := TranscriptRow{Kind: rowCalls, Text: r.text}
+		assistant := model.Message{Role: "assistant", Content: rowText, ToolCalls: r.calls}
+		row := TranscriptRow{Kind: rowCalls, Text: rowText}
 		for _, c := range r.calls {
 			row.Calls = append(row.Calls, TranscriptCall{ID: c.ID, Name: c.Name, Args: c.Args})
 		}
@@ -499,9 +578,15 @@ func (b *modelBrain) decide(ctx context.Context, t *turn, msgs []model.Message, 
 					}
 					json.Unmarshal(c.Args, &a)
 					e.speak, e.pose = true, strings.TrimSpace(a.Pose)
+					if folded {
+						e.speak, e.words = false, r.text
+					}
 				}
 				end = &e
 				res = g.callDecision(ctx, t, ds, c.Name, c.Args)
+				if folded && !e.silent && !res.IsError {
+					res.Text = saidCue
+				}
 			default:
 				res = g.callDecision(ctx, t, ds, c.Name, c.Args)
 			}
@@ -548,4 +633,201 @@ func DecisionNames() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// Calls written as text.
+//
+// Gemma 4 writes a call as `<|tool_call>call:NAME{ARGS}<tool_call|>`, with
+// ARGS in its own notation: keys unquoted, strings between `<|"|>` tokens.
+// llama-server turns that into a structured call when it can read it;
+// when it cannot, the call arrives as the reply's text. textCalls reads it
+// back:
+//
+//	text = [words] call {call}
+//	call = ["<|tool_call>"] ["call:"] NAME object ["<tool_call|>"]
+//
+// NAME is a decision on offer, and object is JSON with three loosenings:
+// `<|"|>…<|"|>` is a string, a bare word as a key or a value is a string,
+// and true, false, null and numbers are themselves. Words may come before
+// the first call only when it opens with `<|tool_call>`, which nobody
+// writes by accident; otherwise the text must open with NAME{ or
+// call:NAME{. A stray `<tool_call|>` in the words is dropped.
+
+const (
+	gemmaCallOpen  = "<|tool_call>"
+	gemmaCallClose = "<tool_call|>"
+	gemmaQuote     = `<|"|>`
+)
+
+// textCalls reads calls written as text. found says the text has a call's
+// shape; err, that it had the shape and could not be read. rest is the
+// words before the calls.
+func textCalls(text string, ds map[string]decision) (calls []model.ToolCall, rest string, found bool, err error) {
+	s := strings.TrimSpace(text)
+	if at := strings.Index(s, gemmaCallOpen); at >= 0 {
+		rest, s = s[:at], s[at:]
+	} else if name, _ := callName(strings.TrimPrefix(s, "call:")); ds[name] == nil {
+		return nil, "", false, nil
+	}
+	rest = strings.TrimSpace(strings.ReplaceAll(rest, gemmaCallClose, ""))
+	for s != "" {
+		s = strings.TrimPrefix(s, gemmaCallOpen)
+		s = strings.TrimPrefix(s, "call:")
+		name, n := callName(s)
+		if name == "" {
+			return nil, "", true, fmt.Errorf("no call name at %q", clip(s, 40))
+		}
+		if ds[name] == nil {
+			return nil, "", true, fmt.Errorf("there is no tool called %s", name)
+		}
+		args, m, err := looseObject(s[n:])
+		if err != nil {
+			return nil, "", true, fmt.Errorf("%s: %w", name, err)
+		}
+		calls = append(calls, model.ToolCall{ID: fmt.Sprintf("text_call_%d", len(calls)), Name: name, Args: args})
+		s = strings.TrimSpace(s[n+m:])
+		s = strings.TrimSpace(strings.TrimPrefix(s, gemmaCallClose))
+	}
+	return calls, rest, true, nil
+}
+
+// callName is the name at the start of s, up to an opening brace, and how
+// many bytes it takes; "" when s does not start NAME{.
+func callName(s string) (string, int) {
+	i := 0
+	for i < len(s) && isNameByte(s[i]) {
+		i++
+	}
+	if i == 0 || i >= len(s) || s[i] != '{' {
+		return "", 0
+	}
+	return s[:i], i
+}
+
+func isNameByte(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-' || c == '.'
+}
+
+// looseObject reads the object at the start of s in Gemma's notation and
+// returns it as JSON, with how many bytes of s it took.
+func looseObject(s string) (json.RawMessage, int, error) {
+	var b strings.Builder
+	depth := 0
+	for i := 0; i < len(s); {
+		c := s[i]
+		switch {
+		case strings.HasPrefix(s[i:], gemmaQuote):
+			from := i + len(gemmaQuote)
+			j := strings.Index(s[from:], gemmaQuote)
+			if j < 0 {
+				return nil, 0, fmt.Errorf("a string that does not end")
+			}
+			b.WriteString(jsonString(s[from : from+j]))
+			i = from + j + len(gemmaQuote)
+		case c == '"':
+			j := i + 1
+			for j < len(s) && s[j] != '"' {
+				if s[j] == '\\' {
+					j++
+				}
+				j++
+			}
+			if j >= len(s) {
+				return nil, 0, fmt.Errorf("a string that does not end")
+			}
+			b.WriteString(s[i : j+1])
+			i = j + 1
+		case c == '{' || c == '[':
+			depth++
+			b.WriteByte(c)
+			i++
+		case c == '}' || c == ']':
+			depth--
+			b.WriteByte(c)
+			i++
+			if depth == 0 {
+				out := json.RawMessage(b.String())
+				if !json.Valid(out) {
+					return nil, 0, fmt.Errorf("not an object: %s", clip(b.String(), 80))
+				}
+				return out, i, nil
+			}
+		case strings.IndexByte(":, \t\r\n", c) >= 0:
+			b.WriteByte(c)
+			i++
+		default:
+			j := i
+			for j < len(s) && strings.IndexByte("{}[]:,\" \t\r\n", s[j]) < 0 && !strings.HasPrefix(s[j:], gemmaQuote) {
+				j++
+			}
+			word := s[i:j]
+			if word == "true" || word == "false" || word == "null" ||
+				(word[0] == '-' || word[0] >= '0' && word[0] <= '9') && json.Valid([]byte(word)) {
+				b.WriteString(word)
+			} else {
+				b.WriteString(jsonString(word))
+			}
+			i = j
+		}
+		if depth == 0 {
+			return nil, 0, fmt.Errorf("no object")
+		}
+	}
+	return nil, 0, fmt.Errorf("an object that does not end")
+}
+
+// jsonString is s as a JSON string, with <, > and & left as they are.
+func jsonString(s string) string {
+	var b strings.Builder
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	enc.Encode(s)
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// heldCalls passes the words of a person's turn to the screen as they
+// stream, and stops at the first of Gemma's call tokens: what follows is
+// a call written as text, which is not for the balloon. A tail that could
+// be the start of one is held until it is known not to be.
+type heldCalls struct {
+	out     func(string)
+	buf     string
+	stopped bool
+}
+
+func (h *heldCalls) delta(d string) {
+	if h.stopped {
+		return
+	}
+	h.buf += d
+	cut := -1
+	for _, tok := range []string{gemmaCallOpen, gemmaCallClose} {
+		if i := strings.Index(h.buf, tok); i >= 0 && (cut < 0 || i < cut) {
+			cut = i
+		}
+	}
+	if cut >= 0 {
+		h.out(h.buf[:cut])
+		h.buf, h.stopped = "", true
+		return
+	}
+	keep := 0
+	for _, tok := range []string{gemmaCallOpen, gemmaCallClose} {
+		for k := min(len(tok)-1, len(h.buf)); k > keep; k-- {
+			if strings.HasSuffix(h.buf, tok[:k]) {
+				keep = k
+				break
+			}
+		}
+	}
+	h.out(h.buf[:len(h.buf)-keep])
+	h.buf = h.buf[len(h.buf)-keep:]
+}
+
+// flush passes on a held tail once the stream has ended without a call.
+func (h *heldCalls) flush() {
+	if !h.stopped && h.buf != "" {
+		h.out(h.buf)
+	}
+	h.buf = ""
 }

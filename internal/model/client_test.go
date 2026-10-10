@@ -360,6 +360,20 @@ func TestFirstTokenDeadline(t *testing.T) {
 	if el := time.Since(start); el > 2500*time.Millisecond {
 		t.Errorf("gave up after %v", el)
 	}
+
+	// Reasoning is the first sign of life: a model that thinks for longer
+	// than the first-token deadline before its first word is not given up
+	// on once its reasoning has started to stream.
+	srv.Script(fake.Rule{Reasoning: "hmm", GapMS: 300, Reply: "late words"})
+	c.firstToken, c.stall = 400*time.Millisecond, 2*time.Second
+	ch, err = c.Stream(context.Background(), Request{Messages: user("hi")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	words, _, _, _, err := collect(t, ch)
+	if err != nil || words != "late words" {
+		t.Errorf("after reasoning: %q, %v; want the words", words, err)
+	}
 }
 
 func TestStallDeadline(t *testing.T) {

@@ -103,7 +103,8 @@ sign of life (a word, reasoning, a tool call fragment, the finish, the
 usage; SSE comments and a role-only chunk do not count), then
 `stall_timeout` from each sign to the next. Unset, the first is 120 s for
 a local model, which reads a long prompt at a few hundred tokens a second
-before its first word, and 30 s for a cloud one. A failed turn is
+before its first word, and 90 s for a cloud one, which with thinking on
+may reason that long on a long turn before it streams anything. A failed turn is
 refunded, written as a `failed` row, and told to a person waiting (or
 watching the ghost wake) in the balloon: "the model said nothing for
 2m0s — is it running?". A failed turn is left out of the next prompt
@@ -180,11 +181,25 @@ before and left up while the tools run, until the next words replace it.
 On the person's turn words stream as they come; an event turn's words
 wait until the model has decided they are words.
 
-**Text and no call** ends the loop with that text as the words. With fold
-on that is the contract; without it the model wrote its reply instead of
-deciding to, and asking again would put its own words last, where a
-server reads them as a prefill to continue. Empty text and no call is
-silence.
+**Text and no call** ends the loop with that text as the words, the face
+left as it is. Unfolded, the model wrote its reply instead of deciding
+to, and asking again would put its own words last, where a server reads
+them as a prefill to continue. Empty text and no call is silence.
+
+**Calls written as text.** Gemma 4 on llama-server sometimes writes a
+call in its own notation, `<|tool_call>call:ask{choices:[<|"|>Yes<|"|>]}<tool_call|>`,
+and the server, unable to read it, passes it on as the reply's text.
+When a round has no calls and its text opens with a call to a decision
+on offer (or carries `<|tool_call>` after some words), `textCalls` reads
+it back as JSON (`<|"|>` as a quote, bare keys and words as strings) and
+the calls go through `callDecision` like any other, the words before them
+interim. Text that has the shape but will not read goes as words, with a
+warning in the log. Such calls tend to carry guessed argument names, so
+`callDecision` renames the few seen (`argAliases`: `question` to `text`
+on `ask`, `skill` to `name` on `skill_view` and `skill_write`, `topic`
+to `query` on `recall`) for any call, and `ask` with no `text` is a
+failure the model can retry. On the person's turn the balloon stops at the first
+call token as the words stream, so the call's text is never shown.
 
 **The speak call**, after `speak`: the same messages plus the decision
 and its result, `[persona] prefill` as a trailing assistant message,
@@ -193,12 +208,19 @@ pose goes on with the first words shown, and the prefill is shown as
 the opening of the words. llama-server echoes a prefill in its first
 delta; the client strips a leading copy.
 
-**Fold.** With `fold` on (the default for cloud), `speak` is not offered:
-the decide call's text is the words and `stay_silent` is the only
-terminal decision. One round trip instead of two, at the cost of the
-prefill and of thinking being off for the words. A local server holds
-the prompt in its cache between the two calls, so the second costs it
-little, and fold is off there.
+**Fold.** With `fold` on (the default for cloud), the words are the text
+of the reply that calls `speak`: one round carries the words and the
+pose, and there is no speak call. `speak`'s description says so. A round
+of text with no call is the words with the face as it was; `speak` with
+no text has the words written in a speak call, as unfolded, so nothing
+is lost. The words go on the transcript's `words` row with the pose, and
+the call row beside them carries no text, so the history reads as it
+does unfolded. As the words stream before the call that ends them, the
+pose goes on when the call arrives rather than with the first word. One
+round trip instead of two, at the cost of the prefill and of thinking
+being off for the words. A local server holds the prompt in its cache
+between the two calls, so the second costs it little, and fold is off
+there.
 
 ## The registry
 
@@ -228,8 +250,8 @@ that calls `register`. Nothing else changes. The gates are applied by
 by its table entry. `TestNewDecision` registers a throwaway one to hold
 that line. A name registered twice panics at start.
 
-`offered` is the registry for one ghost on one turn: less `speak` when
-folded, less any decision whose `needs` the package did not declare,
+`offered` is the registry for one ghost on one turn: `speak` described
+for the words in the same reply when folded, less any decision whose `needs` the package did not declare,
 plus the server tools when `tools` is active. `toolsOf` sorts it by name
 so the request is the same every turn. A decision with `needs` is hidden
 rather than refused because a skill that names it is hidden with it
@@ -243,7 +265,7 @@ same way.
 
 | Decision | Args | Gate |
 |---|---|---|
-| `speak` | `pose?` | terminal; not offered folded |
+| `speak` | `pose?` | terminal; folded, beside the words |
 | `stay_silent` | | terminal |
 | `say` | `text`, `linger_ms?` | none |
 | `ask` | `text`, `choices[1..9]` | none; blocks until picked or dismissed |
@@ -641,8 +663,9 @@ read back.
 (`newBrainRig`): the greeting, a person's turn with a tool, a silent
 event turn and its refund, a deferred event, a failed turn, a reminder
 discharged once shown, a question answered by a click. The package
-tests in `internal/ghost` (`brain_model_test.go`, `decide_new_test.go`)
-hold the loop itself: the terminal decisions, fold, the round cap, taint
-on the turn, compaction, the prompt order, a new decision in one file.
+tests in `internal/ghost` (`brain_model_test.go`, `decide_test.go`,
+`decide_new_test.go`) hold the loop itself: the terminal decisions, fold,
+the round cap, taint on the turn, compaction, the prompt order, a new
+decision in one file, calls written as text.
 The evals are the live counterpart, on a real model
 ([Hacking](hacking.md#evals)).

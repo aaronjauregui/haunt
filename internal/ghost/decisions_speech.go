@@ -23,17 +23,32 @@ const (
 // the words, in the speak call.
 const speakCue = "Now say it: only the words for your balloon."
 
-func init() {
-	register(verb{
-		id: speakName,
-		desc: "Say something to the person. pose is the face you wear as you say it, one of your poses, " +
-			"or empty to let your words choose. You write the words next.",
+// saidCue is speak's result when the words came with it, folded: there is
+// nothing more to write.
+const saidCue = "Said."
+
+// speakVerb is speak with a description. Unfolded, the words come in a
+// call of their own after it; folded, they are the text of the reply that
+// calls it, and offered puts foldedSpeak in its place.
+func speakVerb(desc string) verb {
+	return verb{
+		id:     speakName,
+		desc:   desc,
 		params: []string{"pose?:string"},
 		ends:   true,
 		run: func(context.Context, *Ghost, *turn, json.RawMessage) (string, error) {
 			return speakCue, nil
 		},
-	})
+	}
+}
+
+// foldedSpeak is speak as offered with fold on.
+var foldedSpeak = speakVerb("Say something to the person: write the words as the text of this same reply " +
+	"and call speak in it, with pose the face you wear as you say them (one of your poses, or empty to let your words choose).")
+
+func init() {
+	register(speakVerb("Say something to the person. pose is the face you wear as you say it, one of your poses, " +
+		"or empty to let your words choose. You write the words next."))
 	register(verb{
 		id:   silentName,
 		desc: "Say nothing this turn. Most events deserve no reply; nothing is shown.",
@@ -100,6 +115,9 @@ func toolAsk(g *Ghost, _ context.Context, args json.RawMessage) (string, error) 
 	}
 	if err := decode(args, &a); err != nil {
 		return "", err
+	}
+	if strings.TrimSpace(a.Text) == "" {
+		return "", fmt.Errorf("ask needs text, the question, and choices, 1 to 9 of them")
 	}
 	if len(a.Choices) < 1 || len(a.Choices) > 9 {
 		return "", fmt.Errorf("between 1 and 9 choices, please")

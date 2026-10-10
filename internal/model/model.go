@@ -54,13 +54,15 @@ type Config struct {
 
 // Default deadlines. A local server processes a cold prompt at a few
 // hundred tokens a second (about 500 for Gemma 4 31B on llama-server), so
-// a long transcript takes it a minute or more before its first word; a
-// cloud provider starts within seconds. The stall deadline is far more
+// a long transcript takes it a minute or more before its first word. A
+// cloud provider starts within seconds, but one that thinks may spend a
+// minute on a long turn before its first sign of life, since some stream
+// nothing of their reasoning. The stall deadline is far more
 // than any model needs between two tokens, and is there for a provider
 // that went away mid-call.
 const (
 	DefaultFirstTokenLocal = 120 * time.Second
-	DefaultFirstTokenCloud = 30 * time.Second
+	DefaultFirstTokenCloud = 90 * time.Second
 	DefaultStall           = 120 * time.Second
 )
 
