@@ -1124,6 +1124,7 @@ func (g *Ghost) openHermes() (*hermes.Gateway, *hermes.Client, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	client.Logf = func(f string, a ...any) { g.log.Warn(hlog.Brain, f, a...) }
 	client.LoadSession = func() string {
 		id, _, _ := g.store.Get(HermesSessionStoreKey)
 		return id

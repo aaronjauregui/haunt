@@ -39,6 +39,9 @@ type Client struct {
 	// HTTP defaults to a client with no overall timeout: a turn lasts as
 	// long as its tool calls do, and the caller's context is the bound.
 	HTTP *http.Client
+	// Logf reports what goes wrong out of the caller's sight, such as a
+	// run that could not be stopped. Nil is silent.
+	Logf func(format string, a ...any)
 
 	mu      sync.Mutex
 	session string
@@ -253,6 +256,8 @@ func (c *Client) turn(ctx context.Context, id string, req TurnRequest) (Reply, e
 		completed bool
 		failure   error
 		said      string // the provider's own words on a turn that did not finish
+		run       string // the run's id, which every event carries
+		over      bool   // whether hermes has said the run is over
 	)
 	err = readSSE(resp.Body, func(event string, data []byte) bool {
 		if req.OnEvent != nil {
@@ -264,10 +269,17 @@ func (c *Client) turn(ctx context.Context, id string, req TurnRequest) (Reply, e
 				return true
 			}
 		}
+		if ev.RunID != "" {
+			run = ev.RunID
+		}
 		if ev.SessionID != "" && ev.SessionID != id && (event == "assistant.completed" || strings.HasPrefix(event, "run.")) {
 			// Compression moved the conversation to a child session.
 			id = ev.SessionID
 			c.setSession(id)
+		}
+		switch event {
+		case "run.completed", "run.failed", "run.cancelled", "error":
+			over = true
 		}
 		switch event {
 		case "assistant.delta":
@@ -329,6 +341,9 @@ func (c *Client) turn(ctx context.Context, id string, req TurnRequest) (Reply, e
 		return true
 	})
 	if ctx.Err() != nil {
+		if run != "" && !over {
+			c.stopRun(run)
+		}
 		return reply, ctx.Err()
 	}
 	if failure != nil {
@@ -346,9 +361,106 @@ func (c *Client) turn(ctx context.Context, id string, req TurnRequest) (Reply, e
 	return reply, nil
 }
 
+// How long a run given up on may take to stop: the stop request, then the
+// wait for the run to be over.
+var (
+	stopTimeout   = 5 * time.Second
+	settleTimeout = 10 * time.Second
+	settlePoll    = 200 * time.Millisecond
+)
+
+// stopRun stops a run its caller has given up on, and waits for it to be
+// over, so that the next turn on the session does not start beside it.
+//
+// Closing the stream alone stops the run only when hermes next writes to
+// it, a keepalive up to 10 s later, and hermes does not refuse a second
+// turn on a session whose first is still running. POST
+// /v1/runs/{run_id}/stop (gateway/platforms/api_server_runs.py,
+// _handle_stop_run) interrupts the agent at once, as an explicit stop,
+// but answers "stopping" without waiting for it: the agent's thread winds
+// down on its own, a recovery wait within 200 ms and a model call when its
+// request is cut. The run is over when GET /v1/runs/{run_id} answers one
+// of TERMINAL_STATUSES (api_server_run_idempotency.py), which the session
+// stream's run sets once the agent has returned and its last rows are
+// stored (api_server.py, _handle_session_chat_stream); a run hermes has
+// already forgotten is over too. The wait is bounded, and gives up
+// quietly: a run that will not stop is hermes's to finish.
+//
+// The requests are on a context of their own, the caller's having been
+// cancelled. A stop that fails is logged and changes nothing for the
+// caller, whose turn has failed already.
+func (c *Client) stopRun(run string) {
+	path := "/v1/runs/" + url.PathEscape(run)
+	status := func(resp *http.Response) string {
+		defer resp.Body.Close()
+		var out struct {
+			Status string `json:"status"`
+		}
+		json.NewDecoder(resp.Body).Decode(&out)
+		return out.Status
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
+	resp, err := c.request(ctx, http.MethodPost, path+"/stop", nil)
+	cancel()
+	if isCode(err, "run_not_found") || isCode(err, "run_not_active") {
+		// Forgotten, or with no agent to interrupt: not started on one
+		// yet, which the closed stream ends at hermes's next write, or
+		// just finished with one.
+		return
+	}
+	if err != nil {
+		c.logf("hermes: stopping run %s: %v", run, err)
+		return
+	}
+	if runOver(status(resp)) {
+		return
+	}
+	ctx, cancel = context.WithTimeout(context.Background(), settleTimeout)
+	defer cancel()
+	tick := time.NewTicker(settlePoll)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			c.logf("hermes: run %s was still stopping after %s", run, settleTimeout)
+			return
+		case <-tick.C:
+		}
+		resp, err := c.request(ctx, http.MethodGet, path, nil)
+		if isCode(err, "run_not_found") {
+			return
+		}
+		if err != nil {
+			if ctx.Err() == nil {
+				c.logf("hermes: waiting for run %s to stop: %v", run, err)
+			}
+			return
+		}
+		if runOver(status(resp)) {
+			return
+		}
+	}
+}
+
+// runOver is whether a run's status is one hermes's runs end in.
+func runOver(status string) bool {
+	switch status {
+	case "completed", "failed", "cancelled", "interrupted":
+		return true
+	}
+	return false
+}
+
+func (c *Client) logf(format string, a ...any) {
+	if c.Logf != nil {
+		c.Logf(format, a...)
+	}
+}
+
 // sseEvent is the union of the payload fields haunt reads.
 type sseEvent struct {
 	SessionID      string `json:"session_id"`
+	RunID          string `json:"run_id"`
 	Delta          string `json:"delta"`
 	Text           string `json:"text"`
 	ToolName       string `json:"tool_name"`
@@ -381,6 +493,7 @@ func (e *sseEvent) UnmarshalJSON(b []byte) error {
 	}
 	*e = sseEvent{
 		SessionID:      str("session_id"),
+		RunID:          str("run_id"),
 		Delta:          str("delta"),
 		Text:           str("text"),
 		ToolName:       str("tool_name"),

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +16,7 @@ import (
 	"sync"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -433,6 +436,142 @@ func TestTurnReportsEveryEvent(t *testing.T) {
 	}
 	if !slices.Contains(got, "tool.progress") {
 		t.Error("the model's reasoning was not heard")
+	}
+}
+
+// stoppableHermes is a session stream whose run waits, as one riding out a
+// provider outage does, until it is stopped; it ends settle after the
+// stop, as hermes's agent thread winds down after answering "stopping".
+type stoppableHermes struct {
+	mu      sync.Mutex
+	stops   []string  // the runs asked to stop
+	ended   time.Time // when the run was over
+	status  string
+	stopErr int // a status to fail the stop with
+	settle  time.Duration
+	stopped chan struct{}
+}
+
+func newStoppableHermes(t *testing.T) (*stoppableHermes, *httptest.Server) {
+	h := &stoppableHermes{status: "running", stopped: make(chan struct{}), settle: 300 * time.Millisecond}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/sessions/{id}/chat/stream", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write([]byte("event: run.started\ndata: {\"run_id\":\"run_abc\",\"session_id\":\"haunt-moth\"}\n\n" +
+			"event: message.started\ndata: {\"run_id\":\"run_abc\",\"session_id\":\"haunt-moth\"}\n\n"))
+		w.(http.Flusher).Flush()
+		// Hermes does not see the client go until its next write.
+		<-h.stopped
+		time.Sleep(h.settle)
+		h.mu.Lock()
+		h.status, h.ended = "cancelled", time.Now()
+		h.mu.Unlock()
+	})
+	mux.HandleFunc("POST /v1/runs/{id}/stop", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer sekrit" {
+			t.Errorf("stop sent without the key")
+		}
+		h.mu.Lock()
+		h.stops = append(h.stops, r.PathValue("id"))
+		fail := h.stopErr
+		h.mu.Unlock()
+		if fail != 0 {
+			w.WriteHeader(fail)
+			w.Write([]byte(`{"error":{"message":"no","code":"boom"}}`))
+			return
+		}
+		if r.PathValue("id") != "run_abc" {
+			w.WriteHeader(404)
+			w.Write([]byte(`{"error":{"message":"Run not found","code":"run_not_found"}}`))
+			return
+		}
+		close(h.stopped)
+		w.Write([]byte(`{"run_id":"run_abc","status":"stopping"}`))
+	})
+	mux.HandleFunc("GET /v1/runs/{id}", func(w http.ResponseWriter, r *http.Request) {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		fmt.Fprintf(w, `{"object":"hermes.run","run_id":"run_abc","status":%q}`, h.status)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return h, srv
+}
+
+// A turn given up on is stopped in hermes, by the run id its stream
+// carries, and Turn returns once the run is over and not before.
+func TestTurnStopsTheRunGivenUpOn(t *testing.T) {
+	h, srv := newStoppableHermes(t)
+	saved := "haunt-moth"
+	c := testClient(srv, &saved)
+	var logged []string
+	c.Logf = func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) }
+	ctx, cancel := context.WithCancel(context.Background())
+	_, err := c.Turn(ctx, TurnRequest{Input: "x", OnEvent: func(name string) {
+		if name == "message.started" {
+			cancel()
+		}
+	}})
+	returned := time.Now()
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error %v", err)
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !slices.Equal(h.stops, []string{"run_abc"}) {
+		t.Errorf("stops asked for %v", h.stops)
+	}
+	if h.ended.IsZero() || returned.Before(h.ended) {
+		t.Errorf("Turn returned at %v, before the run was over at %v", returned, h.ended)
+	}
+	if len(logged) != 0 {
+		t.Errorf("logged %q", logged)
+	}
+}
+
+// A stop that fails is logged, and the turn fails as it would have.
+func TestTurnStopFailing(t *testing.T) {
+	h, srv := newStoppableHermes(t)
+	h.stopErr = 500
+	defer close(h.stopped)
+	saved := "haunt-moth"
+	c := testClient(srv, &saved)
+	var logged []string
+	c.Logf = func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) }
+	ctx, cancel := context.WithCancel(context.Background())
+	_, err := c.Turn(ctx, TurnRequest{Input: "x", OnEvent: func(name string) {
+		if name == "message.started" {
+			cancel()
+		}
+	}})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error %v", err)
+	}
+	if len(logged) != 1 || !strings.Contains(logged[0], "stopping run run_abc") || !strings.Contains(logged[0], "500") {
+		t.Errorf("logged %q", logged)
+	}
+}
+
+// A turn whose run hermes has said is over is not stopped.
+func TestTurnOverIsNotStopped(t *testing.T) {
+	f, srv := newFakeHermes(t)
+	f.sessions["haunt-moth"] = true
+	f.stream = func(string, string) string {
+		return "event: run.started\ndata: {\"run_id\":\"run_x\"}\n\nevent: assistant.completed\ndata: {\"run_id\":\"run_x\",\"content\":\"hi\",\"completed\":true}\n\nevent: run.completed\ndata: {\"run_id\":\"run_x\"}\n\n: keepalive\n\n"
+	}
+	saved := "haunt-moth"
+	c := testClient(srv, &saved)
+	var logged []string
+	c.Logf = func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) }
+	ctx, cancel := context.WithCancel(context.Background())
+	c.Turn(ctx, TurnRequest{Input: "x", OnEvent: func(name string) {
+		if name == "run.completed" {
+			cancel()
+		}
+	}})
+	// The fake has no stop endpoint: asking would have been logged.
+	if len(logged) != 0 {
+		t.Errorf("logged %q", logged)
 	}
 }
 

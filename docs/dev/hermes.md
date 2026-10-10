@@ -239,16 +239,35 @@ tools runs (`mcp__haunt__*`, from `tool.started` to `tool.completed` or
 `tool.failed`), since `draw` and `ask` take minutes and the MCP timeout
 bounds them; hermes's own tools are local reads and writes that ask no
 model and do not stop it. A turn given up on fails as any other does, with
-the reason in the balloon. Closing the stream stops the run in hermes: the
-API server's next write, a keepalive within 10 s, fails, and it calls
-`agent.interrupt("SSE client disconnected")`
+the reason in the balloon, and the client stops its run before `Turn`
+returns (`Client.stopRun`). Closing the stream alone would stop it only
+at the API server's next write, a keepalive up to 10 s later, which
+fails and calls `agent.interrupt("SSE client disconnected")`
 (`gateway/platforms/api_server.py`, `_handle_session_chat_stream`,
-`_drain_session_stream_task_on_disconnect`); a recovery wait checks for
-the interrupt every 200 ms (`agent/turn_recovery.py`,
-`interruptible_backoff_sleep`) and ends the turn through
-`abort_turn_on_interrupt`, which keeps what the turn had done in the
-session. `POST /v1/runs/{run_id}/stop` does the same at once and is not
-used. The waiting indicator comes down when the first words are
+`_drain_session_stream_task_on_disconnect`), and hermes does not refuse
+a second turn on a session whose first is still running, so the
+person's queued words could start one beside it. The client records the
+`run_id` every event carries and, when its context is cancelled before
+a `run.*` event has ended the run, sends `POST /v1/runs/{run_id}/stop`
+(`gateway/platforms/api_server_runs.py`, `_handle_stop_run`) on a fresh
+context with a 5 s timeout. The stop is an explicit hard interrupt
+(`request_hard_interrupt`), and it is not synchronous: it answers
+`{"status": "stopping"}` at once, and the agent's thread winds down on
+its own. A recovery wait checks for the interrupt every 200 ms
+(`agent/turn_recovery.py`, `interruptible_backoff_sleep`) and ends the
+turn through `abort_turn_on_interrupt`, which keeps what the turn had
+done in the session; a model call ends when its request is cut. So the
+client then polls `GET /v1/runs/{run_id}` every 200 ms, for at most
+10 s, until the status is one of hermes's terminal ones (`completed`,
+`failed`, `cancelled`, `interrupted`;
+`api_server_run_idempotency.py` `TERMINAL_STATUSES`), which the session
+stream sets once the agent has returned and the turn's rows are stored.
+A 404 `run_not_found` is a run already forgotten, and a 409
+`run_not_active` one with no agent to interrupt yet, which the closed
+stream ends; neither is waited on. A stop or a wait that fails is logged
+and does not change the error the person sees. The run's ownership is
+the API key's and the profile's, so the same bearer key that started it
+may stop it. The waiting indicator comes down when the first words are
 put on screen, not on a tool event, since a `face` call followed by
 another model round trip is seconds with nothing to show; the talk
 animation runs while deltas arrive; tool events feed the why-trace and
@@ -860,8 +879,12 @@ engine's tools are the person's and not among them.
 fake `hermes` executable (`cmd/haunt/testdata/fakehermes`) that reads
 the profile, spawns `haunt mcp-serve` with hermes's filtered environment,
 and speaks the captured SSE format from a script (`FAKEHERMES_SCRIPT`:
-match, delay, interim words, tool call, reply). `newHermesRig` is the
-shared rig. The fake gateway also logs what it finds under
+match, delay, interim words, tool call, reply). Its runs outlive their
+requests as hermes's do: a run whose client has gone ends only when it
+is stopped (`POST /v1/runs/{run_id}/stop`, which answers "stopping" and
+ends the run a moment later) or a few seconds on, when hermes would have
+noticed, and `GET /v1/runs/{run_id}` reports its status.
+`newHermesRig` is the shared rig. The fake gateway also logs what it finds under
 `skills.external_dirs`.
 `internal/hermes` tests replay captured SSE and cover the profile merge
 and the skills install. The evals are the live counterpart, on a real
