@@ -16,7 +16,7 @@ vet:
 fmt:
 	gofmt -l -w .
 
-# The evals: wisp on the real model in [model], each case
+# The evals: wisp on the real model in the config's [model], each case
 # run EVAL_TRIALS times (default 3) four at a time, graded by code and by
 # `claude -p` on a Claude subscription. Spends quota; not part of `test`.
 # Results and report.md go to .eval/<timestamp>/ (EVAL_OUT moves .eval).

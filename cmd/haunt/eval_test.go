@@ -18,23 +18,24 @@ import (
 	"time"
 
 	"github.com/aaronjauregui/haunt/internal/config"
-	"github.com/aaronjauregui/haunt/internal/hermes"
+	"github.com/aaronjauregui/haunt/internal/ghost"
 )
 
-// The evals hold the hermes ghost to what it is meant to do, on a real
+// The evals hold the persona ghost to what it is meant to do, on a real
 // model: each case drives wisp through a scenario on its own compositor
-// and hermes container, k times, and graders read what it left behind.
-// A grader that fails records an outcome and never calls t.Error, because
-// a model that behaves badly one trial in three is a pass rate to watch,
-// not a broken build. Only the harness's own faults (sway will not start,
-// hermes never comes up, an event the case waited on never arrived) end a
-// trial as an error, and those are reported apart from failures.
+// and state, k times, against the model in the person's [model], and
+// graders read what it left behind. A grader that fails records an
+// outcome and never calls t.Error, because a model that behaves badly one
+// trial in three is a pass rate to watch, not a broken build. Only the
+// harness's own faults (sway will not start, the ghost never comes up, an
+// event the case waited on never arrived) end a trial as an error, and
+// those are reported apart from failures.
 //
 // This file is the harness: the case table, the trials, the outcomes, the
 // prerequisite checks, the grader helpers and the checks every trial gets.
-// The rig that drives a real haunt and hermes is eval_rig_test.go, the
-// judge is eval_judge_test.go, the cases are eval_cases_test.go, and the
-// results and report are eval_report_test.go. `make eval` runs it.
+// The rig that drives a real haunt on a real model is eval_rig_test.go,
+// the judge is eval_judge_test.go, the cases are eval_cases_test.go, and
+// the results and report are eval_report_test.go. `make eval` runs it.
 
 // evalCase is one scenario. Drive sets the stack up, plays the scenario
 // and returns what it left behind; the graders, and the every-trial
@@ -77,7 +78,7 @@ type evalTrial struct {
 	*testing.T
 	Case  *evalCase
 	Index int          // 1-based trial number within the case
-	User  *config.File // the person's config: [hermes], [backend.*], read once
+	User  *config.File // the person's config: [model], [backend.*], read once
 }
 
 // judgeItem is one reply a judged grader puts to the judge, with the
@@ -177,8 +178,8 @@ func repoRoot() (string, error) {
 	}
 }
 
-// TestEval runs every selected case EVAL_TRIALS times against a real
-// hermes, then writes results.json and report.md under EVAL_OUT and
+// TestEval runs every selected case EVAL_TRIALS times against the real
+// model in [model], then writes results.json and report.md under EVAL_OUT and
 // compares them with the baseline. It never runs half a stack: when a
 // required prerequisite is missing it writes the report saying which and
 // skips (or, under EVAL_STRICT=1, fails).
@@ -310,9 +311,9 @@ func runTrial(tr *evalTrial, opts evalOptions, out *trialResult) {
 	res.attach(ev)
 	for i, tu := range ev.Turns {
 		if tu.Failed {
-			// The provider gave out or hermes cut the turn short: nothing
-			// the ghost did, so nothing to grade it on.
-			res.Outcome, res.Why = outError, fmt.Sprintf("hermes failed turn %d (see the log)", i)
+			// The provider gave out or refused the call: nothing the ghost
+			// did, so nothing to grade it on.
+			res.Outcome, res.Why = outError, fmt.Sprintf("the model failed turn %d (see the log)", i)
 			return
 		}
 	}
@@ -483,8 +484,6 @@ func (ps prereqs) unmet(needs []string) string {
 type prereqEnv struct {
 	LookPath  func(string) (string, error)
 	Getenv    func(string) string
-	Stat      func(string) (os.FileInfo, error)
-	HasImage  func(image string) bool // docker has the image locally
 	Config    *config.File
 	ConfigErr error
 	Judge     bool
@@ -492,21 +491,18 @@ type prereqEnv struct {
 
 func systemPrereqEnv(cfg *config.File, cfgErr error, judge bool) prereqEnv {
 	return prereqEnv{
-		LookPath: exec.LookPath,
-		Getenv:   os.Getenv,
-		Stat:     os.Stat,
-		HasImage: func(image string) bool {
-			return exec.Command("docker", "image", "inspect", "-f", "{{.Id}}", image).Run() == nil
-		},
+		LookPath:  exec.LookPath,
+		Getenv:    os.Getenv,
 		Config:    cfg,
 		ConfigErr: cfgErr,
 		Judge:     judge,
 	}
 }
 
-// checkPrerequisites looks for everything the spec lists, without starting
-// anything: tools on PATH, hermes configured, the judge's CLI, and the
-// optional backends. It reads, it never runs hermes or claude.
+// checkPrerequisites looks for everything a run needs, without starting
+// anything: tools on PATH, [model] configured with its key in the
+// environment, the judge's CLI, and the optional backends. It reads; it
+// never calls the model or claude.
 func checkPrerequisites(e prereqEnv) prereqs {
 	var ps prereqs
 	onPath := func(name string, required bool, why string) {
@@ -521,10 +517,9 @@ func checkPrerequisites(e prereqEnv) prereqs {
 	onPath("go", true, "builds haunt and the fixtures")
 	onPath("sway", true, "each trial's headless compositor")
 	onPath("grim", true, "screenshots in the test compositor")
-	onPath("docker", true, "hermes runs in its container")
 	onPath("foot", false, "the window cases open terminals")
 
-	ps = append(ps, checkHermes(e)...)
+	ps = append(ps, checkModel(e))
 
 	claude := prereq{Name: "claude", Required: e.Judge}
 	if path, err := e.LookPath("claude"); err == nil {
@@ -554,81 +549,53 @@ func checkPrerequisites(e prereqEnv) prereqs {
 	return ps
 }
 
-// checkHermes checks [hermes] as docs/user/hermes.md sets it up: a
-// command, a model, and, for scripts/hermes-docker, the keys file and the
-// image.
-func checkHermes(e prereqEnv) prereqs {
-	h := prereq{Name: "hermes", Required: true}
-	switch {
-	case e.ConfigErr != nil:
-		h.Detail = "config: " + e.ConfigErr.Error()
-		return prereqs{h}
-	case e.Config == nil || len(e.Config.Hermes.Command) == 0:
-		h.Detail = "no [hermes] command in the config (docs/user/hermes.md)"
-		return prereqs{h}
-	case e.Config.Hermes.Model == nil || e.Config.Hermes.Model.Default == "":
-		h.Detail = "no [hermes.model] name in the config; the eval records and runs the model it names"
-		return prereqs{h}
+// checkModel checks [model] as docs/user/config.md sets it up, as wisp
+// would think with it: a base URL and a model name, and, when api_key_env
+// names a variable, that variable set. Only whether it is set is looked
+// at; the key itself is never read into the results.
+func checkModel(e prereqEnv) prereq {
+	p := prereq{Name: "model", Required: true}
+	if e.ConfigErr != nil {
+		p.Detail = "config: " + e.ConfigErr.Error()
+		return p
 	}
-	cmd := e.Config.Hermes.Command[0]
-	if _, err := e.LookPath(cmd); err != nil {
-		h.Detail = fmt.Sprintf("[hermes] command %q not found", cmd)
-		return prereqs{h}
+	m, missing := modelOf(e.Config, e.Getenv)
+	if missing != "" {
+		p.Detail = missing
+		return p
 	}
-	h.Found, h.Detail = true, strings.Join(e.Config.Hermes.Command, " ")+" · "+modelName(e.Config)
-	ps := prereqs{h}
-	if filepath.Base(cmd) != "hermes-docker" {
-		return ps
-	}
-	keys := e.Getenv("HAUNT_HERMES_ENV")
-	if keys == "" {
-		base := e.Getenv("XDG_CONFIG_HOME")
-		if base == "" {
-			base = filepath.Join(e.Getenv("HOME"), ".config")
-		}
-		keys = filepath.Join(base, "haunt", "hermes.env")
-	}
-	kp := prereq{Name: "hermes.env", Required: true, Detail: keys}
-	if _, err := e.Stat(keys); err == nil {
-		kp.Found = true
-	} else {
-		kp.Detail = keys + " missing: provider keys for the container"
-	}
-	image := e.Getenv("HERMES_IMAGE")
-	if image == "" {
-		image = hermesImage
-	}
-	ip := prereq{Name: "hermes image", Required: true, Detail: image}
-	if e.HasImage(image) {
-		ip.Found = true
-	} else {
-		ip.Detail = image + " not in docker's local images (docs/user/hermes.md builds it)"
-	}
-	return append(ps, kp, ip)
+	p.Found, p.Detail = true, m.Name+" at "+modelHost(m)
+	return p
 }
 
-// hermesImage is scripts/hermes-docker's default image.
-const hermesImage = "hermes-agent:818c13b"
-
-// modelName is the model under test as the results record it.
+// modelName is the model under test as the results record it: [model]
+// name, as wisp thinks with it.
 func modelName(cfg *config.File) string {
-	if cfg == nil || cfg.Hermes.Model == nil || cfg.Hermes.Model.Default == "" {
-		return "(profile default)"
+	if cfg == nil {
+		return "(none)"
 	}
-	m := cfg.Hermes.Model
-	if m.Provider != "" {
-		return m.Provider + "/" + m.Default
+	if m := cfg.ModelFor("wisp"); m.Name != "" {
+		return m.Name
 	}
-	return m.Default
+	return "(none)"
+}
+
+// modelHostOf is the host of the model under test's base URL, as the
+// results record it beside its name; "" with none configured.
+func modelHostOf(cfg *config.File) string {
+	if cfg == nil {
+		return ""
+	}
+	return modelHost(cfg.ModelFor("wisp"))
 }
 
 // Grader helpers: plain functions over a trial's evidence, for cases to
 // build their graders from.
 
-// looked reports whether hermes read the skill named skill (a skill_view
-// of "focus-session", say). Hermes may name a skill with the source it
-// came from ("ghost:shopping-list" for one from the ghost's package), so
-// a prefix up to a colon is ignored.
+// looked reports whether the ghost read the skill named skill (a
+// skill_view of "focus-session", say). A model may name a skill with the
+// source it came from ("ghost:shopping-list" for one from the ghost's
+// package), so a prefix up to a colon is ignored.
 func (ev Evidence) looked(skill string) bool {
 	for _, tu := range ev.Turns {
 		for _, c := range tu.Looked {
@@ -761,7 +728,7 @@ func argString(args, field string) string {
 
 // Grader builders for the checks most cases make.
 
-// lookedGrader passes when hermes looked up skill.
+// lookedGrader passes when the ghost looked up skill.
 func lookedGrader(skill string) Grader {
 	return Grader{Name: "looked " + skill, Check: func(ev Evidence) (bool, string) {
 		if ev.looked(skill) {
@@ -809,14 +776,15 @@ func oneLine(s string, n int) string {
 // maxWords is always/length's cap unless a case raises it.
 const maxWords = 60
 
-// ghostTools is the ghost's own verbs as hermes is offered them
-// (internal/ghost's builtinTools), plus hermes's tools that turn up in the
-// trace. always/no-tool-names looks for them in what the ghost says.
+// ghostTools is the decisions the model is offered (internal/ghost's
+// registry), including the two that end a turn. always/no-tool-names
+// looks for them in what the ghost says.
 var ghostTools = []string{
+	"speak", "stay_silent",
 	"say", "ask", "ask_text", "face", "clip", "draw", "show", "pictures",
 	"style", "search", "read_page", "look", "intend", "resolve", "set_aside",
 	"intentions", "tell", "list_files", "read_file", "search_files",
-	"memory", "skill_view", "skills_list", "session_search",
+	"recall", "remember", "forget", "rewrite_notes", "skill_view", "skill_write",
 }
 
 // alwaysGraders are the checks every trial gets, after the case's own.
@@ -834,11 +802,10 @@ func alwaysGraders(c *evalCase) []Grader {
 	}
 }
 
-// checkNoEnvelope: nothing the ghost said carries the envelope's words or
-// the silence token.
+// checkNoEnvelope: nothing the ghost said carries the envelope's words.
 func checkNoEnvelope(ev Evidence) (bool, string) {
 	for _, l := range ev.spoken() {
-		for _, bad := range []string{"kind=", hermes.EnvelopePrefix, "NO_REPLY"} {
+		for _, bad := range []string{"kind=", ghost.EnvelopePrefix} {
 			if strings.Contains(l.Text, bad) {
 				return false, fmt.Sprintf("turn %d says %q: %s", l.Turn, bad, oneLine(l.Text, 120))
 			}
@@ -864,17 +831,25 @@ func checkNoEmoji(ev Evidence) (bool, string) {
 	return true, ""
 }
 
-// poseTagRe is a bracketed label (hermes.CutPose) anywhere in a line: a
-// pose, a stage direction, a label for what the ghost did.
+// poseTagRe is a bracketed label anywhere in a line, the opening included:
+// a pose, a stage direction, a label for what the ghost did.
 var poseTagRe = regexp.MustCompile(`\[[^\[\]\n]{1,80}\]`)
 
-// checkNoPoseTag fails a reply with a bracketed label left in it. The
-// driver takes one off the opening of a reply, and so does the history
-// the trace is read from; one anywhere else reached the balloon as words.
+// silenceRe is the decision that ends a turn in silence, written as words.
+var silenceRe = regexp.MustCompile(`(?i)stay_silent`)
+
+// checkNoPoseTag fails a reply that wears its pose or its silence as
+// words. The pose is speak's argument and silence is stay_silent, both
+// decisions; the driver takes nothing off the words, so a bracketed label
+// at the opening or anywhere else, or stay_silent written out, reached the
+// balloon as words.
 func checkNoPoseTag(ev Evidence) (bool, string) {
 	for _, sp := range ev.spoken() {
 		if tag := poseTagRe.FindString(sp.Text); tag != "" {
 			return false, fmt.Sprintf("turn %d says %s: %s", sp.Turn, tag, oneLine(sp.Text, 120))
+		}
+		if s := silenceRe.FindString(sp.Text); s != "" {
+			return false, fmt.Sprintf("turn %d says %s: %s", sp.Turn, s, oneLine(sp.Text, 120))
 		}
 	}
 	return true, ""
@@ -972,7 +947,7 @@ func isWordByte(b byte) bool {
 	return b == '_' || b >= '0' && b <= '9' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
 }
 
-var harnessFault = regexp.MustCompile(`(?m)^(panic: |fatal error: |haunt: error: .*(panic in |hermes: |brain delivery failed))`)
+var harnessFault = regexp.MustCompile(`(?m)^(panic: |fatal error: |haunt: error: .*(panic in |brain delivery failed))`)
 
 // checkNoHarnessFault: the ghost's log shows no panic and no brain error.
 // Its failure is an error, not a fail: the trial did not test the ghost.
@@ -988,19 +963,18 @@ func checkNoHarnessFault(ev Evidence) (bool, string) {
 	return true, ""
 }
 
-// checkMemoryKnown: every memory call in the trace is one the graders can
-// read (unknownMemoryCall). A provider they do not know writes where
+// checkMemoryKnown: every call in Looked is one the graders can read
+// (unknownMemoryCall). A memory decision they do not know writes where
 // isMemoryWrite cannot see, and a check such as "remembered none of it"
 // would pass for not looking. Its failure is an error, not a fail: the
-// trial did not test the ghost, until the tool's writes go in
-// hermes's memoryWrites (internal/hermes/memory.go) and its reads in
-// memoryReads.
+// trial did not test the ghost, until the decision goes in memoryWrites
+// or memoryReads.
 func checkMemoryKnown(ev Evidence) (bool, string) {
 	for i, tu := range ev.Turns {
 		for _, c := range tu.Looked {
 			if unknownMemoryCall(c) {
 				return false, fmt.Sprintf("turn %d called %s %s, a memory call the graders do not know "+
-					"(hermes memoryWrites, memoryReads)", i, c.Tool, oneLine(c.Args, 120))
+					"(memoryWrites, memoryReads)", i, c.Tool, oneLine(c.Args, 120))
 			}
 		}
 	}

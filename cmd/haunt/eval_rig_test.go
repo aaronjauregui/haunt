@@ -5,14 +5,14 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,42 +29,44 @@ import (
 
 	"github.com/aaronjauregui/haunt/internal/config"
 	"github.com/aaronjauregui/haunt/internal/ghost"
-	"github.com/aaronjauregui/haunt/internal/hermes"
+	"github.com/aaronjauregui/haunt/internal/model"
+	"github.com/aaronjauregui/haunt/internal/model/fake"
+	"github.com/aaronjauregui/haunt/internal/skill"
 	"github.com/aaronjauregui/haunt/internal/store"
 	"github.com/aaronjauregui/haunt/internal/testenv"
 )
 
-// This file is the real-hermes rig: one trial's wisp, on a real model, in
-// a headless sway of its own, driven the way a person would drive it and
-// read back as an Evidence for the graders.
+// This file is the rig: one trial's wisp, on a real model, in a headless
+// sway of its own, driven the way a person would drive it and read back as
+// an Evidence for the graders.
 //
 // A trial shares nothing with any other: its own compositor, config dir,
-// state dir, hermes home (so its own profile and container) and runtime
-// dir. What it takes from the person running the evals is only the model:
-// [hermes] command and [hermes.model] from their config, and the provider
-// keys scripts/hermes-docker reads from ~/.config/haunt/hermes.env.
+// runtime dir and state dir, which holds the ghost's transcript, memory
+// and learned skills. What it takes from the person running the evals is
+// only the model: [model] from their config as wisp would think with it,
+// and the key in the environment variable that names.
 //
-// Everything that can go wrong because the stack misbehaved (hermes never
-// up, a question that never came, a container left behind) is returned as
-// an error rather than failing the test, so the harness can report the
-// trial as an error, apart from a model that answered badly.
+// Everything that can go wrong because the stack misbehaved (the ghost
+// never up, a question that never came) is returned as an error rather
+// than failing the test, so the harness can report the trial as an error,
+// apart from a model that answered badly.
 
 const (
-	// rigHermesUp is how long a trial waits for the gateway: a container
-	// to start, hermes to load, and the profile's first boot.
-	rigHermesUp = 3 * time.Minute
-	// rigStop is how long the ghost has to stop once asked. Its gateway
-	// gets eight seconds in docker and haunt's ten before SIGKILL.
-	rigStop = 45 * time.Second
+	// rigUp is how long a trial waits for the ghost to be on screen and
+	// booted: haunt run's READY.
+	rigUp = 2 * time.Minute
+	// rigStop is how long the ghost has to stop once asked: a turn in
+	// flight is cut short, and haunt's own shutdown takes a few seconds.
+	rigStop = 30 * time.Second
 	// rigRead is the pause between a question appearing and its answer,
 	// as a person would take to read it. Answering in the same frame the
 	// balloon is drawn in is not something a person can do, and not a
 	// path worth testing.
 	rigRead = 2 * time.Second
 	// occasionLead is the least time between starting the ghost and its
-	// occasion, so the occasion falls after hermes is up, most of the
-	// time. When hermes is slower, the occasion waits for the gateway and
-	// then for the turn in flight, as any event does.
+	// occasion, so the occasion falls after the boot turn, most of the
+	// time. When the model is slower, the occasion waits for the turn in
+	// flight, as any event does.
 	occasionLead = 45 * time.Second
 	// wispStoryWords is the cap wisp's ghost-story skill states, which the
 	// ghost-story case holds the story to.
@@ -84,8 +86,8 @@ var (
 type rigOptions struct {
 	// Notes gives wisp the notes tool server (testdata/toolserver),
 	// writing to the trial's notes file, with the shopping-list skill that
-	// needs it and a misspelled one that hermes hides. The file is
-	// collected as Evidence.Files["notes"].
+	// needs it and a misspelled one that the driver hides, with a warning.
+	// The file is collected as Evidence.Files["notes"].
 	Notes bool
 	// Occasion, if set, is the name of an occasion ([[trigger]] with no
 	// tool) on the first whole minute at least occasionLead after start.
@@ -95,7 +97,7 @@ type rigOptions struct {
 	IdleMS uint
 	// GoalCheckDelay is haunt run's -goal-check-delay (default 5s).
 	GoalCheckDelay time.Duration
-	// Config is appended to the trial's config.toml, after [hermes]; an
+	// Config is appended to the trial's config.toml, after [model]; an
 	// [awareness] section, say.
 	Config string
 	// NotesSeed is what the notes file holds before the ghost starts.
@@ -131,15 +133,19 @@ type rigOptions struct {
 type evalRig struct {
 	t    *testing.T
 	opts rigOptions
-	hr   hermesRig // Bin, CfgDir and RT, and env(), as the fake-backed tests have them
 	c    *testenv.Compositor
 
-	Dir, State, Ghost, Notes, Profile string
+	// Dir is the trial's own directory; Bin the haunt built into it;
+	// CfgDir its HAUNT_CONFIG_DIR and RT its HAUNT_RUNTIME_DIR. State is
+	// wisp's state directory: state.db, transcript.db, memory/ and the
+	// skills it writes itself.
+	Dir, Bin, CfgDir, RT, State, Ghost, Notes string
 
 	cmd        *exec.Cmd
 	exited     chan struct{} // closed when haunt run has exited
 	waitErr    error         // haunt run's exit, once exited is closed
-	log        *rigLog
+	log        *rigLog       // haunt's stderr
+	out        *rigLog       // haunt's stdout, where READY comes
 	kb         *testenv.Keyboard
 	occasionAt time.Time
 	marks      map[string]int    // Evidence.Marks, as the case sets them
@@ -148,19 +154,24 @@ type evalRig struct {
 	typed      int               // input lines typed into so far
 	stopErr    error
 	stopped    bool
-	ups        int            // "hermes is up" lines seen by the last start
 	noticed    map[string]int // session notices waited on, by shape
 	kinds      map[string]int // turns waited on by waitKind, by envelope kind
 	pre        []TraceTurn    // the trace as it was before a restart
 	ptr        *testenv.Pointer
 }
 
+// env is what every haunt the rig runs needs: the trial's config and
+// runtime dirs.
+func (r *evalRig) env() []string {
+	return []string{"HAUNT_RUNTIME_DIR=" + r.RT, "HAUNT_CONFIG_DIR=" + r.CfgDir}
+}
+
 // newEvalRig prepares a trial: haunt built, the trial's config, wisp
 // written, a compositor started. Nothing runs until start, so goals can be
-// seeded first. A trial is skipped when hermes is not configured.
+// seeded first. A trial is skipped when [model] is not configured.
 func newEvalRig(t *testing.T, opts rigOptions) (*evalRig, error) {
 	t.Helper()
-	user, missing := rigUserHermes()
+	user, missing := rigUserModel()
 	if missing != "" {
 		t.Skip(missing)
 	}
@@ -182,26 +193,24 @@ func newEvalRig(t *testing.T, opts rigOptions) (*evalRig, error) {
 	r := &evalRig{
 		t:       t,
 		opts:    opts,
-		hr:      hermesRig{Dir: dir, Bin: filepath.Join(dir, "haunt"), CfgDir: filepath.Join(dir, "config"), RT: rt},
 		Dir:     dir,
+		Bin:     filepath.Join(dir, "haunt"),
+		CfgDir:  filepath.Join(dir, "config"),
+		RT:      rt,
 		State:   filepath.Join(dir, "state"),
 		Ghost:   filepath.Join(dir, "wisp"),
 		log:     &rigLog{},
+		out:     &rigLog{},
 		marks:   map[string]int{},
 		files:   map[string]string{},
 		noticed: map[string]int{},
 		kinds:   map[string]int{},
 	}
-	home := filepath.Join(dir, "hermes")
-	r.Profile = filepath.Join(home, "profiles", hermes.ProfileName("wisp"))
-	// The profile's skills are installed read-only, which t.TempDir's
-	// cleanup cannot remove. Registered after the TempDir, so it runs first.
-	t.Cleanup(func() { exec.Command("chmod", "-R", "u+w", home).Run() })
-	cfg, err := rigConfigTOML(user, home)
+	cfg, err := rigConfigTOML(user)
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(r.hr.CfgDir, 0o755); err != nil {
+	if err := os.MkdirAll(r.CfgDir, 0o755); err != nil {
 		return nil, err
 	}
 	copied, err := rigUserBackend(opts.Backend)
@@ -221,10 +230,10 @@ func newEvalRig(t *testing.T, opts rigOptions) (*evalRig, error) {
 			copied += fmt.Sprintf("\n[files]\nunprompted = %q\n", opts.FilesUnprompted)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(r.hr.CfgDir, "config.toml"), []byte(cfg+copied+"\n"+opts.Config), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(r.CfgDir, "config.toml"), []byte(cfg+copied+"\n"+opts.Config), 0o644); err != nil {
 		return nil, err
 	}
-	if err := rigBuild(r.hr.Bin, "."); err != nil {
+	if err := rigBuild(r.Bin, "."); err != nil {
 		return nil, err
 	}
 	w := r.wisp()
@@ -285,7 +294,7 @@ func (r *evalRig) seedGoal(text string, age time.Duration) error {
 	return ghost.SeedGoal(s, text, nil, age)
 }
 
-// start runs wisp and returns once hermes is up for it.
+// start runs wisp and returns once it is on screen and booted (READY).
 func (r *evalRig) start() error {
 	if r.running() {
 		return errors.New("start: the ghost is already running")
@@ -306,40 +315,49 @@ func (r *evalRig) start() error {
 	} else {
 		args = append(args, "-x", "200", "-y", "150", "-state", r.State, r.Ghost)
 	}
-	cmd := exec.Command(r.hr.Bin, args...)
+	cmd := exec.Command(r.Bin, args...)
 	// Debug for balloon and input: their "choices offered" and "input line
 	// opened" lines are how answer and typein know a question is up. Debug
 	// for brain: its "turn over" line is how sayWait and waitTurn know a
 	// turn has ended.
-	cmd.Env = append(r.c.Env(), r.hr.env()...)
+	cmd.Env = append(r.c.Env(), r.env()...)
 	cmd.Env = append(cmd.Env, "HAUNT_LOG=info", "HAUNT_DEBUG=balloon,input,brain",
 		"XDG_DATA_HOME="+filepath.Join(r.Dir, "data"))
 	if r.Notes != "" {
 		cmd.Env = append(cmd.Env, "HAUNT_TEST_NOTES="+r.Notes)
 	}
-	cmd.Stdout = io.Discard
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return err
 	}
+	// READY comes once a session, and stdout is kept across a restart, so
+	// this session's is the one after those already there.
+	before := strings.Count(r.out.String(), "READY")
 	if err := cmd.Start(); err != nil {
 		return err
 	}
 	r.cmd, r.exited = cmd, make(chan struct{})
-	copied := make(chan struct{})
+	var copied sync.WaitGroup
+	copied.Add(2)
 	go func() {
 		io.Copy(r.log, stderr)
-		close(copied)
+		copied.Done()
 	}()
 	go func() {
-		<-copied
+		io.Copy(r.out, stdout)
+		copied.Done()
+	}()
+	go func() {
+		copied.Wait()
 		r.waitErr = cmd.Wait()
 		close(r.exited)
 	}()
-	before := r.ups
-	return r.waitLog("hermes is up", rigHermesUp, func(log string) bool {
-		r.ups = strings.Count(log, "hermes is up for wisp")
-		return r.ups > before
+	return r.waitLog("the ghost on screen", rigUp, func(string) bool {
+		return strings.Count(r.out.String(), "READY") > before
 	})
 }
 
@@ -371,24 +389,41 @@ func rigSeedFiles(dir string, files map[string][]byte) (string, error) {
 	return fmt.Sprintf("\n[files.roots]\nnotes = %q\n", dir), nil
 }
 
-// snapMemories keeps what hermes has saved to the profile's memories/ so
-// far as Evidence.Files[name], every file one after another.
+// snapMemories keeps what wisp has in its memory directory so far (self.md,
+// you.md and the topic files) as Evidence.Files[name], every file one after
+// another under its path.
 func (r *evalRig) snapMemories(name string) error {
-	dir := filepath.Join(r.Profile, "memories")
-	entries, err := os.ReadDir(dir)
-	if err != nil && !os.IsNotExist(err) {
+	text, err := rigMemoryFiles(filepath.Join(r.State, "memory"))
+	if err != nil {
 		return err
 	}
-	var b strings.Builder
-	for _, e := range entries {
-		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
-		if err != nil {
-			continue
-		}
-		fmt.Fprintf(&b, "== %s\n%s\n", e.Name(), data)
-	}
-	r.files[name] = b.String()
+	r.files[name] = text
 	return nil
+}
+
+// rigMemoryFiles is every file under dir, each headed by its path relative
+// to dir, in path order; "" when dir does not exist yet.
+func rigMemoryFiles(dir string) (string, error) {
+	var b strings.Builder
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) && p == dir {
+				return filepath.SkipDir
+			}
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return nil
+		}
+		rel, _ := filepath.Rel(dir, p)
+		fmt.Fprintf(&b, "== %s\n%s\n", filepath.ToSlash(rel), data)
+		return nil
+	})
+	return b.String(), err
 }
 
 // running reports whether haunt run is up for wisp.
@@ -404,8 +439,8 @@ func (r *evalRig) running() bool {
 	}
 }
 
-// restart stops wisp and starts it again on the same state and hermes
-// profile, as a person's logout and login would, and marks "restarted".
+// restart stops wisp and starts it again on the same state, transcript and
+// memory, as a person's logout and login would, and marks "restarted".
 // The trace before it is kept, in case the new session does not carry it.
 func (r *evalRig) restart() error {
 	out, err := r.haunt("history", "-json", "-n", "1000", "-state", r.State, "wisp")
@@ -424,8 +459,8 @@ func (r *evalRig) restart() error {
 
 // say is the person saying text to wisp, as `haunt say` does.
 func (r *evalRig) say(text string) error {
-	cmd := exec.Command(r.hr.Bin, "say", "-ghost", "wisp", text)
-	cmd.Env = append(os.Environ(), r.hr.env()...)
+	cmd := exec.Command(r.Bin, "say", "-ghost", "wisp", text)
+	cmd.Env = append(os.Environ(), r.env()...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("say %q: %v: %s", text, err, out)
 	}
@@ -554,8 +589,8 @@ func (r *evalRig) neighbour(cue string) error {
 	// while after wisp's does.
 	deadline := time.Now().Add(time.Minute)
 	for {
-		cmd := exec.Command(r.hr.Bin, "say", "-ghost", "moth", cue)
-		cmd.Env = append(os.Environ(), r.hr.env()...)
+		cmd := exec.Command(r.Bin, "say", "-ghost", "moth", cue)
+		cmd.Env = append(os.Environ(), r.env()...)
 		out, err := cmd.CombinedOutput()
 		if err == nil {
 			return nil
@@ -871,10 +906,10 @@ func (r *evalRig) waitLog(what string, within time.Duration, done func(log strin
 	}
 }
 
-// collect reads back what the trial left and ends it: the trace and the
-// intentions while the gateway is still up (the conversation is kept
-// there), then the ghost stopped, then its store and files. The Evidence
-// is as complete as it could be made even when err is not nil.
+// collect reads back what the trial left and ends it: the trace (from the
+// transcript) and the intentions while the ghost still runs, as a person
+// would read them, then the ghost stopped, then its store and files. The
+// Evidence is as complete as it could be made even when err is not nil.
 func (r *evalRig) collect() (Evidence, error) {
 	ev := Evidence{Files: map[string]string{}, Marks: map[string]int{}}
 	for k, v := range r.files {
@@ -917,8 +952,8 @@ func (r *evalRig) collect() (Evidence, error) {
 
 // haunt runs a haunt subcommand against the trial and returns its stdout.
 func (r *evalRig) haunt(args ...string) ([]byte, error) {
-	cmd := exec.Command(r.hr.Bin, args...)
-	cmd.Env = append(os.Environ(), r.hr.env()...)
+	cmd := exec.Command(r.Bin, args...)
+	cmd.Env = append(os.Environ(), r.env()...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -928,9 +963,8 @@ func (r *evalRig) haunt(args ...string) ([]byte, error) {
 	return out, nil
 }
 
-// stop stops the ghost, and so its gateway and container, and checks that
-// the container went. Safe to call more than once; the first call's
-// result is kept.
+// stop stops the ghost and puts away the trial's keyboard and pointer.
+// Safe to call more than once; the first call's result is kept.
 func (r *evalRig) stop() error {
 	if r.stopped {
 		return r.stopErr
@@ -950,8 +984,8 @@ func (r *evalRig) stop() error {
 	return r.stopErr
 }
 
-// halt stops haunt run for wisp, and so its gateway and container, and
-// checks that the container went; start may run it again.
+// halt stops haunt run for wisp, and says whether it stopped cleanly;
+// start may run it again.
 func (r *evalRig) halt() error {
 	if !r.running() {
 		return nil
@@ -968,91 +1002,58 @@ func (r *evalRig) halt() error {
 		<-r.exited
 		errs = append(errs, fmt.Errorf("haunt did not stop within %s of SIGINT", rigStop))
 	}
-	if err := rigContainerGone(rigContainerName(r.Profile)); err != nil {
-		errs = append(errs, err)
-	}
 	return errors.Join(errs...)
 }
 
-// rigContainerGone waits a little for the trial's container to go, and
-// removes it if it does not, so a trial never leaves a model running.
-// Only the trial's own container is looked at: other trials' are running
-// beside it.
-func rigContainerGone(name string) error {
-	if _, err := exec.LookPath("docker"); err != nil {
-		return nil // hermes is not in docker; nothing to outlive the trial
-	}
-	for i := 0; ; i++ {
-		out, err := exec.Command("docker", "ps", "-q", "--filter", "name=^"+name+"$").Output()
-		if err != nil {
-			return fmt.Errorf("docker ps: %v", err)
-		}
-		if len(bytes.TrimSpace(out)) == 0 {
-			return nil
-		}
-		if i == 20 {
-			exec.Command("docker", "rm", "-f", name).Run()
-			return fmt.Errorf("container %s outlived the trial (removed)", name)
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-}
-
-// rigContainerName is the name scripts/hermes-docker gives the container
-// for a hermes home: hermes- and the first twelve hex digits of the
-// sha256 of its real path.
-func rigContainerName(home string) string {
-	if real, err := filepath.EvalSymlinks(home); err == nil {
-		home = real
-	}
-	sum := sha256.Sum256([]byte(home))
-	return "hermes-" + hex.EncodeToString(sum[:])[:12]
-}
-
-// rigUserHermes is the [hermes] section of the person's own config, which
-// the trials run on, or why there is none worth running on. A trial's
-// profile is new, so it has no model of its own to fall back to: the
-// config has to name one.
-func rigUserHermes() (hermes.Config, string) {
+// rigUserModel is the model wisp thinks with in the person's own config
+// ([model] with any [model.ghost.wisp] laid over it), which the trials run
+// on, or why there is none worth running on: no base_url or name, or a key
+// variable named and not set.
+func rigUserModel() (model.Config, string) {
 	cfg, err := config.Load()
 	if err != nil {
-		return hermes.Config{}, "evals need the haunt config: " + err.Error()
+		return model.Config{}, "evals need the haunt config: " + err.Error()
 	}
-	h := cfg.Hermes
-	if h.Model == nil || h.Model.Default == "" {
-		return h, fmt.Sprintf("evals need a model in [hermes.model] in %s (docs/user/hermes.md)", cfg.Path)
-	}
-	command := "hermes"
-	if len(h.Command) > 0 {
-		command = h.Command[0]
-	}
-	if _, err := exec.LookPath(command); err != nil {
-		return h, fmt.Sprintf("evals need hermes: [hermes] command %q in %s is not runnable (%v)", command, cfg.Path, err)
-	}
-	return h, ""
+	return modelOf(cfg, os.Getenv)
 }
 
-// rigConfigTOML is a trial's config.toml: the person's hermes command and
-// model, and a hermes home of the trial's own. The first-token and stall
-// timeouts go too, since they are properties of the model's speed; nothing else of
-// theirs does, so a trial is the same whatever else they have configured.
-func rigConfigTOML(user hermes.Config, home string) (string, error) {
-	var section struct {
-		Hermes struct {
-			Command    []string            `toml:"command"`
-			Home       string              `toml:"home"`
-			FirstToken int                 `toml:"first_token_timeout,omitempty"`
-			Stall      int                 `toml:"stall_timeout,omitempty"`
-			Model      *hermes.ModelConfig `toml:"model,omitempty"`
-		} `toml:"hermes"`
+// modelOf is the model the trials run on from cfg, or why it will not do;
+// getenv is asked only whether the key's variable is set.
+func modelOf(cfg *config.File, getenv func(string) string) (model.Config, string) {
+	where := "the config"
+	if cfg != nil && cfg.Path != "" {
+		where = cfg.Path
 	}
-	section.Hermes.Command = user.Command
-	section.Hermes.Home = home
-	section.Hermes.FirstToken = user.FirstTokenSeconds
-	section.Hermes.Stall = user.StallSeconds
-	section.Hermes.Model = user.Model
+	var m model.Config
+	if cfg != nil {
+		m = cfg.ModelFor("wisp")
+	}
+	if m.BaseURL == "" || m.Name == "" {
+		return m, fmt.Sprintf("evals need a [model] with base_url and name in %s (docs/user/config.md)", where)
+	}
+	if m.APIKeyEnv != "" && getenv(m.APIKeyEnv) == "" {
+		return m, fmt.Sprintf("[model] api_key_env in %s names %s, which is not set in the environment", where, m.APIKeyEnv)
+	}
+	return m, ""
+}
+
+// modelHost is the host of the model's base URL, which the results record
+// beside its name, so a run says where its model ran.
+func modelHost(m model.Config) string {
+	u, err := url.Parse(m.BaseURL)
+	if err != nil {
+		return ""
+	}
+	return u.Host
+}
+
+// rigConfigTOML is a trial's config.toml: [model] as wisp would think with
+// it in the person's config, and nothing else of theirs, so a trial is the
+// same whatever else they have configured. The key stays in the
+// environment, where api_key_env names it.
+func rigConfigTOML(m model.Config) (string, error) {
 	var b bytes.Buffer
-	if err := toml.NewEncoder(&b).Encode(section); err != nil {
+	if err := toml.NewEncoder(&b).Encode(map[string]model.Config{"model": m}); err != nil {
 		return "", err
 	}
 	return b.String(), nil
@@ -1120,8 +1121,8 @@ func rigUserBackend(names []string) (string, error) {
 }
 
 // rigJoinTrace puts the trace from before a restart in front of the one
-// after, unless the one after already carries it (hermes kept the
-// session).
+// after, unless the one after already carries it (the transcript outlives
+// the session, so it usually does).
 func rigJoinTrace(pre, post []TraceTurn) []TraceTurn {
 	if len(pre) == 0 {
 		return post
@@ -1133,7 +1134,7 @@ func rigJoinTrace(pre, post []TraceTurn) []TraceTurn {
 }
 
 // wispOptions is what writeWisp puts in wisp besides its persona and its
-// own ghost-story skill.
+// own ghost-story and humanizer skills.
 type wispOptions struct {
 	// NotesServer, if set, is the built testdata/toolserver, offered as
 	// the "notes" tool server; it writes to $HAUNT_TEST_NOTES.
@@ -1154,8 +1155,8 @@ type wispOptions struct {
 const wispPersona = "You are Wisp, a wry little desktop spirit haunting the user's screen. Reply in one or two short sentences, with dry wit. Let what you remember about them color your mood and callbacks."
 
 // writeWisp writes wisp into dir as scripts/demo.sh writes it: the
-// persona, humanizer from hermes's library, its ghost-story skill, and
-// optionally the notes server with its skills and an occasion.
+// persona, its ghost-story and humanizer skills, and optionally the notes
+// server with its skills and an occasion.
 // The demo keeps its own copy in shell; the two are small, and a demo
 // that needs a Go build step to write a TOML file is worse than two
 // copies.
@@ -1181,9 +1182,6 @@ capabilities = [%s]
 
 [persona]
 system = %q
-
-[hermes]
-bundled_skills = ["humanizer"]
 `, caps, wispPersona)
 	if o.NotesServer != "" {
 		fmt.Fprintf(&m, `
@@ -1200,7 +1198,7 @@ cron = %q
 name = %q
 `, o.OccasionCron, o.Occasion)
 	}
-	skills := map[string]string{"ghost-story": wispGhostStory}
+	skills := map[string]string{"ghost-story": wispGhostStory, "humanizer": wispHumanizer}
 	if o.NotesServer != "" {
 		skills["shopping-list"] = wispShoppingList
 		skills["misspelled-notes"] = wispMisspelledNotes
@@ -1227,34 +1225,52 @@ const wispShoppingList = `---
 name: shopping-list
 description: "When they want something on their shopping list"
 metadata:
-  hermes:
-    requires_toolsets: [mcp-haunt]
-    requires_tools: [mcp__haunt__notes__append]
+  haunt:
+    requires_tools: [notes__append, notes__read]
 ---
 
 # Shopping list
 
 The list lives in their notes file, a line ` + "`buy: <item>`" + ` per item.
 
-- To add: call ` + "`mcp__haunt__notes__append`" + ` with ` + "`text`" + ` like
-  ` + "`buy: <item>`" + `, once per item, then reply in one short sentence
+- To add: call ` + "`notes__append`" + ` with ` + "`text`" + ` like
+  ` + "`buy: <item>`" + `, once per item, then speak one short sentence
   naming what you added.
-- To say what is on it: call ` + "`mcp__haunt__notes__read`" + ` and name the
+- To say what is on it: call ` + "`notes__read`" + ` and name the
   ` + "`buy:`" + ` items, in one short sentence.
 `
 
-// wispMisspelledNotes names its tool as the server spells it, not as
-// hermes does, so hermes hides it and the driver warns.
+// wispMisspelledNotes names its tool as the server spells it, not as the
+// model is offered it, so the driver hides it and warns.
 const wispMisspelledNotes = `---
 name: misspelled-notes
 description: "Never listed: its tool is spelled as the server spells it"
 metadata:
-  hermes:
-    requires_toolsets: [mcp-haunt]
-    requires_tools: [mcp__haunt__notes.append]
+  haunt:
+    requires_tools: [notes.append]
 ---
 
-Hermes hides this skill.
+The driver hides this skill.
+`
+
+// wispHumanizer is wisp's skill for a rewrite that should not read as a
+// machine's, which the humanizer case asks for.
+const wispHumanizer = `---
+name: humanizer
+description: "Asked to make writing sound less like an AI wrote it"
+---
+
+# Humanizer
+
+When they hand you a sentence or a paragraph and ask for it to sound less
+like a machine wrote it:
+
+1. Find the point and keep it: the rewrite says the same thing.
+2. Cut the stock phrases and the buzzwords. Say what they stand for in
+   plain words, or drop them.
+3. Prefer short words, a concrete subject and an active verb.
+4. Speak the rewrite in a line or two, in your own voice. No list of what
+   you changed unless they ask.
 `
 
 // wispGhostStory is the demo's ghost-story skill with its length stated in
@@ -1264,10 +1280,6 @@ name: ghost-story
 description: "When they ask for a ghost story: a tiny spooky tale"
 version: 1.0.0
 author: wisp
-metadata:
-  hermes:
-    tags: [story, spooky, fun]
-    requires_toolsets: [mcp-haunt]
 ---
 
 # Ghost story
@@ -1275,14 +1287,14 @@ metadata:
 Wisp tells ghost stories the way it haunts: briefly, and from the inside.
 
 1. Wear a pose that suits a story, if your shell has one, with
-   ` + "`mcp__haunt__face`" + `.
-2. Tell the story in ` + "`mcp__haunt__say`" + `, three sentences and at most
+   ` + "`face`" + `.
+2. Tell the story in ` + "`say`" + `, three sentences and at most
    ` + strconv.Itoa(wispStoryWords) + ` words. It is told in the first person, by a ghost, about the
    living. It ends on a small twist, never on gore.
-3. Your final reply is one line in which you deny that the story was
-   about anyone the person knows.
+3. Then speak one line in which you deny that the story was about anyone
+   the person knows.
 
-Never tell the same story twice. If your session history has one, tell a
+Never tell the same story twice. If you recall telling one, tell a
 different one.
 `
 
@@ -1371,23 +1383,31 @@ func rigDecodeTrace(b []byte) ([]TraceTurn, error) {
 	}
 }
 
-// The rig's pieces that need no hermes, checked with `go test -tags=eval
+// The rig's pieces that need no model, checked with `go test -tags=eval
 // -run TestRig ./cmd/haunt`.
 
-// A trial's config carries the person's hermes command and model, a home
-// of its own, and nothing else of theirs; a config with no model, or with
-// no hermes to run, is not one a trial can run on.
+// A trial's config carries [model] as wisp would think with it in the
+// person's config, wisp's own table laid over the troupe's, and nothing
+// else of theirs; a config with no model, or naming a key variable that is
+// not set, is not one a trial can run on.
 func TestRigConfig(t *testing.T) {
 	user := t.TempDir()
-	os.WriteFile(filepath.Join(user, "config.toml"), []byte(`[hermes]
-command = ["/bin/sh", "-c", "exit 0"]
-home = "/somewhere/else"
+	os.WriteFile(filepath.Join(user, "config.toml"), []byte(`[model]
+base_url = "https://api.z.ai/api/paas/v4"
+name = "glm-5.3"
+api_key_env = "RIG_TEST_KEY"
+context_length = 65536
 first_token_timeout = 90
 stall_timeout = 120
 
-[hermes.model]
-provider = "zai"
-name = "glm-5.3"
+[model.sampling]
+temperature = 0.7
+
+[model.ghost.wisp]
+thinking = "off"
+
+[model.ghost.moth]
+name = "other"
 
 [backend.image]
 backend = "comfyui"
@@ -1396,12 +1416,15 @@ backend = "comfyui"
 dwell = "5m"
 `), 0o644)
 	t.Setenv("HAUNT_CONFIG_DIR", user)
-	h, missing := rigUserHermes()
+	t.Setenv("RIG_TEST_KEY", "set")
+	m, missing := rigUserModel()
 	if missing != "" {
-		t.Fatalf("a configured hermes reads as missing: %s", missing)
+		t.Fatalf("a configured model reads as missing: %s", missing)
 	}
-	home := filepath.Join(t.TempDir(), "hermes")
-	text, err := rigConfigTOML(h, home)
+	if h := modelHost(m); h != "api.z.ai" {
+		t.Errorf("host = %q, want api.z.ai", h)
+	}
+	text, err := rigConfigTOML(m)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1412,25 +1435,24 @@ dwell = "5m"
 	if err != nil {
 		t.Fatalf("the trial's config does not load: %v\n%s", err, text)
 	}
-	if strings.Join(got.Hermes.Command, " ") != "/bin/sh -c exit 0" || got.Hermes.Home != home ||
-		got.Hermes.FirstTokenSeconds != 90 || got.Hermes.StallSeconds != 120 {
-		t.Errorf("trial [hermes] = %+v, want the person's command and timeouts, and home %s", got.Hermes, home)
-	}
-	if m := got.Hermes.Model; m == nil || m.Provider != "zai" || m.Default != "glm-5.3" {
-		t.Errorf("trial [hermes.model] = %+v, want the person's", m)
+	w := got.ModelFor("wisp")
+	if w.BaseURL != m.BaseURL || w.Name != "glm-5.3" || w.APIKeyEnv != "RIG_TEST_KEY" || w.ContextLength != 65536 ||
+		w.FirstTokenSeconds != 90 || w.StallSeconds != 120 || w.Thinking != "off" ||
+		w.Sampling.Temperature == nil || *w.Sampling.Temperature != 0.7 {
+		t.Errorf("trial [model] for wisp = %+v, want the person's with wisp's table over it\n%s", w, text)
 	}
 	if got.Backend.Image.Backend == "comfyui" || got.Awareness.Dwell != "" {
-		t.Errorf("the trial took more of the person's config than hermes:\n%s", text)
+		t.Errorf("the trial took more of the person's config than [model]:\n%s", text)
 	}
 
-	os.WriteFile(filepath.Join(user, "config.toml"), []byte("[hermes]\ncommand = [\"/bin/sh\"]\n"), 0o644)
 	t.Setenv("HAUNT_CONFIG_DIR", user)
-	if _, missing := rigUserHermes(); !strings.Contains(missing, "[hermes.model]") {
-		t.Errorf("no model: missing = %q, want it to name [hermes.model]", missing)
+	t.Setenv("RIG_TEST_KEY", "")
+	if _, missing := rigUserModel(); !strings.Contains(missing, "RIG_TEST_KEY") {
+		t.Errorf("no key: missing = %q, want it to name the variable", missing)
 	}
-	os.WriteFile(filepath.Join(user, "config.toml"), []byte("[hermes]\ncommand = [\"/no/such/hermes\"]\n[hermes.model]\nname = \"m\"\n"), 0o644)
-	if _, missing := rigUserHermes(); !strings.Contains(missing, "not runnable") {
-		t.Errorf("no hermes: missing = %q, want it to say the command is not runnable", missing)
+	os.WriteFile(filepath.Join(user, "config.toml"), []byte("[awareness]\ndwell = \"5m\"\n"), 0o644)
+	if _, missing := rigUserModel(); !strings.Contains(missing, "[model]") {
+		t.Errorf("no model: missing = %q, want it to name [model]", missing)
 	}
 }
 
@@ -1454,9 +1476,20 @@ func TestRigWisp(t *testing.T) {
 	if len(m.Triggers) != 1 || m.Triggers[0].Name != "morning" || m.Triggers[0].Cron != "7 9 * * *" {
 		t.Errorf("triggers = %+v, want the morning occasion", m.Triggers)
 	}
-	for _, sk := range []string{"ghost-story", "shopping-list", "misspelled-notes"} {
-		if _, err := os.Stat(filepath.Join(dir, "skills", sk, "SKILL.md")); err != nil {
+	// Each skill is one the host reads, under its own name, needing the
+	// tools it names: the shopping list the server's as the model is
+	// offered them, the misspelled one a name no ghost is offered.
+	needs := map[string][]string{"ghost-story": nil, "humanizer": nil,
+		"shopping-list": {"notes__append", "notes__read"}, "misspelled-notes": {"notes.append"}}
+	for sk, want := range needs {
+		raw, err := os.ReadFile(filepath.Join(dir, "skills", sk, "SKILL.md"))
+		if err != nil {
 			t.Errorf("skill %s: %v", sk, err)
+			continue
+		}
+		f, _, err := skill.Parse(raw)
+		if err != nil || f.Name != sk || !slices.Equal(f.RequiresTools(), want) {
+			t.Errorf("skill %s parses as %+v, %v; want it named so, needing %v", sk, f, err, want)
 		}
 	}
 	story, _ := os.ReadFile(filepath.Join(dir, "skills", "ghost-story", "SKILL.md"))
@@ -1518,7 +1551,7 @@ func TestRigFiles(t *testing.T) {
 
 // answer and typein read the ghost's questions from its debug log.
 func TestRigLog(t *testing.T) {
-	log := `haunt: hermes is up for wisp at http://127.0.0.1:8650
+	log := `haunt: [brain] wisp: no brain declared; thinking with glm-5.3 at https://api.z.ai/api/paas/v4
 haunt: [balloon] wisp: choices offered: Yes, keep it | Later | Let it go
 haunt: [input] wisp: input line opened
 haunt: [balloon] wisp: choices offered: Made progress | Got stuck
@@ -1548,7 +1581,7 @@ haunt: [balloon] wisp: choices offered: Made progress | Got stuck
 func TestRigTrace(t *testing.T) {
 	lines := `{"time":"2026-09-18T10:00:00Z","provoked_by":"event","input":"kind=boot","reply":"","silent":true,"self_prompt":false,"acted":[],"looked":[]}
 {"time":"2026-09-18T10:01:00Z","provoked_by":"person","input":"remind me","reply":"Done.","silent":false,"self_prompt":false,
- "acted":[{"tool":"intend","args":"{\"text\":\"stretch\"}","result":"hermes/1"}],
+ "acted":[{"tool":"intend","args":"{\"text\":\"stretch\"}","result":"model/1"}],
  "looked":[{"tool":"skill_view","args":"{\"name\":\"focus-session\"}","result":"…"}],
  "window":{"app":"foot","title":"notes"}}
 `
@@ -1573,33 +1606,44 @@ func TestRigTrace(t *testing.T) {
 	}
 }
 
-// The whole rig, on the fake hermes rather than a model: seeded, started,
-// talked to, a question answered and a line typed in on the trial's
-// keyboard, and read back. What it checks is the rig, not a ghost; the
-// fake answers by script.
-func TestRigOnFakeHermes(t *testing.T) {
+// rigFakeModel puts a scripted model where the person's [model] would be:
+// the fake (internal/model/fake) behind the logging proxy the brain tests
+// read (brain_test.go), named in a config of its own as HAUNT_CONFIG_DIR.
+// It returns the proxy's log.
+func rigFakeModel(t *testing.T, rs []fake.Rule) string {
+	t.Helper()
 	user := t.TempDir()
-	fake := filepath.Join(user, "fakehermes")
-	build(t, fake, "./testdata/fakehermes")
+	log := filepath.Join(user, "fakemodel.log")
+	f := fake.NewT(t, rs...)
+	proxy := httptest.NewServer(&logProxy{to: f.URL, log: log})
+	t.Cleanup(proxy.Close)
 	os.WriteFile(filepath.Join(user, "config.toml"),
-		[]byte(fmt.Sprintf("[hermes]\ncommand = [%q]\n\n[hermes.model]\nname = \"fake\"\n", fake)), 0o644)
+		[]byte(fmt.Sprintf("[model]\nbase_url = %q\nname = \"fake\"\n", proxy.URL+"/v1")), 0o644)
 	t.Setenv("HAUNT_CONFIG_DIR", user)
+	return log
+}
+
+// The whole rig, on the fake model rather than a real one: seeded,
+// started, talked to, a question answered and a line typed in on the
+// trial's keyboard, and read back. What it checks is the rig, not a
+// ghost; the fake answers by script.
+func TestRigOnFakeModel(t *testing.T) {
+	log := rigFakeModel(t, rules(
+		[]fake.Rule{silentOn("[haunt event]")},
+		acts("dinner", []fake.Call{decision("ask",
+			map[string]any{"text": "Dinner?", "choices": []string{"Soup", "Pasta", "Toast"}})}, "Pasta it is."),
+		acts("your name", []fake.Call{decision("ask_text", map[string]any{"prompt": "Your name?"})}, "Hello, you."),
+		acts("remind me", []fake.Call{decision("intend",
+			map[string]any{"text": "stretch", "delay_ms": 600000})}, "Done."),
+		acts("remember", []fake.Call{decision("remember",
+			map[string]any{"topic": "food", "line": "takes coffee black"})}, "Noted."),
+		says("", "I hear you."),
+	))
 
 	r, err := newEvalRig(t, rigOptions{Notes: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.hr.FakeLog = filepath.Join(r.Dir, "fakehermes.log")
-	r.hr.Script = filepath.Join(r.Dir, "fakehermes.json")
-	rules, _ := json.Marshal([]fakeRule{
-		{Match: "[haunt event]", Reply: "NO_REPLY"},
-		{Match: "dinner", Tool: "ask", Args: map[string]any{"text": "Dinner?", "choices": []string{"Soup", "Pasta", "Toast"}},
-			Reply: "picked {tool}"},
-		{Match: "your name", Tool: "ask_text", Args: map[string]any{"prompt": "Your name?"}, Reply: "hello {tool}"},
-		{Match: "remind me", Tool: "intend", Args: map[string]any{"text": "stretch", "delay_ms": 600000}, Reply: "Done: {tool}"},
-		{Match: "", Reply: "echo: {input}"},
-	})
-	os.WriteFile(r.hr.Script, rules, 0o644)
 	if err := r.seedGoal("finish the thesis", 8*24*time.Hour); err != nil {
 		t.Fatal(err)
 	}
@@ -1610,24 +1654,31 @@ func TestRigOnFakeHermes(t *testing.T) {
 		t.Error("a second start was not refused")
 	}
 
-	if err := r.say("remind me in ten minutes to stretch"); err != nil {
+	if err := r.sayWait("remind me in ten minutes to stretch", 30*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	waitFake(t, r.hr.FakeLog, 1, 30*time.Second, repliedTo("remind me"))
+	if err := r.sayWait("remember that I take my coffee black", 30*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.snapMemories("memories"); err != nil {
+		t.Fatal(err)
+	}
 	if err := r.say("ask me about dinner"); err != nil {
 		t.Fatal(err)
 	}
 	if picked, err := r.answer("pasta", 30*time.Second); err != nil || picked != "Pasta" {
 		t.Fatalf("answer = %q, %v; want Pasta", picked, err)
 	}
-	waitFake(t, r.hr.FakeLog, 1, 30*time.Second, func(e fakeEntry) bool { return e.Kind == "reply" && e.Reply == "picked Pasta" })
+	waitFake(t, log, 1, 30*time.Second, func(e fakeEntry) bool { return e.Kind == "tool_call" && e.Name == "ask" && e.Text == "Pasta" })
+	waitFake(t, log, 1, 30*time.Second, repliedTo("dinner"))
 	if err := r.say("what is your name"); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.typein("aaron", 30*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	waitFake(t, r.hr.FakeLog, 1, 30*time.Second, func(e fakeEntry) bool { return e.Kind == "reply" && e.Reply == "hello aaron" })
+	waitFake(t, log, 1, 30*time.Second, func(e fakeEntry) bool { return e.Kind == "tool_call" && e.Name == "ask_text" && e.Text == "aaron" })
+	waitFake(t, log, 1, 30*time.Second, repliedTo("your name"))
 	// Nothing more is asked, and that is not a fault.
 	if _, err := r.answer("", 2*time.Second); !errors.Is(err, errNoQuestion) {
 		t.Errorf("answer with nothing asked = %v, want errNoQuestion", err)
@@ -1640,11 +1691,14 @@ func TestRigOnFakeHermes(t *testing.T) {
 	if !strings.Contains(ev.Intentions, "stretch") || !strings.Contains(ev.Intentions, "finish the thesis") {
 		t.Errorf("intentions lack the reminder or the seeded goal:\n%s", ev.Intentions)
 	}
-	if !strings.Contains(ev.Log, "hermes is up for wisp") || !strings.Contains(ev.Log, "choices offered: Soup | Pasta | Toast") {
+	if !strings.Contains(ev.Log, "turn over: person") || !strings.Contains(ev.Log, "choices offered: Soup | Pasta | Toast") {
 		t.Errorf("the log lacks what the rig waited on:\n%s", ev.Log)
 	}
 	if _, ok := ev.Files["notes"]; !ok {
 		t.Error("no notes file in the evidence")
+	}
+	if !strings.Contains(ev.Files["memories"], "takes coffee black") || !strings.Contains(ev.Files["memories"], "food") {
+		t.Errorf("the memory snapshot lacks the line remembered:\n%s", ev.Files["memories"])
 	}
 	if ev.Store == nil {
 		t.Fatal("no store in the evidence")
@@ -1656,70 +1710,63 @@ func TestRigOnFakeHermes(t *testing.T) {
 	for _, turn := range ev.Turns {
 		said = append(said, turn.Reply)
 	}
-	for _, want := range []string{"picked Pasta", "hello aaron"} {
+	for _, want := range []string{"Pasta it is.", "Hello, you."} {
 		if !slices.Contains(said, want) {
 			t.Errorf("trace replies = %q, want %q among them", said, want)
 		}
+	}
+	if !ev.acted("intend") || !ev.acted("ask") {
+		t.Errorf("the trace lacks the calls in acted: %+v", ev.Turns)
+	}
+	wrote := false
+	for _, tu := range ev.Turns {
+		for _, c := range tu.Looked {
+			wrote = wrote || (isMemoryWrite(c) && strings.Contains(c.Args, "coffee black"))
+		}
+	}
+	if !wrote {
+		t.Errorf("the trace lacks the remember in looked: %+v", ev.Turns)
 	}
 	if err := r.stop(); err != nil {
 		t.Errorf("a second stop = %v, want the first's nil", err)
 	}
 }
 
-// The container the rig checks for is the one scripts/hermes-docker names.
-func TestRigContainerName(t *testing.T) {
-	home := t.TempDir()
-	out, err := exec.Command("sh", "-c", `printf '%s' "$(cd "$1" && pwd -P)" | sha256sum | cut -c1-12`, "sh", home).Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := rigContainerName(home), "hermes-"+strings.TrimSpace(string(out)); got != want {
-		t.Errorf("container = %s, want %s as hermes-docker names it", got, want)
-	}
-}
-
-// TestRigExtensionsOnFakeHermes runs the rig's other means on fakehermes:
-// a seeded notes file, a neighbour that tells wisp something, a question
-// dismissed with Escape, the menu's help, a window opened and focused, and
-// a restart on the same state.
-func TestRigExtensionsOnFakeHermes(t *testing.T) {
+// TestRigExtensionsOnFakeModel runs the rig's other means on the fake
+// model: a seeded notes file, a neighbour that tells wisp something, a
+// question dismissed with Escape, the menu's help, a window opened and
+// focused, and a restart on the same state.
+func TestRigExtensionsOnFakeModel(t *testing.T) {
 	if _, err := exec.LookPath("foot"); err != nil {
 		t.Skip("no foot")
 	}
-	user := t.TempDir()
-	fake := filepath.Join(user, "fakehermes")
-	build(t, fake, "./testdata/fakehermes")
-	os.WriteFile(filepath.Join(user, "config.toml"),
-		[]byte(fmt.Sprintf("[hermes]\ncommand = [%q]\n\n[hermes.model]\nname = \"fake\"\n", fake)), 0o644)
-	t.Setenv("HAUNT_CONFIG_DIR", user)
+	log := rigFakeModel(t, rules(
+		[]fake.Rule{silentOn("[haunt event]")},
+		acts("dinner", []fake.Call{decision("ask",
+			map[string]any{"text": "Dinner?", "choices": []string{"Soup", "Pasta"}})}, "Fine, then."),
+		says("before", "echo: before"),
+		says("after", "echo: after"),
+		says("", "I hear you."),
+	))
 
 	r, err := newEvalRig(t, rigOptions{Notes: true, NotesSeed: "buy: oat milk\n", Neighbour: true,
 		Config: "[awareness]\ndwell = \"1m\"\n"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.hr.FakeLog = filepath.Join(r.Dir, "fakehermes.log")
-	r.hr.Script = filepath.Join(r.Dir, "fakehermes.json")
-	rules, _ := json.Marshal([]fakeRule{
-		{Match: "[haunt event]", Reply: "NO_REPLY"},
-		{Match: "dinner", Tool: "ask", Args: map[string]any{"text": "Dinner?", "choices": []string{"Soup", "Pasta"}},
-			Reply: "picked [{tool}]"},
-		{Match: "", Reply: "echo: {input}"},
-	})
-	os.WriteFile(r.hr.Script, rules, 0o644)
 	if err := r.start(); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.neighbour("tell"); err != nil {
 		t.Fatal(err)
 	}
-	waitFake(t, r.hr.FakeLog, 1, 60*time.Second, func(e fakeEntry) bool {
+	waitFake(t, log, 1, 60*time.Second, func(e fakeEntry) bool {
 		return e.Kind == "reply" && strings.Contains(e.Input, "noise upstairs")
 	})
 	if err := r.neighbour("speak"); err != nil {
 		t.Fatal(err)
 	}
-	waitFake(t, r.hr.FakeLog, 1, 30*time.Second, repliedTo("kind=observed"))
+	waitFake(t, log, 1, 30*time.Second, repliedTo("kind=observed"))
 
 	if err := r.say("ask me about dinner"); err != nil {
 		t.Fatal(err)
@@ -1731,13 +1778,15 @@ func TestRigExtensionsOnFakeHermes(t *testing.T) {
 	if err := r.escape(); err != nil {
 		t.Fatal(err)
 	}
-	waitFake(t, r.hr.FakeLog, 1, 30*time.Second, func(e fakeEntry) bool { return e.Kind == "reply" && e.Reply == "picked []" })
+	// Dismissed: the ask's result is empty.
+	waitFake(t, log, 1, 30*time.Second, func(e fakeEntry) bool { return e.Kind == "tool_call" && e.Name == "ask" && e.Text == "" })
+	waitFake(t, log, 1, 30*time.Second, repliedTo("dinner"))
 	r.asked++ // the dismissed question, which answer did not take
 
 	if err := r.menu("what can you do"); err != nil {
 		t.Fatal(err)
 	}
-	waitFake(t, r.hr.FakeLog, 1, 30*time.Second, repliedTo("kind=help"))
+	waitFake(t, log, 1, 30*time.Second, repliedTo("kind=help"))
 
 	if err := r.openWindow("eval's window"); err != nil {
 		t.Fatal(err)
