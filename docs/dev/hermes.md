@@ -6,7 +6,9 @@ How a persona ghost thinks. `internal/hermes` is haunt's side of the seam;
 into. Every hermes identifier, path and payload here is checked against
 hermes-agent at commit **818c13b** (release v0.21.6), which `scripts/hermes-docker` builds
 its image from. When the pin moves, recheck them: the places that depend
-on hermes internals are named below.
+on hermes internals are named below, and `make hermes-check` checks the
+toolset restriction against the new image ([Moving the
+pin](#moving-the-pin)).
 
 ## Shape
 
@@ -93,7 +95,8 @@ agent:
   disabled_toolsets: [terminal, file, browser, code_execution, delegation,
     web, cronjob, computer_use, todo, vision, image_gen, tts, kanban,
     connections, clarify, google_meet, x_search, video, video_gen,
-    spotify, a2a, browser-cdp, browser-use]
+    spotify, a2a, browser-cdp, browser-use, discord, discord_admin,
+    feishu_doc, feishu_drive, yuanbao]
 tools:
   tool_search: {enabled: "off"}
 ```
@@ -103,17 +106,28 @@ MCP server enables only those. `disabled_toolsets` is subtracted last, so
 a later hermes that widens an explicit list still cannot hand a ghost a
 shell. The plugin toolsets are on that list because hermes enables a
 plugin's toolset beside an explicit list once the person turns the plugin
-on (`hermes_cli/tools_config.py` `_enabled_plugin_toolsets`). `clarify` is left out because the API server passes no clarify
-callback and the tool only ever answers that it is unavailable; haunt's
-`ask` is how a question is put. Tool search must be off: with it on, the
-MCP tools and `session_search` hide behind a lookup a small model does not
-think to use. The model receives exactly `memory`, `skill_manage`,
+on (`hermes_cli/tools_config.py` `_enabled_plugin_toolsets`), and each
+hermes release brings more; `make hermes-check` finds the ones the list
+misses. The messaging-platform toolsets (`discord`, `feishu_doc`,
+`yuanbao` …) reach a ghost only if named; they are on the list so that
+a widened list still has their tools subtracted. `clarify` is left out
+because the API server passes no clarify callback and the tool only
+ever answers that it is unavailable; haunt's `ask` is how a question is
+put. Tool search must be off: with it on, the MCP tools and
+`session_search` hide behind a lookup a small model does not think to
+use. The model receives exactly `memory`, `skill_manage`,
 `skill_view`, `skills_list`, `session_search` and `mcp__haunt__…`, plus
 the tools of the memory provider the person chose, which hermes exposes
 whenever the `memory` toolset is enabled
 (`agent/memory_manager.py` `memory_provider_tools_enabled`). With
 built-in memory turned off, `memory` itself is gone and the provider's
-tools are the only memory the model has.
+tools are the only memory the model has. A plugin context engine the
+person chose (`context.engine`) brings its tools the same way: hermes
+adds the `context_engine` toolset beside an explicit list whenever one
+is set (`hermes_cli/tools_config.py` `_get_platform_tools`,
+`_context_engine_active`), and the agent hands the model the engine's
+tools (`agent/agent_init.py` `_inject_context_engine_tools`). Haunt
+leaves it on; which engine, if any, is the person's choice.
 
 ## The gateway
 
@@ -732,6 +746,43 @@ profile's leftover container and the stopped gateway's
 `gateway_state.json` and `gateway.pid`: a gateway stopped by a signal
 leaves its state saying it should be running, and the boot reconciler
 would start a second gateway from it on the next start.
+
+## Moving the pin
+
+The image tag is in `scripts/hermes-docker`,
+`scripts/hermes-numpy.Dockerfile`, the `HERMES_IMAGE` default in the
+`Makefile` and [The brain: hermes-agent](../user/hermes.md); the commit
+is at the top of this page. After building the new image, `make
+hermes-check` runs `TestHermesToolsets`
+(`internal/hermes/hermescheck_test.go`, build tag `hermescheck`). It
+reads `apiServerToolsets` and `disabledToolsets` from the Go code and
+pipes `internal/hermes/testdata/toolsets.py` into the image's own Python
+(`/opt/hermes/.venv`), with no network and a throwaway `HERMES_HOME`.
+The script enables every plugin it finds in that home's config, imports
+`model_tools` (which imports every `tools/*.py` and loads the plugins),
+and prints what hermes's own tables hold: the static `TOOLSETS`
+(`toolsets.py`), the toolsets registered into `tools/registry.py`,
+`get_plugin_toolsets` (`hermes_cli/plugins.py`), the platform-gated
+toolsets (`TOOLSET_SESSION_PLATFORMS`,
+`hermes_cli/toolset_scope.py` `_TOOLSET_PLATFORM_RESTRICTIONS`) and
+`CLIENT_SURFACE_TOOLSETS`. MCP toolsets are not among them: they come
+from the profile's `mcp_servers`, which haunt writes.
+
+Every toolset gets a verdict. It passes when the profile names it,
+allowed or disabled, or as the person's (`personsToolsets`: the
+`context_engine` a chosen context engine brings); when hermes keeps it
+to another platform or to a
+desktop client; when it has no tools in the image; or when every tool it
+has is one a ghost is given or one `disabled_toolsets` subtracts (hermes
+subtracts by tool, so `disabled: [web]` covers `search`). A plugin
+toolset has to be named outright, since hermes turns it on beside an
+explicit list. Anything else fails, naming the tools nothing would take
+away. Warnings, which do not fail the check: a `disabledToolsets` entry
+the image does not know, a plugin whose declared tools did not register,
+and a subtracted tool `absentTools` (`skills.go`) does not match. The
+check also fails when `ghostTools` (`skills.go`) is not exactly the
+tools of the allowed toolsets; a memory provider's or a context
+engine's tools are the person's and not among them.
 
 ## Tests
 

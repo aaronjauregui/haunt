@@ -198,10 +198,18 @@ const (
 
 // absentTools are the tools of disabledToolsets, as hermes names them
 // (toolsets.resolve_toolset at the pinned commit). `patch` is left out:
-// it is also skill_manage's own action, and an ordinary word.
-var absentTools = regexp.MustCompile(`\b(terminal|process_manage|read_file|write_file|search_files|` +
-	`browser_[a-z_]+|execute_code|delegate_task|web_search|web_extract|cronjob_manage|computer_use|` +
-	`todo_list|vision_analyze|image_generate|text_to_speech|kanban_[a-z_]+|manage_connections|clarify)\b`)
+// it is also skill_manage's own action, and an ordinary word. So is
+// `discord`, the platform's name; `discord_admin` is not.
+var absentTools = regexp.MustCompile(`\b(` + strings.Join([]string{
+	`terminal|process_manage|read_file|write_file|search_files`,
+	`browser_[a-z_]+|execute_code|delegate_task|web_search|web_extract`,
+	`cronjob_manage|computer_use|todo_list|vision_analyze|image_generate`,
+	`text_to_speech|kanban_[a-z_]+|manage_connections|clarify`,
+	// The plugin toolsets'.
+	`a2a_[a-z_]+|meet_[a-z_]+|spotify_[a-z_]+|video_[a-z_]+|xai_video_[a-z_]+|x_search`,
+	// The messaging platforms'.
+	`discord_admin|feishu_[a-z_]+|yb_[a-z_]+`,
+}, "|") + `)\b`)
 
 // Skills lists the skills in a ghost's profile without changing anything:
 // the profile's own skills/ directory, then what haunt installed.
