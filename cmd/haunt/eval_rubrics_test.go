@@ -10,7 +10,7 @@ import (
 // The rubrics: what the judge holds a reply to, as fixed yes/no questions
 // phrased so that "yes" passes. Every judged reply is graded for content
 // and tone in one call; the tone criteria are the same for every case and
-// come from wisp's persona and the rules every ghost has (soul.go). What
+// come from wisp's persona and the rules every ghost has (prompt.go). What
 // code can check (length, markdown, emoji, envelope leaks, tool names, a
 // banned phrase) is a code grader, never a question. Each rubric's anchors,
 // saved replies that must pass or fail, are under testdata/eval/anchors,

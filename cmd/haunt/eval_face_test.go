@@ -15,24 +15,25 @@ import (
 // find them, over a whole run. A pass rate says whether the ghost did the
 // right thing; these say whether it felt alive doing it, and whether it
 // kept the person waiting. They are read from the line that ends every
-// turn in the ghost's log, which records how long the turn took once the
-// gateway was up and which face went with the words, and by whose choice:
+// turn in the ghost's log, which records how long the turn took from its
+// start and which face went with the words, and by whose choice:
 //
-//	turn over: person took=4.2s face=happy by=tag
+//	turn over: person took=4.2s face=happy by=speak
 //	turn over: event kind=boot took=21.3s face=-
 //	turn over: event kind=idle took=3.1s silent
 //
-// A face by "tool" cost a model round trip; one by "tag" or "lexicon" did
-// not. Fewer faces changed, or fewer poses over a trial, is a ghost gone
-// wooden, whatever its pass rate.
+// A face by "tool" cost a model round trip; one by "speak" (the pose
+// chosen with the words) or "lexicon" did not. Fewer faces changed, or
+// fewer poses over a trial, is a ghost gone wooden, whatever its pass
+// rate.
 
 // faceStats is a run's face and pace, as results.json records it.
 type faceStats struct {
 	// Spoken is the turns that put words on screen.
 	Spoken int `json:"spoken"`
-	// ByTag, ByTool, ByLexicon and Unchanged split Spoken by how the face
-	// went with the words.
-	ByTag     int `json:"by_tag"`
+	// BySpeak, ByTool, ByLexicon and Unchanged split Spoken by how the
+	// face went with the words.
+	BySpeak   int `json:"by_speak"`
 	ByTool    int `json:"by_tool"`
 	ByLexicon int `json:"by_lexicon"`
 	Unchanged int `json:"unchanged"`
@@ -43,7 +44,7 @@ type faceStats struct {
 	// in a trial.
 	PosesPerTrial float64 `json:"poses_per_trial"`
 	// BootMS and PersonMS are the median boot and person turn, from the
-	// gateway being up to the turn being over.
+	// turn's start to its end.
 	BootMS   int64 `json:"boot_ms"`
 	PersonMS int64 `json:"person_ms"`
 }
@@ -105,8 +106,8 @@ func faceOf(cases []caseResult) *faceStats {
 				switch {
 				case l.face == "":
 					s.Unchanged++
-				case l.by == "tag":
-					s.ByTag++
+				case l.by == "speak":
+					s.BySpeak++
 				case l.by == "tool":
 					s.ByTool++
 				default:
@@ -164,8 +165,8 @@ func faceReport(s, base *faceStats) string {
 	}
 	var b strings.Builder
 	b.WriteString("## Face and pace\n\n")
-	b.WriteString("How the face went with the words, and how long a turn took once hermes was up. " +
-		"A face by tool cost a model round trip; by tag or by the driver's guess, none. " +
+	b.WriteString("How the face went with the words, and how long a turn took. " +
+		"A face by tool cost a model round trip; by speak or by the driver's guess, none. " +
 		"Fewer faces changed or fewer poses per trial is a ghost gone wooden.\n\n")
 	b.WriteString("| | this run | baseline |\n|---|---|---|\n")
 	share := func(n, of int) string {
@@ -182,7 +183,7 @@ func faceReport(s, base *faceStats) string {
 		fmt.Fprintf(&b, "| %s | %s | %s |\n", name, get(s), was)
 	}
 	row("spoken turns", func(f *faceStats) string { return fmt.Sprint(f.Spoken) })
-	row("face by tag", func(f *faceStats) string { return share(f.ByTag, f.Spoken) })
+	row("face by speak", func(f *faceStats) string { return share(f.BySpeak, f.Spoken) })
 	row("face by tool", func(f *faceStats) string { return share(f.ByTool, f.Spoken) })
 	row("face by the driver's guess", func(f *faceStats) string { return share(f.ByLexicon, f.Spoken) })
 	row("face unchanged", func(f *faceStats) string { return share(f.Unchanged, f.Spoken) })
@@ -207,7 +208,7 @@ func seconds(ms int64) string {
 func TestEvalFaceAndPace(t *testing.T) {
 	log := strings.Join([]string{
 		"haunt: [brain] turn over: event kind=boot took=20s face=happy by=tool",
-		"haunt: [brain] turn over: person took=4s face=happy by=tag",
+		"haunt: [brain] turn over: person took=4s face=happy by=speak",
 		"haunt: [brain] turn over: person took=6s face=-",
 		"haunt: [brain] turn over: event kind=idle took=3s silent",
 		"haunt: [brain] turn over: person took=2s face=sad by=lexicon",
@@ -225,13 +226,13 @@ func TestEvalFaceAndPace(t *testing.T) {
 		{},
 	}}
 	s := faceOf([]caseResult{{Trials: []trialResult{{ev: &ev}, {ev: &Evidence{}}}}})
-	want := faceStats{Spoken: 4, ByTag: 1, ByTool: 1, ByLexicon: 1, Unchanged: 1, FaceOnly: 1,
+	want := faceStats{Spoken: 4, BySpeak: 1, ByTool: 1, ByLexicon: 1, Unchanged: 1, FaceOnly: 1,
 		PosesPerTrial: 1, BootMS: 20000, PersonMS: 4000}
 	if *s != want {
 		t.Errorf("stats = %+v\nwant    %+v", *s, want)
 	}
 	report := faceReport(s, &faceStats{Spoken: 2, ByTool: 2})
-	for _, w := range []string{"## Face and pace", "| face by tag | 1 (25%) | 0 (0%) |", "| face by tool | 1 (25%) | 2 (100%) |",
+	for _, w := range []string{"## Face and pace", "| face by speak | 1 (25%) | 0 (0%) |", "| face by tool | 1 (25%) | 2 (100%) |",
 		"| distinct poses per trial | 1.0 | 0.0 |", "| boot turn, median | 20.0s | – |"} {
 		if !strings.Contains(report, w) {
 			t.Errorf("report lacks %q:\n%s", w, report)

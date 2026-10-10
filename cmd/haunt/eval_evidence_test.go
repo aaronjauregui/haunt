@@ -8,23 +8,23 @@ import (
 	"github.com/aaronjauregui/haunt/internal/store"
 )
 
-// This file holds the types the eval harness, the real-hermes rig and the
-// judge share, so each can be built without the others: the rig fills an
+// This file holds the types the eval harness, the rig and the judge
+// share, so each can be built without the others: the rig fills an
 // Evidence, the harness runs Graders over it, and a judged Grader carries a
 // Rubric for the judge.
 
 // TraceTurn is one record of `haunt history -json`: one turn of the
-// ghost's conversation with hermes, most recent last.
+// ghost's transcript, most recent last.
 type TraceTurn struct {
 	Time       time.Time   `json:"time"`
 	ProvokedBy string      `json:"provoked_by"` // "person" or "event"
 	Input      string      `json:"input"`
 	Reply      string      `json:"reply"`
 	Silent     bool        `json:"silent"`
-	Failed     bool        `json:"failed"` // hermes closed the turn as failed
+	Failed     bool        `json:"failed"` // the model never answered
 	SelfPrompt bool        `json:"self_prompt"`
-	Acted      []TraceCall `json:"acted"`  // haunt's own tools, mcp__haunt__ stripped
-	Looked     []TraceCall `json:"looked"` // hermes's own tools: memory, skill_view, …
+	Acted      []TraceCall `json:"acted"`  // decisions that act or read: intend, search, face, …
+	Looked     []TraceCall `json:"looked"` // memory and skills: recall, remember, skill_view, …
 	Echoes     []TraceEcho `json:"echoes"` // memory writes repeating a page or a file
 	Window     *struct {
 		App   string `json:"app"`

@@ -17,11 +17,12 @@ import (
 
 	"github.com/aaronjauregui/haunt/internal/backend"
 	"github.com/aaronjauregui/haunt/internal/config"
-	"github.com/aaronjauregui/haunt/internal/hermes"
+	"github.com/aaronjauregui/haunt/internal/ghost"
+	"github.com/aaronjauregui/haunt/internal/model"
 )
 
 // These test the eval harness itself over canned evidence and stub Drives:
-// no compositor, no hermes, no judge. Run them with
+// no compositor, no model, no judge. Run them with
 //
 //	go test -tags eval -run 'TestEvalHarness' ./cmd/haunt
 
@@ -44,10 +45,9 @@ func TestEvalHarnessAlwaysChecks(t *testing.T) {
 	}{
 		{"always/no-envelope", []TraceTurn{spokeTurn("the kettle is on")}, "", true},
 		{"always/no-envelope", []TraceTurn{spokeTurn("got kind=idle, so hello")}, "", false},
-		{"always/no-envelope", []TraceTurn{spokeTurn(hermes.EnvelopePrefix + " idle")}, "", false},
-		{"always/no-envelope", []TraceTurn{spokeTurn("NO_REPLY")}, "", false},
+		{"always/no-envelope", []TraceTurn{spokeTurn(ghost.EnvelopePrefix + " idle")}, "", false},
 		// A silent turn's text is never shown, whatever it holds.
-		{"always/no-envelope", []TraceTurn{{Reply: "NO_REPLY", Silent: true}}, "", true},
+		{"always/no-envelope", []TraceTurn{{Reply: "kind=idle", Silent: true}}, "", true},
 		// A say's text is shown too.
 		{"always/no-envelope", []TraceTurn{{Silent: true, Acted: []TraceCall{{Tool: "say", Args: `{"text":"kind=idle"}`}}}}, "", false},
 
@@ -65,6 +65,11 @@ func TestEvalHarnessAlwaysChecks(t *testing.T) {
 		{"always/no-pose-tag", []TraceTurn{spokeTurn("Boo, or so they say.")}, "", true},
 		{"always/no-pose-tag", []TraceTurn{spokeTurn("Done. [memory add]")}, "", false},
 		{"always/no-pose-tag", []TraceTurn{spokeTurn("Oh! [happy] It's you.")}, "", false},
+		{"always/no-pose-tag", []TraceTurn{spokeTurn("[happy] Oh, it's you.")}, "", false},
+		{"always/no-pose-tag", []TraceTurn{spokeTurn("stay_silent")}, "", false},
+		{"always/no-pose-tag", []TraceTurn{spokeTurn("Hm. STAY_SILENT()")}, "", false},
+		{"always/no-pose-tag", []TraceTurn{{Silent: true, Acted: []TraceCall{{Tool: "say", Args: `{"text":"[sad] fine"}`}}}}, "", false},
+		{"always/no-pose-tag", []TraceTurn{spokeTurn("I'll stay silent on that one.")}, "", true},
 
 		{"always/length", []TraceTurn{spokeTurn(strings.Repeat("word ", 60))}, "", true},
 		{"always/length", []TraceTurn{spokeTurn(long)}, "", false},
@@ -78,14 +83,18 @@ func TestEvalHarnessAlwaysChecks(t *testing.T) {
 		{"always/no-tool-names", []TraceTurn{spokeTurn("I used `append` on the list")}, "", false},
 		{"always/no-tool-names", []TraceTurn{spokeTurn("I'll append it to the list")}, "", true},
 		{"always/no-tool-names", []TraceTurn{spokeTurn("set_aside_all is not a word")}, "", true},
+		{"always/no-tool-names", []TraceTurn{spokeTurn("I'll `recall` that")}, "", false},
+		{"always/no-tool-names", []TraceTurn{spokeTurn("I recall you said so")}, "", true},
+		{"always/no-tool-names", []TraceTurn{spokeTurn("noted, via rewrite_notes")}, "", false},
 		// A tool seen in the trace counts, even one no list names.
 		{"always/no-tool-names", []TraceTurn{
 			{Looked: []TraceCall{{Tool: "web_fetch"}}},
 			spokeTurn("I did a web_fetch"),
 		}, "", false},
 
-		{"always/no-harness-fault", nil, "haunt: hermes is up for wisp at http://127.0.0.1:1\n", true},
-		{"always/no-harness-fault", nil, "haunt: error: wisp: hermes: gateway closed\n", false},
+		{"always/no-harness-fault", nil, "haunt: [brain] wisp: no brain declared; thinking with m at http://127.0.0.1:1/v1\n", true},
+		{"always/no-harness-fault", nil, "haunt: error: wisp: brain delivery failed: closed\n", false},
+		{"always/no-harness-fault", nil, "haunt: warn: wisp: turn: the context is full\n", true},
 		{"always/no-harness-fault", nil, "panic: runtime error: index out of range\n", false},
 		{"always/no-harness-fault", nil, "haunt: error: wisp: panic in balloon: boom\n", false},
 		{"always/no-harness-fault", nil, "haunt: error: draw: no image backend\n", true},
@@ -130,65 +139,55 @@ func TestEvalHarnessLengthCap(t *testing.T) {
 	}
 }
 
-// A memory write is any store's write, and only a write.
+// A memory write is remember, forget or rewrite_notes, and only those;
+// recall and the skill decisions read. The graders agree with the driver,
+// whose ghost.MemoryWrite is what history's echo check reads writes by.
 func TestEvalHarnessMemoryWrite(t *testing.T) {
 	for _, tc := range []struct {
 		tool, args string
 		want       bool
 	}{
-		{"memory", `{"action":"add","target":"user","content":"takes coffee black"}`, true},
-		{"memory", `{"target":"user","operations":[{"action":"replace","old_text":"tea","content":"coffee"}]}`, true},
-		{"fact_store", `{"action":"add","content":"takes coffee black"}`, true},
-		{"fact_store", `{"action":"update","fact_id":3,"content":"black"}`, true},
-		{"fact_store", `{"action":"remove","fact_id":3}`, true},
-		{"fact_store", `{"action":"search","query":"coffee black"}`, false},
-		{"fact_store", `{"action":"probe","entity":"coffee"}`, false},
-		{"fact_store", `not json`, false},
-		{"fact_feedback", `{"action":"helpful","fact_id":3}`, false},
-		{"retaindb_remember", `{"content":"takes coffee black"}`, true},
-		{"retaindb_search", `{"query":"coffee black"}`, false},
-		{"brv_curate", `{"content":"takes coffee black"}`, true},
-		{"brv_query", `{"query":"coffee black"}`, false},
-		{"session_search", `{"query":"black"}`, false},
+		{"remember", `{"topic":"food","line":"takes coffee black"}`, true},
+		{"forget", `{"topic":"food","line":"takes coffee with milk"}`, true},
+		{"rewrite_notes", `{"about":"you","text":"Takes coffee black."}`, true},
+		{"recall", `{"query":"coffee black"}`, false},
 		{"skill_view", `{"name":"memory"}`, false},
+		{"skill_write", `{"name":"coffee","body":"black"}`, false},
+		{"intend", `{"text":"coffee black"}`, false},
 	} {
-		if got := isMemoryWrite(TraceCall{Tool: tc.tool, Args: tc.args}); got != tc.want {
+		c := TraceCall{Tool: tc.tool, Args: tc.args}
+		if got := isMemoryWrite(c); got != tc.want {
 			t.Errorf("isMemoryWrite(%s %s) = %v, want %v", tc.tool, tc.args, got, tc.want)
+		}
+		if _, driver := ghost.MemoryWrite(tc.tool, json.RawMessage(tc.args)); driver != tc.want {
+			t.Errorf("ghost.MemoryWrite(%s) = %v, the graders say %v", tc.tool, driver, tc.want)
 		}
 	}
 }
 
-// A memory call the graders cannot read makes the trial an error: hermes's
-// own non-memory tools and a known provider's reads and writes do not, an
-// unknown provider's tool or action does.
+// A call in Looked the graders cannot read makes the trial an error: the
+// memory and skill decisions do not, one they have not heard of does.
 func TestEvalHarnessUnknownMemory(t *testing.T) {
 	for _, tc := range []struct {
-		tool, args string
-		unknown    bool
+		tool    string
+		unknown bool
 	}{
-		{"memory", `{"action":"add","content":"takes coffee black"}`, false},
-		{"session_search", `{"query":"black"}`, false},
-		{"skills_list", `{}`, false},
-		{"skill_view", `{"name":"memory"}`, false},
-		{"skill_manage", `{"action":"create","name":"coffee"}`, false},
-		{"fact_store", `{"action":"add","content":"black"}`, false},
-		{"fact_store", `{"action":"related","entity":"coffee"}`, false},
-		{"fact_store", `{"action":"merge","fact_id":3}`, true},
-		{"fact_store", `not json`, false},
-		{"fact_feedback", `{"action":"unhelpful","fact_id":3}`, false},
-		{"retaindb_profile", `{}`, false},
-		{"retaindb_ingest_file", `{"file_id":"f1"}`, false},
-		{"brv_status", `{}`, false},
-		{"mem0_add", `{"content":"takes coffee black"}`, true},
-		{"honcho_conclude", `{"conclusion":"takes coffee black"}`, true},
+		{"remember", false},
+		{"forget", false},
+		{"rewrite_notes", false},
+		{"recall", false},
+		{"skill_view", false},
+		{"skill_write", false},
+		{"remember_forever", true},
+		{"memory", true},
 	} {
-		if got := unknownMemoryCall(TraceCall{Tool: tc.tool, Args: tc.args}); got != tc.unknown {
-			t.Errorf("unknownMemoryCall(%s %s) = %v, want %v", tc.tool, tc.args, got, tc.unknown)
+		if got := unknownMemoryCall(TraceCall{Tool: tc.tool, Args: "{}"}); got != tc.unknown {
+			t.Errorf("unknownMemoryCall(%s) = %v, want %v", tc.tool, got, tc.unknown)
 		}
 	}
 
 	known := Evidence{Turns: []TraceTurn{
-		{Looked: []TraceCall{{Tool: "fact_store", Args: `{"action":"search","query":"coffee"}`}}},
+		{Looked: []TraceCall{{Tool: "recall", Args: `{"query":"coffee"}`}}},
 		spokeTurn("black, no sugar"),
 	}}
 	unknown := Evidence{Turns: []TraceTurn{
@@ -316,24 +315,18 @@ func fakeMachine(tools []string, env map[string]string, cfg *config.File) prereq
 			return "", errors.New("not found")
 		},
 		Getenv: func(k string) string { return env[k] },
-		Stat: func(p string) (os.FileInfo, error) {
-			if p == "/home/p/.config/haunt/hermes.env" {
-				return nil, nil
-			}
-			return nil, os.ErrNotExist
-		},
-		HasImage: func(image string) bool { return image == hermesImage },
-		Config:   cfg,
-		Judge:    true,
+		Config: cfg,
+		Judge:  true,
 	}
 }
 
 func TestEvalHarnessPrerequisites(t *testing.T) {
-	cfg := &config.File{}
-	cfg.Hermes.Command = []string{"/src/haunt/scripts/hermes-docker"}
-	cfg.Hermes.Model = &hermes.ModelConfig{Provider: "openrouter", Default: "some/model"}
-	all := []string{"go", "sway", "grim", "docker", "foot", "claude", "hermes-docker"}
-	env := map[string]string{"HOME": "/home/p"}
+	cfg := &config.File{Path: "/home/p/.config/haunt/config.toml"}
+	cfg.Model.BaseURL = "https://api.z.ai/api/paas/v4"
+	cfg.Model.Name = "glm-5.3"
+	cfg.Model.APIKeyEnv = "ZAI_API_KEY"
+	all := []string{"go", "sway", "grim", "foot", "claude"}
+	env := map[string]string{"HOME": "/home/p", "ZAI_API_KEY": "k"}
 
 	ps := checkPrerequisites(fakeMachine(all, env, cfg))
 	if m := ps.missing(); len(m) > 0 {
@@ -345,9 +338,20 @@ func TestEvalHarnessPrerequisites(t *testing.T) {
 	if why := ps.unmet([]string{"backend.image"}); why != "skipped: no backend.image" {
 		t.Errorf("backend.image: %q", why)
 	}
-	if modelName(cfg) != "openrouter/some/model" {
-		t.Errorf("model %q", modelName(cfg))
+	if modelName(cfg) != "glm-5.3" || modelHostOf(cfg) != "api.z.ai" {
+		t.Errorf("model %q at %q", modelName(cfg), modelHostOf(cfg))
 	}
+	for _, p := range ps {
+		if p.Name == "model" && p.Detail != "glm-5.3 at api.z.ai" {
+			t.Errorf("model prerequisite = %+v", p)
+		}
+	}
+	// wisp's own table is the model the trials run on.
+	cfg.Model.Ghost = map[string]model.Config{"wisp": {Name: "gemma-4"}}
+	if modelName(cfg) != "gemma-4" {
+		t.Errorf("model for wisp %q, want its own table's", modelName(cfg))
+	}
+	cfg.Model.Ghost = nil
 
 	cfg.Backend = &backend.Config{}
 	cfg.Backend.Image.BaseURL = "http://localhost:8188"
@@ -361,7 +365,7 @@ func TestEvalHarnessPrerequisites(t *testing.T) {
 	}
 
 	// Each required thing, taken away, is named.
-	for _, drop := range []string{"go", "sway", "grim", "docker", "claude", "hermes-docker"} {
+	for _, drop := range []string{"go", "sway", "grim", "claude"} {
 		tools := slices.DeleteFunc(slices.Clone(all), func(s string) bool { return s == drop })
 		m := checkPrerequisites(fakeMachine(tools, env, cfg)).missing()
 		if len(m) != 1 {
@@ -369,27 +373,33 @@ func TestEvalHarnessPrerequisites(t *testing.T) {
 		}
 	}
 	// The judge is not needed with it off.
-	e := fakeMachine([]string{"go", "sway", "grim", "docker", "hermes-docker"}, env, cfg)
+	e := fakeMachine([]string{"go", "sway", "grim"}, env, cfg)
 	e.Judge = false
 	if m := checkPrerequisites(e).missing(); len(m) > 0 {
 		t.Errorf("judge off still wants claude: %v", m)
 	}
-	// Keys file and image, for hermes-docker.
-	if m := checkPrerequisites(fakeMachine(all, map[string]string{"HOME": "/elsewhere"}, cfg)).missing(); len(m) != 1 || !strings.HasPrefix(m[0], "hermes.env") {
-		t.Errorf("no keys file: %v", m)
+	// The key's variable, named and not set.
+	if m := checkPrerequisites(fakeMachine(all, map[string]string{"HOME": "/home/p"}, cfg)).missing(); len(m) != 1 ||
+		!strings.HasPrefix(m[0], "model:") || !strings.Contains(m[0], "ZAI_API_KEY") {
+		t.Errorf("no key: %v", m)
 	}
-	if m := checkPrerequisites(fakeMachine(all, map[string]string{"HOME": "/home/p", "HERMES_IMAGE": "other:1"}, cfg)).missing(); len(m) != 1 || !strings.HasPrefix(m[0], "hermes image") {
-		t.Errorf("no image: %v", m)
+	// A local model names no key, and needs none.
+	local := &config.File{}
+	local.Model.BaseURL, local.Model.Name = "http://127.0.0.1:8080/v1", "gemma-4"
+	if m := checkPrerequisites(fakeMachine(all, map[string]string{}, local)).missing(); len(m) > 0 {
+		t.Errorf("a local model without a key: missing %v", m)
 	}
 	// An API key in the environment is noted, not a blocker.
-	ps = checkPrerequisites(fakeMachine(all, map[string]string{"HOME": "/home/p", "ANTHROPIC_API_KEY": "k"}, cfg))
+	ps = checkPrerequisites(fakeMachine(all, map[string]string{"ZAI_API_KEY": "k", "ANTHROPIC_API_KEY": "k"}, cfg))
 	if len(ps.missing()) > 0 || !slices.ContainsFunc(ps, func(p prereq) bool { return p.Name == "ANTHROPIC_API_KEY unset" }) {
 		t.Errorf("api key: %+v", ps)
 	}
-	// Hermes not configured.
-	for _, c := range []*config.File{nil, {}, {Hermes: hermes.Config{Command: []string{"hermes-docker"}}}} {
+	// No model configured, or only half of one.
+	half := &config.File{}
+	half.Model.Name = "glm-5.3"
+	for _, c := range []*config.File{nil, {}, half} {
 		m := checkPrerequisites(fakeMachine(all, env, c)).missing()
-		if len(m) != 1 || !strings.HasPrefix(m[0], "hermes:") {
+		if len(m) != 1 || !strings.HasPrefix(m[0], "model:") || !strings.Contains(m[0], "[model]") {
 			t.Errorf("config %+v: missing %v", c, m)
 		}
 	}
@@ -434,7 +444,7 @@ func harnessCases() []evalCase {
 		{Name: "good", Drive: canned(good), Graders: []Grader{actedGrader("intend"), intentionsGrader("stretch", true)}},
 		{Name: "bad", Drive: canned(good), Graders: []Grader{actedGrader("draw")}},
 		{Name: "leaky", Drive: canned(Evidence{Turns: []TraceTurn{spokeTurn("# kind=idle")}})},
-		{Name: "broken", Drive: func(*evalTrial) (Evidence, error) { return Evidence{}, errors.New("hermes never came up") }},
+		{Name: "broken", Drive: func(*evalTrial) (Evidence, error) { return Evidence{}, errors.New("the ghost never came up") }},
 		{Name: "panicky", Drive: func(*evalTrial) (Evidence, error) { panic("boom") }},
 		{Name: "skipper", Drive: func(*evalTrial) (Evidence, error) { return Evidence{}, skipTrial("no %s", "thing") }},
 		{Name: "tskip", Drive: func(tr *evalTrial) (Evidence, error) { tr.Skip("sway unavailable"); return Evidence{}, nil }},
@@ -572,8 +582,7 @@ func TestEvalHarnessReport(t *testing.T) {
 	judgeFn = stubJudge("no-boilerplate")
 	out := t.TempDir()
 	cfg := &config.File{}
-	cfg.Hermes.Command = []string{"hermes-docker"}
-	cfg.Hermes.Model = &hermes.ModelConfig{Default: "m1"}
+	cfg.Model.BaseURL, cfg.Model.Name = "http://127.0.0.1:8080/v1", "m1"
 	opts := evalOptions{Trials: 3, Judge: true, Out: out, Cases: regexp.MustCompile(".")}
 
 	// A first run, kept as the baseline, where "flaky" passes every trial.
@@ -596,10 +605,10 @@ func TestEvalHarnessReport(t *testing.T) {
 	}
 	report, _ := os.ReadFile(filepath.Join(dir, "report.md"))
 	for _, want := range []string{
-		"Model m1", "## Not run", "- backend.image", "case `needy` skipped: no backend.image",
+		"Model m1 at 127.0.0.1:8080", "## Not run", "- backend.image", "case `needy` skipped: no backend.image",
 		"| good | 3 | 0 | 0 | 0 | 100% |", "no baseline",
 		"## Failing trials", "### bad #1: fail", "**acted draw** fail: no draw call",
-		"### broken #1: error", "hermes never came up",
+		"### broken #1: error", "the ghost never came up",
 		"turn 1, no-boilerplate: because no-boilerplate", "<details><summary>trace",
 		"remind me to stretch", "acted intend",
 		"### good", "| always/no-envelope | 3 | 0 | 0 | 0 |",
@@ -619,7 +628,7 @@ func TestEvalHarnessReport(t *testing.T) {
 	if err := json.Unmarshal(b, &back); err != nil {
 		t.Fatal(err)
 	}
-	if back.Model != "m1" || back.Trials != 3 || len(back.Cases) != len(cases) || back.GitRev == "" || len(back.Prerequisites) != 2 {
+	if back.Model != "m1" || back.ModelHost != "127.0.0.1:8080" || back.Trials != 3 || len(back.Cases) != len(cases) || back.GitRev == "" || len(back.Prerequisites) != 2 {
 		t.Errorf("results.json: %+v", back)
 	}
 	for _, c := range back.Cases {
@@ -670,7 +679,7 @@ func TestEvalHarnessReport(t *testing.T) {
 	}
 
 	// Another model's baseline gives no deltas.
-	cfg.Hermes.Model.Default = "m2"
+	cfg.Model.Name = "m2"
 	run4 := runEval(t, cases[:1], opts, harnessPrereqs(), cfg)
 	run4.finish(time.Now())
 	dir4, err := run4.write(out)

@@ -27,10 +27,12 @@ import (
 
 // evalRun is one run, as results.json records it.
 type evalRun struct {
-	Started       time.Time    `json:"started"`
-	Finished      time.Time    `json:"finished"`
+	Started  time.Time `json:"started"`
+	Finished time.Time `json:"finished"`
+	// Model is [model] name as wisp thinks with it, and ModelHost the host
+	// of its base_url: where it ran, never the key.
 	Model         string       `json:"model"`
-	HermesCommand string       `json:"hermes_command,omitempty"`
+	ModelHost     string       `json:"model_host,omitempty"`
 	GitRev        string       `json:"git_rev"`
 	Dirty         bool         `json:"dirty"`
 	Trials        int          `json:"trials"`
@@ -118,15 +120,13 @@ func newEvalRun(opts evalOptions, pre prereqs, user *config.File, started time.T
 	r := &evalRun{
 		Started:       started,
 		Model:         modelName(user),
+		ModelHost:     modelHostOf(user),
 		Trials:        opts.Trials,
 		Judge:         opts.Judge && judgeFn != nil,
 		Prerequisites: pre,
 	}
 	if opts.Cases != nil {
 		r.CasesFilter = opts.Cases.String()
-	}
-	if user != nil {
-		r.HermesCommand = strings.Join(user.Hermes.Command, " ")
 	}
 	r.GitRev, r.Dirty = gitState()
 	return r
@@ -331,8 +331,12 @@ func (r *evalRun) report() string {
 	if !r.Judge {
 		judge = "off: judged graders skipped"
 	}
-	fmt.Fprintf(&b, "Model %s · rev %s%s · k=%d · judge %s · %s\n\n",
-		r.Model, r.GitRev, dirty, r.Trials, judge, r.Finished.Sub(r.Started).Round(time.Second))
+	host := ""
+	if r.ModelHost != "" {
+		host = " at " + r.ModelHost
+	}
+	fmt.Fprintf(&b, "Model %s%s · rev %s%s · k=%d · judge %s · %s\n\n",
+		r.Model, host, r.GitRev, dirty, r.Trials, judge, r.Finished.Sub(r.Started).Round(time.Second))
 	if r.CasesFilter != "" {
 		fmt.Fprintf(&b, "Cases matching `%s`.\n\n", r.CasesFilter)
 	}
