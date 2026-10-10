@@ -364,10 +364,12 @@ func TestFirstTokenDeadline(t *testing.T) {
 
 func TestStallDeadline(t *testing.T) {
 	t.Parallel()
-	// Reasoning is a sign of life: the first deadline passes on it, and
-	// the gap after it runs out the stall.
-	srv := fake.NewT(t, fake.Rule{Reasoning: "hmm", GapMS: 300, Reply: "one two three"})
-	c := New(Config{BaseURL: srv.BaseURL(), FirstTokenSeconds: 3, StallSeconds: 1})
+	// The stall deadline is far shorter than the first-token one, and is
+	// held to on its own once the stream has started. Reasoning is a sign
+	// of life like a word.
+	srv := fake.NewT(t, fake.Rule{Reasoning: "hmm", GapMS: 50, Reply: "one two three"})
+	c := New(Config{BaseURL: srv.BaseURL()})
+	c.firstToken, c.stall = 5*time.Second, 250*time.Millisecond
 	words, _, _, _, err := func() (string, []ToolCall, *Usage, string, error) {
 		ch, err := c.Stream(context.Background(), Request{Messages: user("hi")})
 		if err != nil {
@@ -381,15 +383,21 @@ func TestStallDeadline(t *testing.T) {
 
 	// The first word comes inside the first deadline, the second only
 	// after the stall deadline has run out.
-	srv.Script(fake.Rule{GapMS: 1200, Reply: "one two"})
+	srv.Script(fake.Rule{GapMS: 500, Reply: "one two"})
+	start := time.Now()
 	ch, err := c.Stream(context.Background(), Request{Messages: user("hi")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, _, _, _, err = collect(t, ch)
 	var de *DeadlineError
-	if !errors.As(err, &de) || de.First {
+	if !errors.As(err, &de) || de.First || de.After != 250*time.Millisecond {
 		t.Fatalf("err = %v, want the stall deadline", err)
+	}
+	// "one" at 500 ms, the stall at 750 ms; the first-token clock's 5 s
+	// must not be what ended it.
+	if el := time.Since(start); el > 2*time.Second {
+		t.Errorf("the stall was caught after %v", el)
 	}
 }
 
