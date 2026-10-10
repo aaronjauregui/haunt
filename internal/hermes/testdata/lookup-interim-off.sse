@@ -1,0 +1,72 @@
+event: run.started
+data: {"user_message": {"role": "user", "content": "Did I burn anything last week? Say one short sentence first telling me you'll check, and in that same message call session_search for \"burned\". Then answer."}, "runtime": {"provider": "", "model": "", "route_source": "global", "requested": {"provider": "", "model": ""}}, "session_id": "haunt-fake", "run_id": "run_df7aeffb692a4728aab7d3f983c9287f", "seq": 1, "ts": 1791618664.6004515}
+
+event: message.started
+data: {"message": {"id": "msg_92cad964c1744c909197eee90d91c33b", "role": "assistant"}, "session_id": "haunt-fake", "run_id": "run_df7aeffb692a4728aab7d3f983c9287f", "seq": 2, "ts": 1791618664.6004598}
+
+event: assistant.delta
+data: {"message_id": "msg_92cad964c1744c909197eee90d91c33b", "delta": "I", "session_id": "haunt-fake", "run_id": "run_df7aeffb692a4728aab7d3f983c9287f", "seq": 3, "ts": 1791618667.1649113}
+
+event: assistant.delta
+data: {"message_id": "msg_92cad964c1744c909197eee90d91c33b", "delta": " will", "session_id": "haunt-fake", "run_id": "run_df7aeffb692a4728aab7d3f983c9287f", "seq": 4, "ts": 1791618667.165129}
+
+event: assistant.delta
+data: {"message_id": "msg_92cad964c1744c909197eee90d91c33b", "delta": " check", "session_id": "haunt-fake", "run_id": "run_df7aeffb692a4728aab7d3f983c9287f", "seq": 5, "ts": 1791618667.165395}
+
+event: assistant.delta
+data: {"message_id": "msg_92cad964c1744c909197eee90d91c33b", "delta": ".", "session_id": "haunt-fake", "run_id": "run_df7aeffb692a4728aab7d3f983c9287f", "seq": 6, "ts": 1791618667.1656055}
+
+event: assistant.delta
+data: {"message_id": "msg_92cad964c1744c909197eee90d91c33b", "delta": "\n\n", "session_id": "haunt-fake", "run_id": "run_df7aeffb692a4728aab7d3f983c9287f", "seq": 7, "ts": 1791618667.2268732}
+
+event: tool.progress
+data: {"message_id": "msg_92cad964c1744c909197eee90d91c33b", "tool_name": "_thinking", "delta": "I will check.", "session_id": "haunt-fake", "run_id": "run_df7aeffb692a4728aab7d3f983c9287f", "seq": 8, "ts": 1791618667.602938}
+
+event: tool.started
+data: {"message_id": "msg_92cad964c1744c909197eee90d91c33b", "tool_name": "session_search", "preview": "recall: \"burned\"", "args": {"after": "7d", "query": "burned"}, "session_id": "haunt-fake", "run_id": "run_df7aeffb692a4728aab7d3f983c9287f", "seq": 9, "ts": 1791618667.6078324}
+
+event: tool.completed
+data: {"message_id": "msg_92cad964c1744c909197eee90d91c33b", "tool_name": "session_search", "preview": null, "args": null, "session_id": "haunt-fake", "run_id": "run_df7aeffb692a4728aab7d3f983c9287f", "seq": 10, "ts": 1791618667.6117043}
+
+event: assistant.delta
+data: {"message_id": "msg_92cad964c1744c909197eee90d91c33b", "delta": "\n\nI", "session_id": "haunt-fake", "run_id": "run_df7aeffb692a4728aab7d3f983c9287f", "seq": 11, "ts": 1791618672.7637334}
+
+event: assistant.delta
+data: {"message_id": "msg_92cad964c1744c909197eee90d91c33b", "delta": " found", "session_id": "haunt-fake", "run_id": "run_df7aeffb692a4728aab7d3f983c9287f", "seq": 12, "ts": 1791618672.763939}
+
+event: assistant.delta
+data: {"message_id": "msg_92cad964c1744c909197eee90d91c33b", "delta": " nothing", "session_id": "haunt-fake", "run_id": "run_df7aeffb692a4728aab7d3f983c9287f", "seq": 13, "ts": 1791618672.8288977}
+
+event: assistant.delta
+data: {"message_id": "msg_92cad964c1744c909197eee90d91c33b", "delta": " about", "session_id": "haunt-fake", "run_id": "run_df7aeffb692a4728aab7d3f983c9287f", "seq": 14, "ts": 1791618672.8292222}
+
+event: assistant.delta
+data: {"message_id": "msg_92cad964c1744c909197eee90d91c33b", "delta": " you", "session_id": "haunt-fake", "run_id": "run_df7aeffb692a4728aab7d3f983c9287f", "seq": 15, "ts": 1791618672.829449}
+
+event: assistant.delta
+data: {"message_id": "msg_92cad964c1744c909197eee90d91c33b", "delta": " burning", "session_id": "haunt-fake", "run_id": "run_df7aeffb692a4728aab7d3f983c9287f", "seq": 16, "ts": 1791618672.829658}
+
+event: assistant.delta
+data: {"message_id": "msg_92cad964c1744c909197eee90d91c33b", "delta": " anything", "session_id": "haunt-fake", "run_id": "run_df7aeffb692a4728aab7d3f983c9287f", "seq": 17, "ts": 1791618672.8298726}
+
+event: assistant.delta
+data: {"message_id": "msg_92cad964c1744c909197eee90d91c33b", "delta": " last", "session_id": "haunt-fake", "run_id": "run_df7aeffb692a4728aab7d3f983c9287f", "seq": 18, "ts": 1791618672.8934135}
+
+event: assistant.delta
+data: {"message_id": "msg_92cad964c1744c909197eee90d91c33b", "delta": " week", "session_id": "haunt-fake", "run_id": "run_df7aeffb692a4728aab7d3f983c9287f", "seq": 19, "ts": 1791618672.8937135}
+
+event: assistant.delta
+data: {"message_id": "msg_92cad964c1744c909197eee90d91c33b", "delta": ".", "session_id": "haunt-fake", "run_id": "run_df7aeffb692a4728aab7d3f983c9287f", "seq": 20, "ts": 1791618672.8939736}
+
+event: tool.progress
+data: {"message_id": "msg_92cad964c1744c909197eee90d91c33b", "tool_name": "_thinking", "delta": "I found nothing about you burning anything last week.", "session_id": "haunt-fake", "run_id": "run_df7aeffb692a4728aab7d3f983c9287f", "seq": 21, "ts": 1791618672.9002998}
+
+event: assistant.completed
+data: {"session_id": "haunt-fake", "message_id": "msg_92cad964c1744c909197eee90d91c33b", "content": "I found nothing about you burning anything last week.", "completed": true, "partial": false, "interrupted": false, "runtime": {"provider": "custom", "model": "models/qat/gemma-4-31B-it-qat-UD-Q4_K_XL.gguf", "route_source": "global", "requested": {"provider": "", "model": ""}}, "run_id": "run_df7aeffb692a4728aab7d3f983c9287f", "seq": 22, "ts": 1791618672.908356}
+
+event: run.completed
+data: {"session_id": "haunt-fake", "message_id": "msg_92cad964c1744c909197eee90d91c33b", "completed": true, "partial": false, "interrupted": false, "messages": [{"role": "assistant", "content": "I will check.", "tool_calls": [{"id": "igW933I1WUack8puhYGKbwVKNiLeUTsm", "call_id": "igW933I1WUack8puhYGKbwVKNiLeUTsm", "response_item_id": "fc_igW933I1WUack8puhYGKbwVKNiLeUTsm", "type": "function", "function": {"name": "session_search", "arguments": "{\"after\":\"7d\",\"query\":\"burned\"}"}}], "timestamp": 1791618667.6032515, "finish_reason": "tool_calls", "reasoning": "The user is asking if they burned anything last week.\nI need to search past sessions for the keyword \"burned\".\nThe user specifically requested:\n1. One short sentence saying I'll check.\n2. A `session_search` call for \"burned\" in the same message.\n3. Then answer (which will happen after the tool output).\n\nPlan:\n- Response: \"I will check.\"\n- Tool call: `session_search(query=\"burned\", after=\"7d\")` (since \"last week\" implies the last 7 days).", "reasoning_content": "The user is asking if they burned anything last week.\nI need to search past sessions for the keyword \"burned\".\nThe user specifically requested:\n1. One short sentence saying I'll check.\n2. A `session_search` call for \"burned\" in the same message.\n3. Then answer (which will happen after the tool output).\n\nPlan:\n- Response: \"I will check.\"\n- Tool call: `session_search(query=\"burned\", after=\"7d\")` (since \"last week\" implies the last 7 days)."}, {"role": "tool", "content": "{\"success\": true, \"mode\": \"discover\", \"query\": \"burned\", \"detail\": \"adaptive\", \"results\": [{\"session_id\": \"haunt-fake\", \"when\": \"October 10, 2026 at 07:49 AM\", \"source\": \"api_server\", \"model\": \"models/qat/gemma-4-31B-it-qat-UD-Q4_K_XL.gguf\", \"title\": \"capture\", \"matched_role\": \"assistant\", \"match_message_id\": 2, \"snippet\": \"[{\\\"id\\\": \\\"oAxhE1nKIRVAYfwqYKYGjYLFslNyd01n\\\", \\\"call_id\\\": \\\"oAxhE1nKIRVAYfwqYKYGjYLFslNyd01n\\\", \\\"response_item_id\\\": \\\"fc_oAxhE1nKIRVAYfwqYKYGjYLFslNyd01n\\\", \\\"type\\\": \\\"function\\\", \\\"function\\\": {\\\"name\\\": \\\"session_search\\\", \\\"arguments\\\": \\\"{\\\\\\\"query\\\\\\\":\\\\\\\">>>burned<<<\\\\\\\"}\\\"}}]\", \"bookend_start\": [], \"messages\": [{\"id\": 1, \"role\": \"user\", \"content\": \"Did I burn anything last week? Say one short sentence first telling me you'll check, and in that same message call session_search for \\\"burned\\\". Then answer.\", \"timestamp\": 1791618596.4142938}, {\"id\": 2, \"role\": \"assistant\", \"content\": \"I will check your history.\", \"timestamp\": 1791618608.2159765, \"tool_calls\": [{\"id\": \"oAxhE1nKIRVAYfwqYKYGjYLFslNyd01n\", \"call_id\": \"oAxhE1nKIRVAYfwqYKYGjYLFslNyd01n\", \"response_item_id\": \"fc_oAxhE1nKIRVAYfwqYKYGjYLFslNyd01n\", \"type\": \"function\", \"function\": {\"name\": \"session_search\", \"arguments\": \"{\\\"query\\\":\\\"burned\\\"}\"}}], \"anchor\": true}, {\"id\": 4, \"role\": \"assistant\", \"content\": \"I found nothing about you burning anything last week.\", \"timestamp\": 1791618610.8664176}], \"bookend_end\": [], \"messages_before\": 1, \"messages_after\": 2, \"detail\": \"full\", \"link\": \"@session:default/haunt-fake\"}], \"count\": 1, \"sessions_searched\": 1, \"link_hint\": \"When referring the user to a session, write its `link` value verbatim inline mid-sentence (it renders as a titled link) — never as markdown, in backticks, on its own line, or next to the title/id/date. To read more around a compact result, scroll: session_search(session_id=..., around_message_id=match_message_id).\"}", "tool_call_id": "igW933I1WUack8puhYGKbwVKNiLeUTsm", "tool_name": "session_search", "timestamp": 1791618667.6103892}, {"role": "assistant", "content": "I found nothing about you burning anything last week.", "timestamp": 1791618672.9004116, "finish_reason": "stop", "reasoning": "The user asked if they burned anything last week.\nI performed a `session_search` for \"burned\" with `after='7d'`.\nThe search result shows one session (`haunt-fake`) which is actually the *current* session.\nThe snippet and messages in that session show the current conversation where the user asks the same question and I (in the search result) said \"I found nothing\".\nWait, the search results return the current session because I'm searching for \"burned\" and the user just used that word.\nSince no *other* sessions were found containing \"burned\" in the last 7 days, the answer is no.", "reasoning_content": "The user asked if they burned anything last week.\nI performed a `session_search` for \"burned\" with `after='7d'`.\nThe search result shows one session (`haunt-fake`) which is actually the *current* session.\nThe snippet and messages in that session show the current conversation where the user asks the same question and I (in the search result) said \"I found nothing\".\nWait, the search results return the current session because I'm searching for \"burned\" and the user just used that word.\nSince no *other* sessions were found containing \"burned\" in the last 7 days, the answer is no."}], "usage": {"input_tokens": 11431, "output_tokens": 302, "total_tokens": 11733, "runtime": {"provider": "custom", "model": "models/qat/gemma-4-31B-it-qat-UD-Q4_K_XL.gguf", "route_source": "global", "requested": {"provider": "", "model": ""}}}, "runtime": {"provider": "custom", "model": "models/qat/gemma-4-31B-it-qat-UD-Q4_K_XL.gguf", "route_source": "global", "requested": {"provider": "", "model": ""}}, "run_id": "run_df7aeffb692a4728aab7d3f983c9287f", "seq": 23, "ts": 1791618672.9083607}
+
+event: done
+data: {"session_id": "haunt-fake", "run_id": "run_df7aeffb692a4728aab7d3f983c9287f", "seq": 24, "ts": 1791618672.9083736}
+

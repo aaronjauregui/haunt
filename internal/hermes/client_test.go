@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -221,8 +220,8 @@ func (p *streamParts) request(input string) TurnRequest {
 
 // Words written alongside a tool call stream as deltas and are then marked
 // as commentary, before the call starts. They are not the reply: the reply
-// is what follows the mark, and its pose tag opens that part, not the
-// stream.
+// is what follows the mark, which hermes opens with a blank line, and
+// assistant.completed carries the reply alone.
 func TestTurnMarksInterimWords(t *testing.T) {
 	f, srv := newFakeHermes(t)
 	f.stream = func(string, string) string {
@@ -237,15 +236,15 @@ func TestTurnMarksInterimWords(t *testing.T) {
 	if !slices.Equal(p.order, []string{"delta", "interim", "tool", "delta"}) {
 		t.Errorf("callbacks came %v", p.order)
 	}
-	if !slices.Equal(p.interim, []string{"Let me look."}) || !slices.Equal(p.deltas, []string{"Let me look."}) {
+	// The deltas also carry the blank line the model wrote before its
+	// call; the commentary is the words alone.
+	const interim = "I will check your history."
+	if !slices.Equal(p.interim, []string{interim}) || len(p.deltas) != 1 || strings.TrimSpace(p.deltas[0]) != interim {
 		t.Errorf("interim %q, streamed as %q", p.interim, p.deltas)
 	}
-	const want = "[sad] Yes: the bread, on Tuesday."
-	if reply.Text != want || strings.TrimSpace(p.cur.String()) != want {
+	const want = "I found nothing about you burning anything last week."
+	if reply.Text != want || p.cur.String() != "\n\n"+want {
 		t.Errorf("reply %q, streamed after the mark %q", reply.Text, p.cur.String())
-	}
-	if pose, rest := CutPose(p.cur.String()); pose != "sad" || strings.TrimSpace(rest) != "Yes: the bread, on Tuesday." {
-		t.Errorf("the reply's part opens with pose %q, words %q", pose, rest)
 	}
 	if !slices.Equal(reply.Tools, []string{"session_search"}) {
 		t.Errorf("tools %v", reply.Tools)
@@ -256,14 +255,11 @@ func TestTurnMarksInterimWords(t *testing.T) {
 // and the tool call is what marks the words before it as interim.
 func TestTurnMarksInterimWordsAtTheCall(t *testing.T) {
 	f, srv := newFakeHermes(t)
-	commentary := regexp.MustCompile(`(?m)^event: assistant\.commentary\ndata: .*\n\n`)
-	f.stream = func(string, string) string {
-		sse := strings.ReplaceAll(fixture(t, "lookup.sse"), `"haunt-fake"`, `"haunt-moth"`)
-		if !commentary.MatchString(sse) {
-			t.Fatal("lookup.sse has no commentary to take out")
-		}
-		return commentary.ReplaceAllString(sse, "")
+	sse := strings.ReplaceAll(fixture(t, "lookup-interim-off.sse"), `"haunt-fake"`, `"haunt-moth"`)
+	if strings.Contains(sse, "assistant.commentary") {
+		t.Fatal("lookup-interim-off.sse has commentary")
 	}
+	f.stream = func(string, string) string { return sse }
 	saved := ""
 	var p streamParts
 	reply, err := testClient(srv, &saved).Turn(context.Background(), p.request("Did I burn anything last week?"))
@@ -273,10 +269,11 @@ func TestTurnMarksInterimWordsAtTheCall(t *testing.T) {
 	if !slices.Equal(p.order, []string{"delta", "interim", "tool", "delta"}) {
 		t.Errorf("callbacks came %v", p.order)
 	}
-	if !slices.Equal(p.interim, []string{"Let me look."}) {
+	// The part is what streamed, the model's trailing blank line with it.
+	if len(p.interim) != 1 || strings.TrimSpace(p.interim[0]) != "I will check." {
 		t.Errorf("interim %q", p.interim)
 	}
-	const want = "[sad] Yes: the bread, on Tuesday."
+	const want = "I found nothing about you burning anything last week."
 	if reply.Text != want || strings.TrimSpace(p.cur.String()) != want {
 		t.Errorf("reply %q, streamed after the mark %q", reply.Text, p.cur.String())
 	}
@@ -352,6 +349,25 @@ func TestSessionIsFoundAndRemade(t *testing.T) {
 	}
 	if saved != "haunt-moth" {
 		t.Errorf("a vanished session was not replaced: %q", saved)
+	}
+}
+
+// A turn hermes gives up on, its provider unreachable: failed.sse sends
+// assistant.completed with hermes's own notice and completed false, then
+// run.failed. The notice is not the ghost's words, and the turn fails.
+func TestTurnReportsAFailedTurn(t *testing.T) {
+	f, srv := newFakeHermes(t)
+	f.stream = func(string, string) string {
+		return strings.ReplaceAll(fixture(t, "failed.sse"), `"haunt-fake"`, `"haunt-moth"`)
+	}
+	saved := ""
+	var p streamParts
+	_, err := testClient(srv, &saved).Turn(context.Background(), p.request("Hello, are you there?"))
+	if err == nil || !strings.Contains(err.Error(), "the turn failed") {
+		t.Errorf("error %v", err)
+	}
+	if len(p.order) != 0 {
+		t.Errorf("callbacks came %v", p.order)
 	}
 }
 
@@ -455,12 +471,6 @@ func TestTranscriptKeepsCallsWhole(t *testing.T) {
 	}
 }
 
-// A compacted session is read whole, and its handoff is not a turn. The
-// fixtures are hermes's own answers, from its session store and API
-// handler: history-compacted.json is an in-place compaction in the middle
-// of a turn, after a lookup and before the reply it led to;
-// history-lineage.json is a session a compression ended and the child
-// that carries it on.
 // Hermes closes a failed turn with a notice of its own in the ghost's
 // place; it reads as a failed turn, not as words, and keeps the turn's
 // calls.
@@ -487,8 +497,26 @@ func TestMessagesFailedTurn(t *testing.T) {
 	if len(msgs[1].Looked) != 1 || msgs[1].Looked[0].Tool != "session_search" || msgs[1].Looked[0].Result != "nothing" {
 		t.Errorf("the failed turn's calls %+v", msgs[1].Looked)
 	}
+
+	// history-failed.json is hermes's answer after a turn whose provider
+	// never answered: the notice for a turn in which nothing ran.
+	f.history = fixture(t, "history-failed.json")
+	msgs, err = testClient(srv, &saved).Messages(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 2 || msgs[0].Text != "Hello, are you there?" || !msgs[1].Failed || msgs[1].Text != "" ||
+		msgs[1].Looked != nil || msgs[1].Time.Unix() != 1791618802 {
+		t.Fatalf("messages %+v", msgs)
+	}
 }
 
+// A compacted session is read whole, and its handoff is not a turn. The
+// fixtures are hermes's own answers, from its session store and API
+// handler: history-compacted.json is an in-place compaction in the middle
+// of a turn, after a lookup and before the reply it led to;
+// history-lineage.json is a session a compression ended and the child
+// that carries it on.
 func TestMessagesAcrossCompaction(t *testing.T) {
 	for _, tc := range []struct {
 		fixture string

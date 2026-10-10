@@ -317,8 +317,8 @@ const configVersion = 50
 // the first sign of life only, so after a tool call hermes's default of
 // five would hold the turn for minutes with the person's words queued
 // behind it. Two keep the short waits, which ride out a provider's
-// overload (z.ai's 429s come in bursts), and still fail a dead one within
-// a minute.
+// overload (z.ai's 429s come in bursts), and still fail a dead one in
+// about a minute and a half.
 const autoRecoveryCycles = 2
 
 func (c Config) writeConfig(path string, spec ProfileSpec, hasSkills bool) error {
