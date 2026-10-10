@@ -47,11 +47,11 @@ var foldedSpeak = speakVerb("Say something to the person: write the words as the
 	"and call speak in it, with pose the face you wear as you say them (one of your poses, or empty to let your words choose).")
 
 func init() {
-	register(speakVerb("Say something to the person. pose is the face you wear as you say it, one of your poses, " +
-		"or empty to let your words choose. You write the words next."))
+	register(speakVerb("End the turn by speaking; call it last, after any ask. " +
+		"pose is the face to wear, one of your poses, or empty to match your words. You write the words next."))
 	register(verb{
 		id:   silentName,
-		desc: "Say nothing this turn. Most events deserve no reply; nothing is shown.",
+		desc: "End the turn saying nothing. The usual answer to an event.",
 		ends: true,
 		run: func(context.Context, *Ghost, *turn, json.RawMessage) (string, error) {
 			return "You said nothing.", nil
@@ -65,8 +65,9 @@ func init() {
 	})
 	register(verb{
 		id: "ask",
-		desc: "Ask the person a question with 1 to 9 choices and wait for their pick. " +
-			"Returns the chosen text, or an empty string if they dismissed it.",
+		desc: "Put a question to the person with 2 to 4 short choices they click, and wait for the pick. " +
+			"Use it whenever you want their choice rather than asking in words; put what you would say in text. " +
+			"Returns the choice, or empty if dismissed.",
 		params: []string{"text:string", "choices:array"},
 		run:    tool(toolAsk),
 	})
