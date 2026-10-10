@@ -354,20 +354,53 @@ func TestSessionIsFoundAndRemade(t *testing.T) {
 
 // A turn hermes gives up on, its provider unreachable: failed.sse sends
 // assistant.completed with hermes's own notice and completed false, then
-// run.failed. The notice is not the ghost's words, and the turn fails.
+// run.failed. The notice is not the ghost's words, and the turn fails with
+// what the provider said and nothing else of the notice's.
 func TestTurnReportsAFailedTurn(t *testing.T) {
+	sse := strings.ReplaceAll(fixture(t, "failed.sse"), `"haunt-fake"`, `"haunt-moth"`)
+	const said = `\n\nProvider said: Connection error.`
+	if !strings.Contains(sse, said) {
+		t.Fatal("failed.sse has no provider line")
+	}
+	for _, tc := range []struct {
+		name, sse, want string
+	}{
+		{"failed.sse", sse, "hermes: the turn failed: Connection error"},
+		// A notice without the provider's line, as hermes writes for a
+		// failure that is not the provider's.
+		{"no provider line", strings.Replace(sse, said, "", 1), "hermes: the turn failed"},
+		// Advice after the provider's line is not the provider's.
+		{"advice after", strings.Replace(sse, said, said+`\n\nThe connection kept dropping.`, 1), "hermes: the turn failed: Connection error"},
+	} {
+		f, srv := newFakeHermes(t)
+		f.stream = func(string, string) string { return tc.sse }
+		saved := ""
+		var p streamParts
+		reply, err := testClient(srv, &saved).Turn(context.Background(), p.request("Hello, are you there?"))
+		if err == nil || err.Error() != tc.want {
+			t.Errorf("%s: error %v, want %q", tc.name, err, tc.want)
+		}
+		if reply.Text != "" {
+			t.Errorf("%s: the notice was taken as the reply: %q", tc.name, reply.Text)
+		}
+		if len(p.order) != 0 {
+			t.Errorf("%s: callbacks came %v", tc.name, p.order)
+		}
+	}
+}
+
+// A finished turn's assistant.completed without the completed field is
+// still the reply.
+func TestTurnCompletedWithoutTheField(t *testing.T) {
 	f, srv := newFakeHermes(t)
+	f.sessions["haunt-moth"] = true
 	f.stream = func(string, string) string {
-		return strings.ReplaceAll(fixture(t, "failed.sse"), `"haunt-fake"`, `"haunt-moth"`)
+		return "event: assistant.completed\ndata: {\"content\":\"hi\"}\n\nevent: run.completed\ndata: {}\n\nevent: done\ndata: {}\n\n"
 	}
-	saved := ""
-	var p streamParts
-	_, err := testClient(srv, &saved).Turn(context.Background(), p.request("Hello, are you there?"))
-	if err == nil || !strings.Contains(err.Error(), "the turn failed") {
-		t.Errorf("error %v", err)
-	}
-	if len(p.order) != 0 {
-		t.Errorf("callbacks came %v", p.order)
+	saved := "haunt-moth"
+	reply, err := testClient(srv, &saved).Turn(context.Background(), TurnRequest{Input: "x"})
+	if err != nil || reply.Text != "hi" {
+		t.Errorf("reply %q, error %v", reply.Text, err)
 	}
 }
 

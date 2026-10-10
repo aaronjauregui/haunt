@@ -252,6 +252,7 @@ func (c *Client) turn(ctx context.Context, id string, req TurnRequest) (Reply, e
 		streamed  strings.Builder
 		completed bool
 		failure   error
+		said      string // the provider's own words on a turn that did not finish
 	)
 	err = readSSE(resp.Body, func(event string, data []byte) bool {
 		if req.OnEvent != nil {
@@ -304,10 +305,20 @@ func (c *Client) turn(ctx context.Context, id string, req TurnRequest) (Reply, e
 				req.OnTool(te)
 			}
 		case "assistant.completed":
+			if ev.Unfinished {
+				// The turn did not finish, and content is hermes's notice
+				// to the person, never the ghost's words: run.failed or
+				// run.cancelled follows.
+				said = providerSaid(ev.Content)
+				return true
+			}
 			reply.Text = ev.Content
 			completed = true
 		case "run.failed":
 			failure = fmt.Errorf("hermes: the turn failed%s", ev.reason())
+			if said != "" {
+				failure = fmt.Errorf("%w: %s", failure, said)
+			}
 		case "run.cancelled":
 			failure = fmt.Errorf("hermes: the turn was cancelled")
 		case "error":
@@ -344,6 +355,9 @@ type sseEvent struct {
 	Content        string `json:"content"`
 	Message        string `json:"message"`
 	TurnExitReason string `json:"turn_exit_reason"`
+	// Unfinished is completed: false on assistant.completed or a run.*
+	// event; an event without the field is not unfinished.
+	Unfinished bool
 }
 
 func (e sseEvent) reason() string {
@@ -374,7 +388,33 @@ func (e *sseEvent) UnmarshalJSON(b []byte) error {
 		Message:        str("message"),
 		TurnExitReason: str("turn_exit_reason"),
 	}
+	var done *bool
+	if json.Unmarshal(raw["completed"], &done) == nil && done != nil {
+		e.Unfinished = !*done
+	}
 	return nil
+}
+
+// providerSaidMark opens the line hermes ends a failed turn's notice with,
+// the provider's own error, summarised: "Provider said: Connection
+// error." (agent/turn_failure_copy.py, exhausted_copy, nonretryable_copy
+// and content_policy_copy, each f"…\n\nProvider said: {summary}"; the
+// summary is agent/api_error_summary.py _summarize_api_error). Hermes may
+// add a paragraph of advice after it.
+const providerSaidMark = "\n\nProvider said: "
+
+// providerSaid is the provider's error from a failed turn's notice, or ""
+// when the notice has none. The rest of the notice is advice for hermes's
+// own chat (send /retry, switch with /model, `hermes fallback add`) and
+// means nothing in haunt.
+func providerSaid(notice string) string {
+	_, said, ok := strings.Cut(notice, providerSaidMark)
+	if !ok {
+		return ""
+	}
+	said, _, _ = strings.Cut(said, "\n")
+	said = strings.TrimSuffix(strings.TrimSpace(said), ".")
+	return clip(said, 200)
 }
 
 // readSSE calls fn for each event until fn returns false or the stream

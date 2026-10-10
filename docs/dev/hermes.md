@@ -280,7 +280,14 @@ A turn hermes fails ends its stream with `assistant.completed` carrying
 hermes's notice for the person ("custom didn't respond in time on any of
 3 attempts…") and `completed: false`, then `run.failed`, with no
 `turn_exit_reason`; the client reads it as a failure and the notice is
-not the ghost's words. Hermes closes the turn in the session with an
+not the ghost's words. The notice ends with the provider's error on a
+line of its own, `Provider said: Connection error.`
+(`agent/turn_failure_copy.py`), sometimes followed by a paragraph of
+advice; the client takes that line alone into the error, "hermes: the
+turn failed: Connection error", and leaves the rest, which tells a
+hermes chat user to send `/retry` or switch with `/model`. A notice
+without the line, for a failure that is not the provider's, fails as
+"hermes: the turn failed". Hermes closes the turn in the session with an
 assistant row of its own, "Your request was not processed. Send it again
 if you still want me to carry it out." (or "This turn did not
 complete…" once a tool ran), marked `display_kind: "failed_turn"`, which
