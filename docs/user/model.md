@@ -90,15 +90,25 @@ model on your network reached by name is cloud until you say
 `trust = "local"`; `trust = "cloud"` treats a local server as cloud.
 
 On a local model, nothing the ghost reads leaves the machine through
-the model, so reading is loose: a ghost that may read your shared
-folders or the web reads them on turns of its own too, within quiet
-hours and the hourly ration. On a cloud model reading on its own follows
-`[backend.search] unprompted` and `[files] unprompted`, and a memory
-write that repeats a page or a file it read is refused. On both, what
-reaches past you (telling another ghost, a tool server, a reminder taken
-on after reading somebody else's words) is asked about, and nothing can
-run a command or write a file. [What it may do](permissions.md) has the
-rest.
+the model, so reading is loose. A ghost whose package declared `web` or
+`files` reads with no question asked, on your turns and on its own,
+within quiet hours and the hourly ration; a "never ask again" you gave
+still holds, but `haunt perms revoke` does not stop it. What it keeps (a
+remembered line, its notes, a skill it writes) is labelled with where
+the words came from.
+
+On a cloud model the capability is asked for the first time, reading on
+its own follows `[backend.search] unprompted` and `[files] unprompted`,
+and after a read, taking something on, settling it or changing its
+drawing style is put to you, as is searching the web after reading a
+file. What it keeps is labelled too, and refused when its words repeat
+what it read this turn.
+
+On both, telling another ghost and using a tool server after a read are
+put to you, and nothing can run a command or write a file. The ghost is
+told these rules in its own prompt, written from the same table the
+driver enforces. [What it may do](permissions.md#where-the-model-runs)
+has the rest.
 
 ## How a turn goes
 

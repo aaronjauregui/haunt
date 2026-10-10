@@ -154,7 +154,7 @@ and the ghost is told which read it repeats; words you said yourself in
 that turn are yours to have saved. On a local model the write is kept
 with its label. Either way `haunt journal -echoes` lists every write
 that repeats a read, and `haunt history -why` marks them among
-everything it wrote down ([memory](memory.md#what-it-remembers)).
+everything it wrote down ([memory](memory.md#words-it-read-are-not-yours)).
 
 ## Reading your files
 
@@ -219,6 +219,12 @@ the web.
 
 With several ghosts resident, name the ghost: `haunt perms wisp`,
 `haunt perms revoke window wisp`.
+
+Revoking `web` or `files` stops a ghost on a cloud model, which is asked
+again the next time. A ghost on a local model is not asked in the first
+place, so revoking does not stop its reads. What does: a "Never ask
+again" given when it was asked (on a cloud model, say), unsharing the
+folder in `[files.roots]`, or emptying `[backend.search]`.
 
 ## Budgets and allowances
 

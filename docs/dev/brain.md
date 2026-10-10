@@ -148,8 +148,10 @@ envelopes or decisions:
 4. How to speak (`speak` with a pose, or with fold on, the reply itself),
    the shell's poses and clips by name, and `face` and `clip`.
 5. What the ghost can do and cannot, whose words web and file text are,
-   and when it may read or look things up with nobody asking
-   (`ruleFive`, rendered from the same facts the gates use).
+   when it may read or look things up with nobody asking, what is put to
+   the person after a read (`afterReading`), and whether a write that
+   repeats a read is refused or labelled. `ruleFive` renders it from the
+   trust table, so what the model is told is what the gates do.
 6. Memory: `remember`, `forget`, `recall`, `rewrite_notes`; never
    remember a page's or a file's words as the person's.
 7. Other ghosts are not you and not the person.
@@ -251,21 +253,21 @@ same way.
 | `draw` | `prompt`, `style?`, `see?`, `like?` | `imagine`, image budget, fullscreen |
 | `show` | `id` | `imagine` |
 | `pictures` | `count?` | `imagine` |
-| `style` | `set?`, `reset?` | a set or reset only on the person's turn; taint |
-| `search` | `query`, `count?` | declared `web`, search budget, trust; taint after a file |
-| `read_page` | `url`, `from?` | declared `web`, search budget, trust; taint after a file |
+| `style` | `set?`, `reset?` | a set or reset only on the person's turn; taint on cloud |
+| `search` | `query`, `count?` | declared `web`, search budget, trust; taint after a file on cloud |
+| `read_page` | `url`, `from?` | declared `web`, search budget, trust; taint after a file on cloud |
 | `list_files` | `path?` | declared `files`, a folder shared, trust |
 | `read_file` | `path`, `from?`, `question?` | declared `files`, a folder shared, trust; a picture also the vision backend and budget |
 | `search_files` | `text`, `path?`, `names_only?` | declared `files`, a folder shared, trust |
-| `intend` | `text`, `delay_ms?`, `name?` | taint |
-| `resolve`, `set_aside` | `name` | taint |
+| `intend` | `text`, `delay_ms?`, `name?` | taint on cloud |
+| `resolve`, `set_aside` | `name` | taint on cloud |
 | `intentions` | | none |
 | `tell` | `ghost`, `text` | `tell`, taint |
-| `remember`, `forget` | `topic`, `line` | trust |
+| `remember`, `forget` | `topic`, `line` | the echo check on cloud; labelled |
 | `recall` | `query` | none |
-| `rewrite_notes` | `about` (`self` or `you`), `text` | trust |
+| `rewrite_notes` | `about` (`self` or `you`), `text` | the echo check on cloud; labelled |
 | `skill_view` | `name` | none |
-| `skill_write` | `name`, `body` | the skill host's checks |
+| `skill_write` | `name`, `body` | the echo check on cloud; labelled; the skill host's checks |
 | `<server>__<tool>` | the server's schema | `tools`, per-tool consent, tool budget, the marks, taint |
 
 Intentions the model takes on are named `model/<name>`, so they cannot
@@ -369,8 +371,8 @@ screen, and a window title is the thing that must never become a query.
 Every unprompted call also spends `unprompted_search_per_hour` before
 the general ration and is refused outright during quiet hours; each
 refusal names its reason, so the model says nothing rather than invent
-an answer. On a local model the mode does not apply (see
-[Trust](#trust)); quiet hours and the ration still do.
+an answer. On a local model neither the mode nor the consent question
+applies (see [Trust](#trust)); quiet hours and the ration still do.
 
 ## Files
 
@@ -441,6 +443,13 @@ Two flags on a decision say what is gated after which source
   file: `search`, whose query goes to the provider, and `read_page`,
   whose URL can carry a file's text to any host.
 
+The trust table then narrows that (`gateAfterReading` in `trust.go`): a
+decision whose class does not need the after-read question where the
+model runs is not gated at all. On a local model that leaves `tell` and
+the server tools; `intend`, `resolve`, `set_aside`, `style`, `search`
+and `read_page` are free after a read there, since none of them takes
+the words anywhere the person does not own.
+
 On the person's turn the act is put to them in the balloon, naming what
 was read ("Wisp read a file just now and wants to tell Moth: …"), with
 Allow and Not this time, and nothing is written to the grants file. On
@@ -456,23 +465,33 @@ IPv6 unique local) are local; every other host is cloud, including a
 name that would resolve to a private address, since resolving it would
 make trust depend on the resolver of the moment.
 
+A ghost with no model brain counts as cloud: it makes no decisions, and
+the stricter column is the safe one to answer with.
+
 Reads are loose and writes are confined. `internal/ghost/trust.go` holds
-one table from trust to what each class of decision needs:
+one table from trust to what each class of decision needs, and the gates
+read it (`readGate`, `gateAfterReading`, `mayRemember`, `labelled`):
 
-| Class | Local | Cloud |
-|---|---|---|
-| read web or files, the person's turn | free | consent on first use |
-| read web or files, an event turn | free; quiet hours and the ration apply | `[backend.search] unprompted`, `[files] unprompted` |
-| `recall`, `skill_view` | free | free |
-| `remember`, `rewrite_notes` | kept, labelled with the source | labelled, and a write that echoes a web or file read is refused |
-| `skill_write` | checked against the tools on offer | the same |
-| `intend`, `resolve`, `set_aside`, a `style` set | free | taint-gated |
-| `tell`, `<server>__<tool>` | consent, marks, taint ask | the same |
-| `speak`, `face`, `clip`, `draw`, `show`, `look` | as the gates above | the same |
+| Class | Decisions | Local | Cloud |
+|---|---|---|---|
+| read, the person's turn | `search`, `read_page`, `list_files`, `read_file`, `search_files` | nothing | consent; the after-read question |
+| read, an event turn | the same | quiet hours and the ration | consent, the `unprompted` policy, quiet hours and the ration; the after-read question |
+| lookup | `recall`, `skill_view`, `intentions`, `pictures` | nothing | nothing |
+| write | `remember`, `forget`, `rewrite_notes`, `skill_write` | the label | the echo check and the label |
+| keep | `intend`, `resolve`, `set_aside`, `style` | nothing | the after-read question |
+| reach | `tell`, every `<server>__<tool>`, and any decision not in the table | consent, the marks, the after-read question | the same |
+| show | `speak`, `stay_silent`, `say`, `ask`, `ask_text`, `face`, `clip`, `draw`, `show`, `look` | nothing | nothing |
 
+"Nothing" is nothing from trust; a decision's own gates (its capability
+declared, its budget, quiet hours at the screen, the fullscreen rule)
+still apply. A local read asks no question, but the package must still
+declare `web` or `files`, and a "never ask again" the person gave stands
+(`opts.Refused`). The grant itself is not consulted, so `haunt perms
+revoke web` does not stop a local ghost reading; refusing for good does.
 A decision whose capability the package did not declare is hidden on
-both. Standing rule 5 is rendered from the same table, so the model is
-told the truth about what it may do.
+both. A decision added later and left out of `verbClasses` is a reach,
+the strictest class that still lets it run. Standing rule 5 is rendered
+from the same table.
 
 ## Memory
 
@@ -494,7 +513,11 @@ Markdown viewer, parsed by the store. Its source is `person`, `web`,
 `file` or `self`, and the driver writes it, not the model: a file or the
 web when the turn has read one, the person on a turn they started, the
 ghost otherwise (`provenance` in `decisions_memory.go`). A line the
-person typed without one is read as theirs.
+person typed without one is read as theirs. Text kept whole, `self.md`,
+`you.md` and a learned skill's `SKILL.md`, carries the same comment,
+`<!-- src t=N date -->`, as its last line (`labelled` in `trust.go`); a
+label the model wrote itself is dropped first, since the label is the
+driver's.
 
 Facts are lines in topics, never a file per fact, so the topic index in
 part 3 of the prompt stays under 1500 bytes. `self.md` and `you.md` are
@@ -514,17 +537,26 @@ temporary file and rename it. `haunt memory reindex` asks a running
 ghost over its control socket, since `state.db` has one writer. Nothing
 the package returns names the directory; the model sees topic names.
 
-**The echo check** compares a memory write with the web and file reads
-in its turn and the three before: both lowercased and cut into words,
-every three consecutive words a run, and a write echoes a read when they
-share at least two distinct runs the person's own words in the window
-do not also have (`cmd/haunt/echo.go`). Three-word runs keep a fact's
-own phrases ("name is bartholomew") when the model rewrites the sentence
-around them; one shared run is what a page about the same subject shares
-by chance. `haunt history` and `haunt journal -echoes` flag such writes
-on every model; on a cloud model the same check refuses the write at
-the gate. It sees only wording, so a paraphrase that keeps no run
-passes.
+**The echo check** compares what a write keeps (a remembered line, the
+notes, a skill's body: `ghost.MemoryWrite` names all three) with what
+the web and file reads returned. Both are lowercased and cut into words,
+every three consecutive words a run (`WordRuns`), and a write echoes a
+read when they share at least `EchoShared` (two) distinct runs that the
+person's own words do not also have (`SharedRuns`). Three-word runs keep
+a fact's own phrases ("name is bartholomew") when the model rewrites the
+sentence around them; one shared run is what a page about the same
+subject shares by chance. It runs twice:
+
+- **As a gate**, on cloud only (`mayRemember`): against this turn's
+  reads, kept on the turn as they return, with the person's words this
+  turn exempt. The refusal names the read and the shared phrases, so the
+  model can keep what the person said in its own words instead.
+- **As a flag**, on every model (`cmd/haunt/echo.go`): `haunt history`
+  and `haunt journal -echoes` check every write against the reads in its
+  turn and the three before, read back from the transcript, and mark the
+  ones that echo.
+
+It sees only wording, so a paraphrase that keeps no run passes.
 
 ## Skills
 
@@ -551,8 +583,9 @@ vanish without a word; the usual cause is a server tool spelled as the
 server spells it (`notes.append`) rather than as the model is offered it
 (`notes__append`).
 
-`skill_write` creates or replaces a learned skill only. It refuses a body
-over 16 KiB, a name that is not lowercase letters, digits and hyphens,
+`skill_write` creates or replaces a learned skill only. On a cloud model
+its body goes through the echo check first, and on both it is labelled
+like the notes. It refuses a body over 16 KiB, a name that is not lowercase letters, digits and hyphens,
 the name of one of haunt's skills, and a body that names a tool outside
 the decisions on offer (`skill.ToolRefs`, a heuristic for tool names in
 prose), naming the tool. The curator marks a learned skill stale after

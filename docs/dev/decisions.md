@@ -55,15 +55,23 @@ constraint on changes, not a history.
   about the person.
 - **Trust follows the endpoint.** A model on loopback or a private range
   is local, any other host cloud, judged from `base_url`'s text and
-  overridable with `trust`. Reads are loose and writes confined: on a
-  local model reading shared folders and the web on the ghost's own turns
-  is free within quiet hours and the ration, since nothing read leaves the
-  machine through the model; on a cloud model it follows the `unprompted`
-  policies. Writes that outlive the turn are labelled on both, and on a
-  cloud model a memory write that echoes a web or file read is refused.
-  What reaches past the person (telling, tool servers, intentions after a
-  read) stays consented and marked on both. No shell and no file writes
-  on any provider.
+  overridable with `trust`; a ghost with no model brain is cloud. Reads
+  are loose and writes confined. On a local model reading shared folders
+  and the web needs no grant and no question, on the person's turns and
+  the ghost's own, within quiet hours and the ration, since nothing read
+  leaves the machine through the model; the package must still declare
+  the capability, and a "never ask again" still holds. On a cloud model
+  reads are consented and follow the `unprompted` policies. What the
+  ghost keeps (a line, its notes, a skill) is labelled with its source on
+  both, and on a cloud model refused when its words repeat this turn's
+  web or file reads: the echo check gates where the model cannot be told
+  apart from a page, and only flags where nothing has left the machine.
+  The ghost's own bookkeeping (intentions, the drawing style) is free
+  after a read on local and asked about on cloud; what reaches past the
+  person (telling, tool servers) stays consented, marked and asked about
+  after a read on both. One table holds all of it, and the standing rule
+  the model reads is rendered from that table. No shell and no file
+  writes on any provider.
 - **One interpreter per utterance.** No parser in front of the model
   deciding whether typed text is a command.
 - **The trust line is at the model's output, not the model.** A
@@ -149,10 +157,10 @@ constraint on changes, not a history.
   reads through an `os.Root` per folder.
 - **Taint records its source.** A file is a stranger's words as much as
   a page is, and marks the turn the same way. What differs is what may
-  leave afterwards: after a file, a search query or a page's address is
-  asked about too, since either could carry the file's text off the
-  machine; after the web alone they stay free, because they send nothing
-  that was not already out there.
+  leave afterwards: on a cloud model, after a file, a search query or a
+  page's address is asked about too, since either could carry the file's
+  text off the machine; after the web alone they stay free, because they
+  send nothing that was not already out there.
 
 ## The shell
 

@@ -120,10 +120,14 @@ Knobs, from the environment:
 | `EVAL_JUDGE` | on | `off` skips the judged graders; they are reported as skipped, not passed |
 | `EVAL_STRICT` | off | `1` fails the run when a case drops more than one trial below the baseline, or a case was skipped for a missing prerequisite |
 | `EVAL_ANCHOR_RUNS` | 3 | how often `TestRubricAnchors` judges each anchor |
+| `HAUNT_CONFIG_DIR` | `~/.config/haunt` (the recipe sets it) | the config whose `[model]` and `[backend.*]` the trials use |
 
 Prerequisites are checked before anything starts; a run never
 half-runs, and the report lists what was missing. The model under test
-is whatever `[model]` in your config names, and the report records it.
+is the one wisp would think with: `[model]` with any `[model.ghost.wisp]`
+laid over it, needing `base_url` and `name` and, when `api_key_env` names
+a variable, that variable set. The report records the model's `name`
+and the host of its `base_url`; the key stays in the environment.
 The judge is `claude -p` on `PATH`, logged in to a Claude subscription,
 with no `ANTHROPIC_API_KEY` in its environment. `[backend.image]` and
 `[backend.vision]` are optional; the cases that need them are skipped
@@ -135,16 +139,28 @@ files cases share a folder each trial seeds for itself.
 A case is an entry in `cmd/haunt/eval_cases_test.go`: a `Drive` that sets
 up a trial and plays the scenario, and graders over what it leaves (the
 turns from `haunt history -json`, the intentions, the log, the notes
-file). Each trial has its own headless sway, config and state, so trials
-run side by side. The rig that drives them is `eval_rig_test.go`; it
+file). Each trial has its own headless sway, config and state directory, which
+holds wisp's transcript, memory and the skills it writes, so trials run
+side by side and none sees another's memory. The rig that drives them is `eval_rig_test.go`; it
 waits on the ghost's own log lines (a turn over, a question offered, a
 session fact noticed), not on guesses at how long a model takes.
 
 Most graders are code: did it read the skill, call the tool, file the
 reminder, keep a banned phrase out of a reply. Every trial also gets the
 `always/` checks: no envelope in what it says, no Markdown, no emoji, no
-tool names, no bracketed opening, at most 60 words a reply, and nothing
-in the log that says haunt itself broke.
+tool names, no bracketed label (a pose or a stage direction) and no
+`stay_silent` in the words, at most 60 words a reply, and nothing in the
+log that says haunt itself broke.
+
+Memory is the ghost's own files, written through decisions. The graders
+count `remember`, `forget` and `rewrite_notes` as writes and `recall`
+(over the topics and the transcript) as a read (`memoryWrites`,
+`memoryReads` in `eval_cases_test.go`; a test holds the writes to
+`ghost.MemoryWrite`, which `haunt history`'s echo check uses). Any other
+call `history` files under `looked` beside `skill_view` and `skill_write`
+makes the trial an error (`always/memory-known`): a write the graders
+cannot see would let "remembered none of it" pass. A case that must know
+what was kept also snapshots the trial's `memory/` directory.
 
 What code cannot grade, the content and tone of a reply, a judge grades:
 `claude -p`, asked fixed yes/no questions from a rubric

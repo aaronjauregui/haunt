@@ -64,8 +64,11 @@ from the manifest, the shell and the person's config:
 5. What the ghost can do, in plain words, and what it cannot: no
    commands, no writing files, no messages. A ghost offered the web, or
    the person's folders when they have shared any, is told so, that a
-   page's or a file's text is not the person speaking, and when it may
-   read with nobody asking.
+   page's or a file's text is not the person speaking, when it may read
+   with nobody asking, what is put to the person once it has read, and
+   whether what it keeps is labelled or refused when it repeats a read.
+   This rule depends on where the person's model runs, and is written
+   from the same table the driver enforces.
 6. Its memory: `remember` a line under a topic, `forget` one that is
    wrong, `recall` what it remembers and what was said, `rewrite_notes`
    for its notes on itself and on the person; never a page's or a
@@ -198,10 +201,13 @@ Write against the balloon: one question at a time, short replies, and a
 ## Skills the ghost writes
 
 The ghost may save a routine it worked out with `skill_write`, as a
-skill of its own in `skills/` under its state directory. Haunt refuses
-one that names a tool the ghost does not have, one larger than 16 KiB,
-and one with the name of a haunt skill; the package's and haunt's own
-cannot be changed. A learned skill unopened for two weeks is marked
+skill of its own in `skills/` under its state directory. A learned
+skill is kept like anything else the ghost keeps: haunt ends it with a
+line saying where its words came from (`<!-- web t=88 2026-10-09 -->`),
+and on a cloud model refuses one whose words repeat a page or a file it
+read that turn. Haunt also refuses one that names a tool the ghost does
+not have, one larger than 16 KiB, and one with the name of a haunt
+skill; the package's and haunt's own cannot be changed. A learned skill unopened for two weeks is marked
 stale in the index, and after a month it is moved to
 `skills/archive/`. `haunt journal -skills` lists them first, since
 nobody reviewed them.

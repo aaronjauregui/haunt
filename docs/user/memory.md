@@ -16,7 +16,9 @@ runs, and it notices within a second.
 
 `self.md` and `you.md` are short free prose, under 1500 bytes each, and
 the ghost has both in front of it on every turn. It rewrites them
-whole when it has something to add.
+whole when it has something to add, and haunt ends each rewrite with a
+line saying where it came from, `<!-- person t=412 2026-10-09 -->`, in
+the same form as a fact's.
 
 A topic is a list of facts, one per line, each saying where it came
 from:
@@ -53,13 +55,18 @@ Each ghost has its own memory, and two ghosts may disagree about you.
 
 A page or a file can say anything, including something written to look
 like you. The ghost's rules say never to keep a page's or a file's words
-as yours, and haunt checks: a memory write whose wording repeats
-something the ghost read from the web or a file, in that turn or the
-three before, is an **echo**.
+as yours, and haunt checks the wording of everything it keeps: a
+remembered line, a rewrite of its notes, a skill it writes for itself.
+Both texts are cut into runs of three words; a write that shares two or
+more runs with something the ghost read from the web or a file is an
+**echo**. Runs you said yourself in the same turn do not count, so
+saving what you told it after it looked something up is yours.
 
-On a cloud model an echo is refused, and the ghost is told why. On a
-local model it is kept, labelled with where it came from. Either way it
-is flagged, and you decide:
+On a cloud model, an echo of a read in the same turn is refused as the
+ghost makes it, and the ghost is told which read it repeats. On a local
+model it is kept, labelled `web` or `file`. Afterwards, on either, every
+write that echoes a read from its own turn or the three before is
+flagged, and you decide:
 
     haunt journal -echoes          # what it saved in a page's or a file's words
 
@@ -68,10 +75,9 @@ is flagged, and you decide:
 
 The same `!` line appears under the write in `haunt history -why`, and
 `haunt history -json` gives it as `echoes`. The check compares wording
-only, and what you said yourself in those turns does not count against a
-write, so it misses a write that says the page's claim in other words,
-or keeps only one three-word phrase of it. To undo one, tell the ghost,
-or `haunt memory rm` the line.
+only, so it misses a write that says the page's claim in other words, or
+keeps only one three-word phrase of it. To undo one, tell the ghost, or
+`haunt memory rm` the line; a skill it wrote goes with its directory.
 
 ## What else it keeps
 
@@ -129,9 +135,11 @@ A ghost carries a few routines as **skills**, short procedures the model
 reads when one fits: a morning check-in, a focus session, a weekly
 review, keeping an eye on a goal, drawing on request, looking something
 up, reading your files. A ghost's package can add its own, and the ghost
-may write new ones as it learns how you like things done. One it wrote
-and has not opened in two weeks is marked stale; after a month it is
-moved to `skills/archive/` in its state directory.
+may write new ones as it learns how you like things done. A skill it
+writes may name only the tools it has, is checked for echoes like
+anything else it keeps, and ends with the same line saying where it came
+from. One it wrote and has not opened in two weeks is marked stale;
+after a month it is moved to `skills/archive/` in its state directory.
 
     haunt journal -skills          # all of them, and which it wrote itself
 
