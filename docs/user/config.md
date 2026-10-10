@@ -86,7 +86,7 @@ context_length = 0              # the model's context window in tokens
 trust = ""                      # "local" or "cloud"; empty judges by base_url's host
 # fold = false                  # the words in the first call; default false for local, true for cloud
 thinking = ""                   # "off", "low", "medium" or "high"; empty: the provider's default
-first_token_timeout = 30        # seconds a call may go without a word before it is given up on
+# first_token_timeout = 120     # seconds a call may go without a word; default 120 local, 30 cloud
 stall_timeout = 120             # seconds a call under way may then go quiet
 
 [model.sampling]                # each unset key is the provider's default
@@ -155,7 +155,9 @@ A call the provider refuses with 429 or a 5xx is tried three times in
 all, a second and then two apart, or after the provider's own
 `Retry-After` when that is under a minute. A call that says nothing for
 `first_token_timeout` seconds, or stops for `stall_timeout` once under
-way, is given up on.
+way, is given up on. Unset, the first is 120 seconds for a local model,
+which reads a long conversation at a few hundred tokens a second before
+its first word, and 30 for a cloud one.
 
 ## Drawing with your own ComfyUI workflow
 

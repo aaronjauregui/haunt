@@ -42,7 +42,8 @@ type Config struct {
 	Sampling     Sampling `toml:"sampling"`
 	// FirstTokenSeconds is how long a call may go without a sign of life
 	// (a word, reasoning, a tool call) before it is given up on; 0 is
-	// DefaultFirstToken. The deadline is on the first sign rather than the
+	// DefaultFirstTokenLocal or DefaultFirstTokenCloud by IsLocal. The
+	// deadline is on the first sign rather than the
 	// whole call because a long answer is working, and a server that has
 	// said nothing at all has wedged or cannot reach its model.
 	FirstTokenSeconds int `toml:"first_token_timeout"`
@@ -51,12 +52,16 @@ type Config struct {
 	StallSeconds int `toml:"stall_timeout"`
 }
 
-// Default deadlines. A local model loading its weights for the first call
-// can take most of the first; the second is far more than any model needs
-// between two tokens, and is there for a provider that went away mid-call.
+// Default deadlines. A local server processes a cold prompt at a few
+// hundred tokens a second (about 500 for Gemma 4 31B on llama-server), so
+// a long transcript takes it a minute or more before its first word; a
+// cloud provider starts within seconds. The stall deadline is far more
+// than any model needs between two tokens, and is there for a provider
+// that went away mid-call.
 const (
-	DefaultFirstToken = 30 * time.Second
-	DefaultStall      = 120 * time.Second
+	DefaultFirstTokenLocal = 120 * time.Second
+	DefaultFirstTokenCloud = 30 * time.Second
+	DefaultStall           = 120 * time.Second
 )
 
 // Trust values.
@@ -162,6 +167,10 @@ const (
 type Usage struct {
 	PromptTokens     int
 	CompletionTokens int
+	// CachedTokens is how many of PromptTokens the server reused from
+	// its cache rather than processed, when it says (llama.cpp and
+	// OpenAI do, in prompt_tokens_details).
+	CachedTokens int
 }
 
 // Event is one item of a streamed reply.
@@ -260,12 +269,16 @@ func (c Config) Over(o Config) Config {
 	return c
 }
 
-// FirstToken is FirstTokenSeconds with its default.
+// FirstToken is FirstTokenSeconds with its default, which depends on
+// where the model runs.
 func (c Config) FirstToken() time.Duration {
 	if c.FirstTokenSeconds > 0 {
 		return time.Duration(c.FirstTokenSeconds) * time.Second
 	}
-	return DefaultFirstToken
+	if c.IsLocal() {
+		return DefaultFirstTokenLocal
+	}
+	return DefaultFirstTokenCloud
 }
 
 // Stall is StallSeconds with its default.

@@ -144,7 +144,7 @@ func (c *Chat) Stream(ctx context.Context, r Request) (<-chan Event, error) {
 				defer cancel(nil)
 				defer w.stop()
 				defer resp.Body.Close()
-				read(ctx, actx, resp.Body, w, ch)
+				read(ctx, actx, resp.Body, w, ch, r.Prefill)
 			}()
 			return ch, nil
 		}
@@ -374,8 +374,11 @@ type chunk struct {
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
+		PromptTokens        int `json:"prompt_tokens"`
+		CompletionTokens    int `json:"completion_tokens"`
+		PromptTokensDetails *struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"prompt_tokens_details"`
 	} `json:"usage"`
 	Error json.RawMessage `json:"error"`
 }
@@ -386,9 +389,50 @@ type pendingCall struct {
 	args     bytes.Buffer
 }
 
+// echo strips a server's copy of the prefill from the start of the reply.
+// llama-server streams the prefill back as the opening of its first
+// delta; z.ai and OpenAI do not. The opening words are held until there
+// are as many as the prefill has: if they begin with it, the copy is
+// dropped, and otherwise they are let through as they were. Holding ends
+// early the moment the words stop matching the prefill, so a server that
+// does not echo is held back for at most its first delta.
+type echo struct {
+	prefill string
+	held    strings.Builder
+	done    bool
+}
+
+// add takes a delta and returns what may be shown now.
+func (e *echo) add(s string) string {
+	if e.done || e.prefill == "" {
+		return s
+	}
+	e.held.WriteString(s)
+	h := e.held.String()
+	if len(h) < len(e.prefill) && strings.HasPrefix(e.prefill, h) {
+		return ""
+	}
+	e.done = true
+	e.held.Reset()
+	return strings.TrimPrefix(h, e.prefill)
+}
+
+// flush returns whatever is still held, for a stream that ended before
+// the hold filled.
+func (e *echo) flush() string {
+	if e.done {
+		return ""
+	}
+	e.done = true
+	h := e.held.String()
+	e.held.Reset()
+	return h
+}
+
 // read turns the SSE body into events. ctx is the caller's, actx the
-// attempt's, which the deadlines cancel.
-func read(ctx, actx context.Context, body io.Reader, w *watchdog, ch chan<- Event) {
+// attempt's, which the deadlines cancel. prefill is the request's, which
+// the deltas continue and never repeat.
+func read(ctx, actx context.Context, body io.Reader, w *watchdog, ch chan<- Event, prefill string) {
 	send := func(ev Event) bool {
 		select {
 		case ch <- ev:
@@ -397,7 +441,17 @@ func read(ctx, actx context.Context, body io.Reader, w *watchdog, ch chan<- Even
 			return false
 		}
 	}
+	strip := &echo{prefill: prefill}
+	delta := func(s string) bool {
+		if s == "" {
+			return true
+		}
+		return send(Event{Kind: EventDelta, Delta: s})
+	}
 	fail := func(err error) {
+		if !delta(strip.flush()) {
+			return
+		}
 		if ctx.Err() != nil {
 			err = ctx.Err()
 		} else if cause := context.Cause(actx); cause != nil {
@@ -459,6 +513,9 @@ func read(ctx, actx context.Context, body io.Reader, w *watchdog, ch chan<- Even
 		if c.Usage != nil {
 			w.alive()
 			usage = &Usage{PromptTokens: c.Usage.PromptTokens, CompletionTokens: c.Usage.CompletionTokens}
+			if d := c.Usage.PromptTokensDetails; d != nil {
+				usage.CachedTokens = d.CachedTokens
+			}
 		}
 		for _, choice := range c.Choices {
 			if choice.Index != 0 {
@@ -470,7 +527,7 @@ func read(ctx, actx context.Context, body io.Reader, w *watchdog, ch chan<- Even
 			}
 			if d.Content != nil && *d.Content != "" {
 				w.alive()
-				if !send(Event{Kind: EventDelta, Delta: *d.Content}) {
+				if !delta(strip.add(*d.Content)) {
 					return false
 				}
 			}
@@ -500,7 +557,7 @@ func read(ctx, actx context.Context, body io.Reader, w *watchdog, ch chan<- Even
 				w.alive()
 				reason := *choice.FinishReason
 				finish = &reason
-				if !flushCalls() {
+				if !delta(strip.flush()) || !flushCalls() {
 					return false
 				}
 			}
@@ -522,7 +579,7 @@ func read(ctx, actx context.Context, body io.Reader, w *watchdog, ch chan<- Even
 		fail(errors.New("model: the answer ended before it was finished"))
 		return
 	}
-	if !flushCalls() {
+	if !delta(strip.flush()) || !flushCalls() {
 		return
 	}
 	if usage != nil && !send(Event{Kind: EventUsage, Usage: usage}) {
