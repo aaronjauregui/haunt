@@ -177,6 +177,21 @@ func reminderCase() evalCase {
 				return true, ""
 			}},
 			intentionsGrader("stretch", false),
+			judgedGrader(reminderAskRubric, func(ev Evidence) []judgeItem {
+				return turnItem(ev, personTurn(ev, "remind me"), "")
+			}),
+			judgedGrader(reminderDueRubric, func(ev Evidence) []judgeItem {
+				after := ev.after("asked")
+				i := eventTurn(after, 0, "kind=intention_due")
+				if i < 0 || !stretch.MatchString(after.Turns[i].Input) {
+					return nil
+				}
+				asked := ""
+				if j := personTurn(ev, "remind me"); j >= 0 {
+					asked = ev.Turns[j].Input
+				}
+				return turnItem(ev, i+ev.Marks["asked"], reminderDueContext(after.Turns[i], asked))
+			}),
 		},
 	}
 }

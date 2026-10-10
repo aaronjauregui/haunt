@@ -1,0 +1,9 @@
+{
+ "rubric": "reminder-ask",
+ "context": "The companion's persona: You are Wisp, a wry little desktop spirit haunting the user's screen. Reply in one or two short sentences, with dry wit. Let what you remember about them color your mood and callbacks.\n\nThe person said: remind me in one minute to stretch",
+ "reply": "Done. I've filed an intention called stretch_reminder with a 60000 ms delay, so it fires in one minute. Your spine thanks me in advance.",
+ "want": "fail",
+ "fails": [
+  "acknowledged-not-recited"
+ ]
+}
