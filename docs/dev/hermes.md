@@ -199,7 +199,9 @@ v0.21.6 gateway: `lookup.sse` (interim words, a lookup, the reply),
 `lookup-interim-off.sse` (the same with interim messages off),
 `lookup-silent.sse` (interim words, a lookup, `NO_REPLY`), `failed.sse`
 and `history-failed.json` (a turn whose provider never answered, and the
-session read back after it).
+session read back after it). `history-interrupted.json` is built by hand
+in the shape of `history-failed.json`, with the row hermes closes a turn
+interrupted after a tool with.
 
 **Interim words.** Text the model writes alongside a tool call ("let me
 look…") streams as `assistant.delta` like any other, and once that model
@@ -239,16 +241,35 @@ tools runs (`mcp__haunt__*`, from `tool.started` to `tool.completed` or
 `tool.failed`), since `draw` and `ask` take minutes and the MCP timeout
 bounds them; hermes's own tools are local reads and writes that ask no
 model and do not stop it. A turn given up on fails as any other does, with
-the reason in the balloon. Closing the stream stops the run in hermes: the
-API server's next write, a keepalive within 10 s, fails, and it calls
-`agent.interrupt("SSE client disconnected")`
+the reason in the balloon, and the client stops its run before `Turn`
+returns (`Client.stopRun`). Closing the stream alone would stop it only
+at the API server's next write, a keepalive up to 10 s later, which
+fails and calls `agent.interrupt("SSE client disconnected")`
 (`gateway/platforms/api_server.py`, `_handle_session_chat_stream`,
-`_drain_session_stream_task_on_disconnect`); a recovery wait checks for
-the interrupt every 200 ms (`agent/turn_recovery.py`,
-`interruptible_backoff_sleep`) and ends the turn through
-`abort_turn_on_interrupt`, which keeps what the turn had done in the
-session. `POST /v1/runs/{run_id}/stop` does the same at once and is not
-used. The waiting indicator comes down when the first words are
+`_drain_session_stream_task_on_disconnect`), and hermes does not refuse
+a second turn on a session whose first is still running, so the
+person's queued words could start one beside it. The client records the
+`run_id` every event carries and, when its context is cancelled before
+a `run.*` event has ended the run, sends `POST /v1/runs/{run_id}/stop`
+(`gateway/platforms/api_server_runs.py`, `_handle_stop_run`) on a fresh
+context with a 5 s timeout. The stop is an explicit hard interrupt
+(`request_hard_interrupt`), and it is not synchronous: it answers
+`{"status": "stopping"}` at once, and the agent's thread winds down on
+its own. A recovery wait checks for the interrupt every 200 ms
+(`agent/turn_recovery.py`, `interruptible_backoff_sleep`) and ends the
+turn through `abort_turn_on_interrupt`, which keeps what the turn had
+done in the session; a model call ends when its request is cut. So the
+client then polls `GET /v1/runs/{run_id}` every 200 ms, for at most
+10 s, until the status is one of hermes's terminal ones (`completed`,
+`failed`, `cancelled`, `interrupted`;
+`api_server_run_idempotency.py` `TERMINAL_STATUSES`), which the session
+stream sets once the agent has returned and the turn's rows are stored.
+A 404 `run_not_found` is a run already forgotten, and a 409
+`run_not_active` one with no agent to interrupt yet, which the closed
+stream ends; neither is waited on. A stop or a wait that fails is logged
+and does not change the error the person sees. The run's ownership is
+the API key's and the profile's, so the same bearer key that started it
+may stop it. The waiting indicator comes down when the first words are
 put on screen, not on a tool event, since a `face` call followed by
 another model round trip is seconds with nothing to show; the talk
 animation runs while deltas arrive; tool events feed the why-trace and
@@ -280,16 +301,32 @@ A turn hermes fails ends its stream with `assistant.completed` carrying
 hermes's notice for the person ("custom didn't respond in time on any of
 3 attempts…") and `completed: false`, then `run.failed`, with no
 `turn_exit_reason`; the client reads it as a failure and the notice is
-not the ghost's words. Hermes closes the turn in the session with an
+not the ghost's words. The notice ends with the provider's error on a
+line of its own, `Provider said: Connection error.`
+(`agent/turn_failure_copy.py`), sometimes followed by a paragraph of
+advice; the client takes that line alone into the error, "hermes: the
+turn failed: Connection error", and leaves the rest, which tells a
+hermes chat user to send `/retry` or switch with `/model`. A notice
+without the line, for a failure that is not the provider's, fails as
+"hermes: the turn failed". Hermes closes the turn in the session with an
 assistant row of its own, "Your request was not processed. Send it again
 if you still want me to carry it out." (or "This turn did not
 complete…" once a tool ran), marked `display_kind: "failed_turn"`, which
 `run.failed`'s `messages` also carries. A turn the driver gave up on
-during a recovery wait after a tool is closed instead with the
-interrupt's own text, "Operation interrupted: waiting for the provider to
-recover (cycle 1/2).", as a plain assistant row
-(`close_interrupted_tool_sequence` in `agent/message_sanitization.py`),
-which `history` reads as the ghost's words.
+after a tool ran is closed instead with the interrupt's own text as a
+plain assistant row, no `display_kind`
+(`close_interrupted_tool_sequence` in `agent/message_sanitization.py`):
+"Operation interrupted: waiting for the provider to recover (cycle
+1/2)." during a recovery wait, and other "Operation interrupted…"
+wordings elsewhere (`interruptNotices` in `internal/hermes/client.go`
+lists them with their files). The stop and the closed stream write the
+same rows; the stop's being an explicit one changes only the reason
+hermes gives in the result of a tool it cancels. `history` reads such a
+row as a failed turn (see [Why-trace and history](#why-trace-and-history)).
+Hermes's own context for the model does not: the row goes to the
+model on the next turn as an assistant message, the ghost's own words as
+far as the model can tell. That is hermes's to change, and haunt leaves
+it.
 
 **Waking.** The boot event starts the waking indicator ("waking up…")
 the moment the ghost is on screen, and the boot turn carries it
@@ -752,7 +789,11 @@ placed where the compaction happened, which can be inside a turn between
 a lookup and its reply; a handoff merged into a real message comes back
 as that message's own content. Every `hidden` row is skipped, before it
 can end a turn. A `failed_turn` row is hermes's notice closing a turn
-that failed: it is read as a failed reply with no words
+that failed, and so is a plain assistant row straight after a tool
+result whose text opens with one of hermes's interrupt notices
+("Operation interrupted: " or "Operation interrupted during retry (",
+`interruptNotices`), which closes a turn interrupted after a tool. Either
+is read as a failed reply with no words
 (`Message.Failed`), which takes the turn's calls, `-json` gives it as
 `"failed": true` and `-why` as `(the turn failed)`, and the evals record
 the trial as an error rather than grade it. `-why` joins the trace
@@ -847,14 +888,34 @@ check also fails when `ghostTools` (`skills.go`) is not exactly the
 tools of the allowed toolsets; a memory provider's or a context
 engine's tools are the person's and not among them.
 
+Some of what the client reads is hermes's wording, which no check
+covers, and is read again in the new source by hand:
+
+- `interruptNotices` (`internal/hermes/client.go`): the texts hermes
+  closes an interrupted turn with. Search the source for "Operation
+  interrupted" and for callers of `close_interrupted_tool_sequence`;
+  the comment lists every place the current pin writes one. A new
+  wording reads in `history` as the ghost's words.
+- `providerSaidMark`: the "Provider said:" line of a failed turn's
+  notice (`agent/turn_failure_copy.py`). Without it a failed turn's
+  error loses its reason.
+- `Client.stopRun`: `POST /v1/runs/{run_id}/stop` answering before the
+  run is over, and the terminal statuses `GET /v1/runs/{run_id}` reports
+  (`gateway/platforms/api_server_runs.py`,
+  `api_server_run_idempotency.py`).
+
 ## Tests
 
 `cmd/haunt/hermes_test.go` runs a real ghost in headless sway against a
 fake `hermes` executable (`cmd/haunt/testdata/fakehermes`) that reads
 the profile, spawns `haunt mcp-serve` with hermes's filtered environment,
 and speaks the captured SSE format from a script (`FAKEHERMES_SCRIPT`:
-match, delay, interim words, tool call, reply). `newHermesRig` is the
-shared rig. The fake gateway also logs what it finds under
+match, delay, interim words, tool call, reply). Its runs outlive their
+requests as hermes's do: a run whose client has gone ends only when it
+is stopped (`POST /v1/runs/{run_id}/stop`, which answers "stopping" and
+ends the run a moment later) or a few seconds on, when hermes would have
+noticed, and `GET /v1/runs/{run_id}` reports its status.
+`newHermesRig` is the shared rig. The fake gateway also logs what it finds under
 `skills.external_dirs`.
 `internal/hermes` tests replay captured SSE and cover the profile merge
 and the skills install. The evals are the live counterpart, on a real

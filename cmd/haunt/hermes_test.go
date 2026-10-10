@@ -517,6 +517,8 @@ func repliedTo(s string) func(fakeEntry) bool {
 type fakeEntry struct {
 	Kind          string            `json:"kind"`
 	PID           int               `json:"pid"`
+	RunID         string            `json:"run_id"`
+	Status        string            `json:"status"`
 	Input         string            `json:"input"`
 	Reply         string            `json:"reply"`
 	SystemMessage string            `json:"system_message"`

@@ -39,6 +39,9 @@ type Client struct {
 	// HTTP defaults to a client with no overall timeout: a turn lasts as
 	// long as its tool calls do, and the caller's context is the bound.
 	HTTP *http.Client
+	// Logf reports what goes wrong out of the caller's sight, such as a
+	// run that could not be stopped. Nil is silent.
+	Logf func(format string, a ...any)
 
 	mu      sync.Mutex
 	session string
@@ -252,6 +255,9 @@ func (c *Client) turn(ctx context.Context, id string, req TurnRequest) (Reply, e
 		streamed  strings.Builder
 		completed bool
 		failure   error
+		said      string // the provider's own words on a turn that did not finish
+		run       string // the run's id, which every event carries
+		over      bool   // whether hermes has said the run is over
 	)
 	err = readSSE(resp.Body, func(event string, data []byte) bool {
 		if req.OnEvent != nil {
@@ -263,10 +269,17 @@ func (c *Client) turn(ctx context.Context, id string, req TurnRequest) (Reply, e
 				return true
 			}
 		}
+		if ev.RunID != "" {
+			run = ev.RunID
+		}
 		if ev.SessionID != "" && ev.SessionID != id && (event == "assistant.completed" || strings.HasPrefix(event, "run.")) {
 			// Compression moved the conversation to a child session.
 			id = ev.SessionID
 			c.setSession(id)
+		}
+		switch event {
+		case "run.completed", "run.failed", "run.cancelled", "error":
+			over = true
 		}
 		switch event {
 		case "assistant.delta":
@@ -304,10 +317,20 @@ func (c *Client) turn(ctx context.Context, id string, req TurnRequest) (Reply, e
 				req.OnTool(te)
 			}
 		case "assistant.completed":
+			if ev.Unfinished {
+				// The turn did not finish, and content is hermes's notice
+				// to the person, never the ghost's words: run.failed or
+				// run.cancelled follows.
+				said = providerSaid(ev.Content)
+				return true
+			}
 			reply.Text = ev.Content
 			completed = true
 		case "run.failed":
 			failure = fmt.Errorf("hermes: the turn failed%s", ev.reason())
+			if said != "" {
+				failure = fmt.Errorf("%w: %s", failure, said)
+			}
 		case "run.cancelled":
 			failure = fmt.Errorf("hermes: the turn was cancelled")
 		case "error":
@@ -318,6 +341,9 @@ func (c *Client) turn(ctx context.Context, id string, req TurnRequest) (Reply, e
 		return true
 	})
 	if ctx.Err() != nil {
+		if run != "" && !over {
+			c.stopRun(run)
+		}
 		return reply, ctx.Err()
 	}
 	if failure != nil {
@@ -335,15 +361,115 @@ func (c *Client) turn(ctx context.Context, id string, req TurnRequest) (Reply, e
 	return reply, nil
 }
 
+// How long a run given up on may take to stop: the stop request, then the
+// wait for the run to be over.
+var (
+	stopTimeout   = 5 * time.Second
+	settleTimeout = 10 * time.Second
+	settlePoll    = 200 * time.Millisecond
+)
+
+// stopRun stops a run its caller has given up on, and waits for it to be
+// over, so that the next turn on the session does not start beside it.
+//
+// Closing the stream alone stops the run only when hermes next writes to
+// it, a keepalive up to 10 s later, and hermes does not refuse a second
+// turn on a session whose first is still running. POST
+// /v1/runs/{run_id}/stop (gateway/platforms/api_server_runs.py,
+// _handle_stop_run) interrupts the agent at once, as an explicit stop,
+// but answers "stopping" without waiting for it: the agent's thread winds
+// down on its own, a recovery wait within 200 ms and a model call when its
+// request is cut. The run is over when GET /v1/runs/{run_id} answers one
+// of TERMINAL_STATUSES (api_server_run_idempotency.py), which the session
+// stream's run sets once the agent has returned and its last rows are
+// stored (api_server.py, _handle_session_chat_stream); a run hermes has
+// already forgotten is over too. The wait is bounded, and gives up
+// quietly: a run that will not stop is hermes's to finish.
+//
+// The requests are on a context of their own, the caller's having been
+// cancelled. A stop that fails is logged and changes nothing for the
+// caller, whose turn has failed already.
+func (c *Client) stopRun(run string) {
+	path := "/v1/runs/" + url.PathEscape(run)
+	status := func(resp *http.Response) string {
+		defer resp.Body.Close()
+		var out struct {
+			Status string `json:"status"`
+		}
+		json.NewDecoder(resp.Body).Decode(&out)
+		return out.Status
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
+	resp, err := c.request(ctx, http.MethodPost, path+"/stop", nil)
+	cancel()
+	if isCode(err, "run_not_found") || isCode(err, "run_not_active") {
+		// Forgotten, or with no agent to interrupt: not started on one
+		// yet, which the closed stream ends at hermes's next write, or
+		// just finished with one.
+		return
+	}
+	if err != nil {
+		c.logf("hermes: stopping run %s: %v", run, err)
+		return
+	}
+	if runOver(status(resp)) {
+		return
+	}
+	ctx, cancel = context.WithTimeout(context.Background(), settleTimeout)
+	defer cancel()
+	tick := time.NewTicker(settlePoll)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			c.logf("hermes: run %s is still stopping after %s", run, settleTimeout)
+			return
+		case <-tick.C:
+		}
+		resp, err := c.request(ctx, http.MethodGet, path, nil)
+		if isCode(err, "run_not_found") {
+			return
+		}
+		if err != nil {
+			if ctx.Err() == nil {
+				c.logf("hermes: waiting for run %s to stop: %v", run, err)
+			}
+			return
+		}
+		if runOver(status(resp)) {
+			return
+		}
+	}
+}
+
+// runOver is whether a run's status is one hermes's runs end in.
+func runOver(status string) bool {
+	switch status {
+	case "completed", "failed", "cancelled", "interrupted":
+		return true
+	}
+	return false
+}
+
+func (c *Client) logf(format string, a ...any) {
+	if c.Logf != nil {
+		c.Logf(format, a...)
+	}
+}
+
 // sseEvent is the union of the payload fields haunt reads.
 type sseEvent struct {
 	SessionID      string `json:"session_id"`
+	RunID          string `json:"run_id"`
 	Delta          string `json:"delta"`
 	Text           string `json:"text"`
 	ToolName       string `json:"tool_name"`
 	Content        string `json:"content"`
 	Message        string `json:"message"`
 	TurnExitReason string `json:"turn_exit_reason"`
+	// Unfinished is completed: false on assistant.completed or a run.*
+	// event; an event without the field is not unfinished.
+	Unfinished bool
 }
 
 func (e sseEvent) reason() string {
@@ -367,6 +493,7 @@ func (e *sseEvent) UnmarshalJSON(b []byte) error {
 	}
 	*e = sseEvent{
 		SessionID:      str("session_id"),
+		RunID:          str("run_id"),
 		Delta:          str("delta"),
 		Text:           str("text"),
 		ToolName:       str("tool_name"),
@@ -374,7 +501,33 @@ func (e *sseEvent) UnmarshalJSON(b []byte) error {
 		Message:        str("message"),
 		TurnExitReason: str("turn_exit_reason"),
 	}
+	var done *bool
+	if json.Unmarshal(raw["completed"], &done) == nil && done != nil {
+		e.Unfinished = !*done
+	}
 	return nil
+}
+
+// providerSaidMark opens the line hermes ends a failed turn's notice with,
+// the provider's own error, summarised: "Provider said: Connection
+// error." (agent/turn_failure_copy.py, exhausted_copy, nonretryable_copy
+// and content_policy_copy, each f"…\n\nProvider said: {summary}"; the
+// summary is agent/api_error_summary.py _summarize_api_error). Hermes may
+// add a paragraph of advice after it.
+const providerSaidMark = "\n\nProvider said: "
+
+// providerSaid is the provider's error from a failed turn's notice, or ""
+// when the notice has none. The rest of the notice is advice for hermes's
+// own chat (send /retry, switch with /model, `hermes fallback add`) and
+// means nothing in haunt.
+func providerSaid(notice string) string {
+	_, said, ok := strings.Cut(notice, providerSaidMark)
+	if !ok {
+		return ""
+	}
+	said, _, _ = strings.Cut(said, "\n")
+	said = strings.TrimSuffix(strings.TrimSpace(said), ".")
+	return clip(said, 200)
 }
 
 // readSSE calls fn for each event until fn returns false or the stream
@@ -493,6 +646,7 @@ func (c *Client) messages(ctx context.Context, n, argsMax, resultMax int) ([]Mes
 		}
 		looked, acted, byCall, last = nil, nil, map[string]callAt{}, -1
 	}
+	prev := "" // the role of the last row not hidden
 	for _, m := range out.Data {
 		if m.DisplayKind == "hidden" {
 			// A compaction handoff or a control row, said by nobody. A
@@ -501,11 +655,15 @@ func (c *Client) messages(ctx context.Context, n, argsMax, resultMax int) ([]Mes
 			// as the person's words would.
 			continue
 		}
+		afterTool := prev == "tool"
+		prev = m.Role
 		text := rawText(m.Content)
-		if m.DisplayKind == "failed_turn" {
+		interrupted := afterTool && m.Role == "assistant" && m.DisplayKind == "" && len(m.ToolCalls) == 0 && interruptNotice(text)
+		if m.DisplayKind == "failed_turn" || interrupted {
 			// Hermes's notice, "Your request was not processed…", written
-			// in the ghost's place when a turn failed. The turn's calls go
-			// on it, as they would on a reply.
+			// in the ghost's place when a turn failed, or the interrupt's
+			// own words closing a turn stopped after a tool. The turn's
+			// calls go on it, as they would on a reply.
 			last = len(msgs)
 			msgs = append(msgs, Message{Role: "assistant", Failed: true, Time: unixTime(m.Timestamp)})
 			continue
@@ -558,6 +716,54 @@ func (c *Client) messages(ctx context.Context, n, argsMax, resultMax int) ([]Mes
 	endTurn()
 	// "latest" pages back from the newest and still answers oldest first.
 	return msgs, nil
+}
+
+// interruptNotices open the rows hermes closes an interrupted turn with
+// when its last row is a tool result: a plain assistant row, with no
+// display_kind, whose content is the interrupt's own text
+// (agent/message_sanitization.py, close_interrupted_tool_sequence, called
+// from agent/turn_recovery.py abort_turn_on_interrupt and from
+// agent/turn_finalizer.py _close_transcript_tail). The texts, by where
+// hermes writes them:
+//
+//   - "Operation interrupted: waiting for the provider to recover (cycle
+//     1/2)." agent/turn_recovery_autorecover.py
+//   - "Operation interrupted: handling API error (…)." and "Operation
+//     interrupted: retrying API call after error (retry 1/3)."
+//     agent/turn_api_error.py
+//   - "Operation interrupted: retrying empty response from model (retry
+//     1/3)." agent/turn_empty_response.py
+//   - "Operation interrupted: waiting for model response (4.2s
+//     elapsed)." INTERRUPT_WAITING_FOR_MODEL_PREFIX in
+//     agent/conversation_loop.py, used by agent/turn_api_call.py
+//     handle_api_interrupt and agent/turn_finalizer.py
+//   - "Operation interrupted during retry (…, attempt 1/3)."
+//     agent/turn_response_check.py
+//
+// An interrupt the closed stream causes and one POST
+// /v1/runs/{run_id}/stop causes write the same rows. A turn interrupted
+// before any tool ran gets a failed_turn row instead, one with no text
+// at all gets a hidden row, and one interrupted mid-reply keeps the words
+// the model had streamed, which are the ghost's.
+//
+// The match is on hermes's wording, and is rechecked when the pin moves
+// (docs/dev/hermes.md, Moving the pin).
+var interruptNotices = []string{
+	"Operation interrupted: ",
+	"Operation interrupted during retry (",
+}
+
+// interruptNotice is whether an assistant row's text is hermes's
+// interrupt notice rather than the ghost's words. Only a row straight
+// after a tool result can be one, which keeps a reply that happens to
+// open the same way the ghost's.
+func interruptNotice(text string) bool {
+	for _, p := range interruptNotices {
+		if strings.HasPrefix(strings.TrimSpace(text), p) {
+			return true
+		}
+	}
+	return false
 }
 
 // unixTime is a hermes timestamp, seconds since the epoch as a float.

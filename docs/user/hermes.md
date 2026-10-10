@@ -29,7 +29,8 @@ not take that down. A tool with a wait of its own ("painting…") shows its
 own words while it runs. When the model's provider is down, hermes
 retries a few times, then waits about fifteen seconds and thirty more,
 trying again after each; after that an answer to you says in the balloon
-that it failed, `haunt history` marks the turn `(the turn failed)`, and
+that it failed and what the provider said ("hermes: the turn failed:
+Connection error"), `haunt history` marks the turn `(the turn failed)`, and
 anything you said meanwhile goes to the model next. A provider that asks
 for a longer wait is not waited on: once a turn has gone two minutes
 with nothing new (`stall_timeout`), the ghost gives up on it, says so

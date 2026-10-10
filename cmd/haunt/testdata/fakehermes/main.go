@@ -292,7 +292,7 @@ func run() error {
 		logEntry(map[string]any{"kind": "tools_list", "tools": tools})
 	}()
 
-	s := &server{key: key, mcp: mcp, ready: ready, rules: rules, mcpErr: func() error { return mcpErr }, sessions: map[string]bool{}}
+	s := &server{key: key, mcp: mcp, ready: ready, rules: rules, mcpErr: func() error { return mcpErr }, sessions: map[string]bool{}, runs: map[string]*fakeRun{}}
 	ln, err := net.Listen("tcp", net.JoinHostPort(host, port))
 	if err != nil {
 		return err
@@ -509,6 +509,8 @@ type server struct {
 	// transcript is every stored message, oldest first, as hermes keeps
 	// them: the reply is stored even when it is NO_REPLY.
 	transcript []map[string]any
+	// runs is every turn's run by id, for /v1/runs.
+	runs map[string]*fakeRun
 }
 
 func (s *server) mux() *http.ServeMux {
@@ -520,6 +522,8 @@ func (s *server) mux() *http.ServeMux {
 	m.HandleFunc("POST /api/sessions", s.auth(s.createSession))
 	m.HandleFunc("POST /api/sessions/{id}/chat/stream", s.auth(s.chat))
 	m.HandleFunc("GET /api/sessions/{id}/messages", s.auth(s.messages))
+	m.HandleFunc("POST /v1/runs/{run_id}/stop", s.auth(s.stopRun))
+	m.HandleFunc("GET /v1/runs/{run_id}", s.auth(s.getRun))
 	return m
 }
 
@@ -596,23 +600,40 @@ func (s *server) chat(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	logEntry(map[string]any{"kind": "chat", "session": id, "input": body.Input, "system_message": body.SystemMessage,
-		"session_key": r.Header.Get("X-Hermes-Session-Key")})
 	s.mu.Lock()
 	known := s.sessions[id]
 	s.runN++
 	n := s.runN
 	s.mu.Unlock()
+	runID := fmt.Sprintf("run_fake%d", n)
+	logEntry(map[string]any{"kind": "chat", "session": id, "input": body.Input, "system_message": body.SystemMessage,
+		"session_key": r.Header.Get("X-Hermes-Session-Key"), "run_id": runID})
 	if !known {
 		apiError(w, http.StatusNotFound, "session_not_found", "no session "+id)
 		return
 	}
 
 	<-s.ready
+	// The run outlives the request, as hermes's does: it ends when it is
+	// stopped, or once hermes notices the client gone (watch).
+	run := &fakeRun{stop: make(chan struct{}), status: "running"}
+	s.mu.Lock()
+	s.runs[runID] = run
+	s.mu.Unlock()
+	runCtx, endRun := context.WithCancel(context.Background())
+	defer endRun()
+	finished := make(chan struct{})
+	defer close(finished)
+	go run.watch(r.Context(), finished, endRun)
+	abandon := func() {
+		logEntry(map[string]any{"kind": "abandoned", "session": id, "input": body.Input, "run_id": runID})
+		s.setStatus(run, "cancelled")
+	}
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
-	e := &sse{w: w, fl: w.(http.Flusher), session: id, run: fmt.Sprintf("run_fake%d", n)}
+	e := &sse{w: w, fl: w.(http.Flusher), session: id, run: runID}
 	msgID := fmt.Sprintf("msg_fake%d", n)
 
 	e.send("run.started", map[string]any{
@@ -625,8 +646,8 @@ func (s *server) chat(w http.ResponseWriter, r *http.Request) {
 	if rl.DelayMS > 0 {
 		select {
 		case <-time.After(time.Duration(rl.DelayMS) * time.Millisecond):
-		case <-r.Context().Done():
-			logEntry(map[string]any{"kind": "abandoned", "session": id, "input": body.Input})
+		case <-runCtx.Done():
+			abandon()
 			return
 		}
 	}
@@ -670,8 +691,8 @@ func (s *server) chat(w http.ResponseWriter, r *http.Request) {
 		tool := "mcp__haunt__" + st.Tool
 		interim()
 		e.send("tool.started", map[string]any{"message_id": msgID, "tool_name": tool, "preview": "", "args": st.Args})
-		if st.DelayMS > 0 && !e.pause(r.Context(), time.Duration(st.DelayMS)*time.Millisecond, false, msgID) {
-			logEntry(map[string]any{"kind": "abandoned", "session": id, "input": body.Input})
+		if st.DelayMS > 0 && !e.pause(runCtx, time.Duration(st.DelayMS)*time.Millisecond, false, msgID) {
+			abandon()
 			return
 		}
 		text, err := s.callTool(r.Context(), st.Tool, st.Args)
@@ -687,8 +708,8 @@ func (s *server) chat(w http.ResponseWriter, r *http.Request) {
 	if len(steps) > 0 {
 		reply = strings.ReplaceAll(reply, "{tool}", last)
 	}
-	if rl.StallMS > 0 && !e.pause(r.Context(), time.Duration(rl.StallMS)*time.Millisecond, rl.Reasoning, msgID) {
-		logEntry(map[string]any{"kind": "abandoned", "session": id, "input": body.Input})
+	if rl.StallMS > 0 && !e.pause(runCtx, time.Duration(rl.StallMS)*time.Millisecond, rl.Reasoning, msgID) {
+		abandon()
 		return
 	}
 	if len(calls) > 0 {
@@ -711,6 +732,99 @@ func (s *server) chat(w http.ResponseWriter, r *http.Request) {
 		"message_id": msgID, "completed": true, "partial": false, "interrupted": false,
 	})
 	e.send("done", map[string]any{})
+	s.setStatus(run, "completed")
+}
+
+// fakeRun is one turn's run, for the /v1/runs endpoints.
+type fakeRun struct {
+	stop   chan struct{}
+	once   sync.Once
+	status string // guarded by server.mu
+}
+
+// How hermes ends a run whose client has gone. It notices the stream
+// closed only at its next write, a keepalive within 10 s
+// (_handle_session_chat_stream), shortened here; a stop interrupts the
+// agent at once, and the run is over once the agent's thread has wound
+// down, a moment later.
+const (
+	noticeLag  = 3 * time.Second
+	stopSettle = 300 * time.Millisecond
+)
+
+// watch ends the run, by calling end, once it is stopped or hermes would
+// have noticed the client gone, unless it finishes first.
+func (run *fakeRun) watch(client context.Context, finished <-chan struct{}, end func()) {
+	select {
+	case <-finished:
+		return
+	case <-run.stop:
+		time.Sleep(stopSettle)
+	case <-client.Done():
+		select {
+		case <-finished:
+			return
+		case <-run.stop:
+			time.Sleep(stopSettle)
+		case <-time.After(noticeLag):
+		}
+	}
+	end()
+}
+
+func (s *server) setStatus(run *fakeRun, status string) {
+	s.mu.Lock()
+	run.status = status
+	s.mu.Unlock()
+}
+
+func runStatus(w http.ResponseWriter, id, status string) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"object": "hermes.run", "run_id": id, "status": status})
+}
+
+// stopRun answers POST /v1/runs/{run_id}/stop as hermes does: it
+// interrupts the run and answers "stopping" without waiting for it to be
+// over.
+func (s *server) stopRun(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("run_id")
+	s.mu.Lock()
+	run := s.runs[id]
+	status := ""
+	if run != nil {
+		status = run.status
+		if status == "running" {
+			run.status = "stopping"
+		}
+	}
+	s.mu.Unlock()
+	logEntry(map[string]any{"kind": "stop", "run_id": id, "status": status})
+	switch status {
+	case "":
+		apiError(w, http.StatusNotFound, "run_not_found", "Run not found: "+id)
+	case "completed", "cancelled":
+		runStatus(w, id, status)
+	default:
+		run.once.Do(func() { close(run.stop) })
+		runStatus(w, id, "stopping")
+	}
+}
+
+// getRun answers GET /v1/runs/{run_id} with the run's status.
+func (s *server) getRun(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("run_id")
+	s.mu.Lock()
+	run := s.runs[id]
+	status := ""
+	if run != nil {
+		status = run.status
+	}
+	s.mu.Unlock()
+	if run == nil {
+		apiError(w, http.StatusNotFound, "run_not_found", "Run not found: "+id)
+		return
+	}
+	runStatus(w, id, status)
 }
 
 // callTool calls one haunt tool through the MCP server and logs what came

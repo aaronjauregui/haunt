@@ -22,10 +22,12 @@ import (
 // but its stream going silent is: when the model's provider goes down
 // mid-turn, hermes waits it out with nothing on the stream but keepalive
 // comments, which are not events and do not reset the clock, while the
-// person's words queue behind the turn. Hermes does notice the turn being
-// given up on. The driver closes the stream, the API server's next write
-// (a keepalive within 10 s) fails, and it interrupts the run, which ends
-// its recovery wait and keeps what the turn had done in the session.
+// person's words queue behind the turn. Giving up on a turn stops it in
+// hermes too. The driver cancels the turn's context, and the client
+// closes the stream, asks hermes to stop the run and waits for it to be
+// over before Turn returns (hermes.Client.stopRun), so the next turn does
+// not start beside it; the stop ends the run's recovery wait and keeps
+// what the turn had done in the session.
 //
 // The clock stops while one of the ghost's own tools runs, from its
 // tool.started to its tool.completed or tool.failed, since those take as
