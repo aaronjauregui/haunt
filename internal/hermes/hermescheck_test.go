@@ -181,8 +181,9 @@ func TestHermesToolsets(t *testing.T) {
 	}
 	var unmatched []string
 	for tool := range subtracted {
-		// patch is left out of absentTools on purpose (skills.go).
-		if tool != "patch" && absentTools.FindString(tool) != tool {
+		// patch and discord are left out of absentTools on purpose: each
+		// is an ordinary word (skills.go).
+		if tool != "patch" && tool != "discord" && absentTools.FindString(tool) != tool {
 			unmatched = append(unmatched, tool)
 		}
 	}
