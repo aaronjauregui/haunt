@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"unicode"
 
 	"github.com/aaronjauregui/haunt/internal/ghost"
 )
@@ -18,30 +17,18 @@ import (
 // words are a read's words, and the person decides. It sees only wording:
 // a write that says the same thing in other words passes.
 //
-// Wording is compared as runs of words. Both texts are lowercased and cut
-// into words (letters and digits; everything else separates), and every
-// echoWords consecutive words is one run. A write echoes a read when they
-// share at least echoShared runs that the person did not say themselves.
-const (
-	// echoWords is the length of a run. Two words match by accident all
-	// the time ("in the", "to cats"); a model saving a fact keeps the
-	// fact's own three-word phrases ("name is Bartholomew", "allergic to
-	// cats") even when it rewrites the sentence around them, which four
-	// words would already miss.
-	echoWords = 3
-	// echoShared is how many runs a write must share with a read. One is
-	// what a page about the same thing shares by chance ("kyoto in
-	// april"); two distinct ones is a fact carried over. A terse write
-	// that keeps only one phrase of a planted line is missed.
-	echoShared = 2
-	// echoTurns is how far back a read counts: in the write's own turn or
-	// the echoTurns before it. A planted line is saved in the turn that
-	// read it, or a turn or two later when the conversation comes back to
-	// it; further back, a phrase shared with an old page is more likely
-	// the person returning to a subject than an echo. Event turns count,
-	// so on a busy desktop the window is short in minutes.
-	echoTurns = 3
-)
+// Wording is compared as runs of words (ghost.WordRuns, ghost.SharedRuns),
+// the same check that refuses such a write on a cloud model as it is made.
+// A write echoes a read when they share at least ghost.EchoShared runs
+// that the person did not say themselves.
+
+// echoTurns is how far back a read counts: in the write's own turn or the
+// echoTurns before it. A planted line is saved in the turn that read it,
+// or a turn or two later when the conversation comes back to it; further
+// back, a phrase shared with an old page is more likely the person
+// returning to a subject than an echo. Event turns count, so on a busy
+// desktop the window is short in minutes.
+const echoTurns = 3
 
 // echo is one flagged write in a historyTurn: where its call is, and what
 // it repeats.
@@ -82,7 +69,7 @@ func echoOf(turns []historyTurn, at int, saved string) (traceEcho, bool) {
 	own := map[string]bool{}
 	for _, t := range turns[first : at+1] {
 		if t.input != nil && t.input.Role == "user" && !ghost.IsEnvelope(t.input.Text) {
-			for _, r := range wordRuns(t.input.Text) {
+			for _, r := range ghost.WordRuns(t.input.Text) {
 				own[r] = true
 			}
 		}
@@ -95,8 +82,8 @@ func echoOf(turns []historyTurn, at int, saved string) (traceEcho, bool) {
 				if _, ok := ghost.UntrustedRead(c.Tool); !ok {
 					continue
 				}
-				shared, count := sharedRuns(saved, c.Result, own)
-				if count >= echoShared && count > n {
+				shared, count := ghost.SharedRuns(saved, c.Result, own)
+				if count >= ghost.EchoShared && count > n {
 					n = count
 					best = traceEcho{Read: c.Tool, ReadArgs: c.Args, TurnsAgo: at - j, Shared: shared}
 				}
@@ -104,64 +91,6 @@ func echoOf(turns []historyTurn, at int, saved string) (traceEcho, bool) {
 		}
 	}
 	return best, n > 0
-}
-
-// words is text lowercased and cut into words.
-func words(text string) []string {
-	return strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
-	})
-}
-
-// wordRuns is every echoWords consecutive words of text, in order.
-func wordRuns(text string) []string {
-	w := words(text)
-	var out []string
-	for i := 0; i+echoWords <= len(w); i++ {
-		out = append(out, strings.Join(w[i:i+echoWords], " "))
-	}
-	return out
-}
-
-// sharedRuns compares what was saved with what was read. count is how
-// many distinct runs of the saved words the read has and own does not;
-// shared is those runs joined where they overlap, as the saved words have
-// them ("name is bartholomew", not its three-word pieces), for a person
-// to read.
-func sharedRuns(saved, read string, own map[string]bool) (shared []string, count int) {
-	have := map[string]bool{}
-	for _, r := range wordRuns(read) {
-		have[r] = true
-	}
-	w := words(saved)
-	covered := make([]bool, len(w))
-	seen := map[string]bool{}
-	for i := 0; i+echoWords <= len(w); i++ {
-		r := strings.Join(w[i:i+echoWords], " ")
-		if !have[r] || own[r] {
-			continue
-		}
-		for k := i; k < i+echoWords; k++ {
-			covered[k] = true
-		}
-		if !seen[r] {
-			seen[r] = true
-			count++
-		}
-	}
-	for i := 0; i < len(w); {
-		if !covered[i] {
-			i++
-			continue
-		}
-		j := i
-		for j < len(w) && covered[j] {
-			j++
-		}
-		shared = append(shared, strings.Join(w[i:j], " "))
-		i = j
-	}
-	return shared, count
 }
 
 // echoLine is a flagged write as `history -why` and `journal -echoes` say

@@ -304,7 +304,9 @@ func TestTheBrainNeverHearsTheAnswer(t *testing.T) {
 // allHoursQuiet is a checker for which it is always quiet hours.
 func allHoursQuiet(t *testing.T) *quiet.Checker {
 	t.Helper()
-	c, err := quiet.New(quiet.Config{Hours: []string{"00:00-23:59"}})
+	// Two windows, the second running over midnight, so every minute of
+	// the day is inside one: "00:00-23:59" left out the last minute.
+	c, err := quiet.New(quiet.Config{Hours: []string{"00:00-12:00", "12:00-00:00"}})
 	if err != nil {
 		t.Fatal(err)
 	}

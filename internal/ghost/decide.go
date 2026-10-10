@@ -35,9 +35,9 @@ import (
 // whose capability the package never asked for is not offered at all;
 // once somebody else's words have entered the turn, a decision that
 // reaches past the person or sends words off the machine is put to the
-// person (web.go, allowAfterReading); and inside each, the capability,
-// consent, quiet hours, the fullscreen rule, the budgets and the three
-// marks, as before. A refusal is a result the model reads, never an error
+// person when the trust table says so (trust.go, web.go); and inside
+// each, the capability, consent, quiet hours, the fullscreen rule, the
+// budgets and the three marks. A refusal is a result the model reads, never an error
 // that ends the turn.
 
 // decision is one thing the model can decide to do.
@@ -168,6 +168,9 @@ type turn struct {
 	// tainted is where the text nobody in the room wrote came from, if any
 	// has entered this turn (web.go).
 	tainted taintSource
+	// reads is what the turn's reads returned, for the echo check on a
+	// write (trust.go).
+	reads turnReads
 	// acted is the decisions applied, in order, for the why-trace.
 	acted []string
 	// faced and drew say the model wore a face or painted this turn.
@@ -348,7 +351,7 @@ func (g *Ghost) callDecision(ctx context.Context, t *turn, ds map[string]decisio
 		return toolResult{Text: "There is no tool called " + name + ".", IsError: true}
 	}
 	if tg, ok := d.(taintGated); ok && t != nil {
-		if after := tg.gatedAfter(args); after != 0 {
+		if after := g.gateAfterReading(t, name, tg.gatedAfter(args)); after != 0 {
 			if err := g.allowAfterReading(t, actSummary(name, args), after); err != nil {
 				return refusalResult(err)
 			}
@@ -363,6 +366,9 @@ func (g *Ghost) callDecision(ctx context.Context, t *turn, ds map[string]decisio
 	}
 	if t != nil {
 		t.noteDone(name)
+		if _, read := taintingReads[name]; read {
+			t.reads.add(name, text)
+		}
 	}
 	return toolResult{Text: text}
 }

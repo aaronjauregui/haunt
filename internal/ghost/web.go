@@ -18,15 +18,19 @@ import (
 // renders (internal/backend/web.go); this file decides whether the call
 // may happen at all, and what the rest of the turn may do afterwards.
 //
-// Three gates, in order:
+// Three gates, in order, each as the trust table says for where the model
+// runs (trust.go):
 //
-//   - The `web` capability, asked for in the balloon like any other. A
-//     search nobody asked for cannot put the question — there is nothing
-//     on screen to make sense of it — so it is refused instead.
-//   - The unprompted policy, when the turn is one nobody started. The
-//     driver cannot see which skill the model loaded, so "only where a
-//     skill says to" is approximated by the kinds of event a skill acts
-//     on, and bounded by a smaller ration and by quiet hours.
+//   - The `web` capability. On cloud it is asked for in the balloon like
+//     any other, and a search nobody asked for cannot put the question —
+//     there is nothing on screen to make sense of it — so it is refused
+//     instead. On local it needs no question; a refusal for good still
+//     stands.
+//   - On a turn nobody started: on cloud the unprompted policy, then quiet
+//     hours and a smaller ration. The driver cannot see which skill the
+//     model loaded, so "only where a skill says to" is approximated by the
+//     kinds of event a skill acts on. On local only quiet hours and the
+//     ration apply.
 //   - Taint, afterwards. Once a page or a result list has entered a turn,
 //     the model is reasoning partly on somebody else's words, and the
 //     tools that reach past the person in front of it need asking about
@@ -98,8 +102,8 @@ func UntrustedRead(tool string) (from string, ok bool) {
 	return src.what(), true
 }
 
-// unpromptedKinds are the events a ghost may look something up about
-// without being asked, under the default policy.
+// unpromptedKinds are the events a ghost on cloud may look something up
+// about without being asked, under the default policy.
 //
 // They are the ones a skill acts on and that carry no text from the
 // person's screen: a morning occasion, an errand coming due, a goal that
@@ -122,36 +126,14 @@ func (g *Ghost) allowWeb() error {
 	if g.backend == nil || !g.backend.SearchEnabled() {
 		return refuse("there is no search backend configured")
 	}
-	// The grant comes before the ration. A ghost whose web grant was
-	// refused, or that has nobody to ask just now, would otherwise spend
-	// an unprompted look on every attempt and be turned away anyway —
-	// four quiet turns and the hour's ration is gone with nothing
-	// searched.
-	if !g.ensureCapability("web") {
-		return refuse("the web capability is not granted")
-	}
-	person, kind, _ := g.thisTurn()
-	if !person {
-		switch g.backend.Unprompted() {
-		case "never":
-			return refuse("only when the person asks")
-		case "any":
-		default:
-			if !unpromptedKinds[kind] {
-				return refuse("only when the person asks, or where a skill says to")
-			}
-		}
-		if muted, why := g.quiet.Active(); muted {
-			return refuse("it is quiet time (%s)", why)
-		}
-		// The smaller ration last, once nothing else can refuse: the call
-		// charges the general one itself, so an unprompted look spends
-		// both.
+	return g.readGate("web", g.backend.Unprompted(), func() error {
+		// The call charges the general ration itself, so an unprompted
+		// look spends both.
 		if err := g.backend.SpendUnpromptedSearch(); err != nil {
 			return refuse("%v", err)
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 // webRef is what a web tool's answer is logged as when it was too long to
@@ -210,8 +192,10 @@ func toolReadPage(g *Ghost, ctx context.Context, args json.RawMessage) (string, 
 
 // Taint, applied.
 //
-// gatedAfter is the whole of the rule, in one place rather than in fifteen
-// decisions: which sources, once read, put this call to the person.
+// gatedAfter is the whole of the rule on cloud, in one place rather than
+// in fifteen decisions: which sources, once read, put this call to the
+// person. The trust table narrows it for a model on this machine
+// (gateAfterReading in trust.go).
 // A verb that reaches past the person is gated after anything was read,
 // and `style` is one only when it is being changed rather than read. A
 // verb that leaves the machine is gated after a file, so that what a file

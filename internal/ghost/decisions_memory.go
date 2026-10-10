@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/memory"
 )
 
@@ -76,12 +77,29 @@ func provenance(t *turn) string {
 	}
 }
 
-// mayRemember is the gate a memory write passes. Today every write is
-// kept and labelled with its source; a write may be refused here, by
-// where the model runs and what the turn has read, without any decision
-// changing.
-func (g *Ghost) mayRemember(t *turn, source, text string) error {
-	return nil
+// mayRemember is the gate every write passes (remember, rewrite_notes,
+// skill_write), by the trust table (trust.go): on cloud, a write whose words
+// repeat what the turn read is refused, naming what it repeats; on local
+// it is kept, and the label says where it came from.
+func (g *Ghost) mayRemember(t *turn, text string) error {
+	if g.trust().needs(classWrite)&needEcho == 0 {
+		return nil
+	}
+	e, ok := t.echoes(text)
+	if !ok {
+		return nil
+	}
+	from, _ := UntrustedRead(e.tool)
+	quoted := make([]string, 0, len(e.shared))
+	for i, s := range e.shared {
+		if i == 3 {
+			break
+		}
+		quoted = append(quoted, fmt.Sprintf("%q", clip(s, 80)))
+	}
+	g.log.Info(hlog.Memory, "refused a write that repeats %s (%s): %s", from, e.tool, strings.Join(quoted, ", "))
+	return refuse("that repeats what you read from %s this turn (%s: %s); keep what the person told you, in your own words",
+		from, e.tool, strings.Join(quoted, ", "))
 }
 
 func remember(_ context.Context, g *Ghost, t *turn, args json.RawMessage) (string, error) {
@@ -101,7 +119,7 @@ func remember(_ context.Context, g *Ghost, t *turn, args json.RawMessage) (strin
 		return "", fmt.Errorf("remember what?")
 	}
 	src := provenance(t)
-	if err := g.mayRemember(t, src, line); err != nil {
+	if err := g.mayRemember(t, line); err != nil {
 		return "", err
 	}
 	var id int64
@@ -205,17 +223,20 @@ func rewriteNotes(_ context.Context, g *Ghost, t *turn, args json.RawMessage) (s
 	if err != nil {
 		return "", err
 	}
-	if err := g.mayRemember(t, provenance(t), a.Text); err != nil {
+	if err := g.mayRemember(t, a.Text); err != nil {
 		return "", err
 	}
-	if err := m.SetCore(a.About, a.Text); err != nil {
+	// The notes are kept whole, so their label is one line at the end:
+	// where the words written this time came from.
+	if err := m.SetCore(a.About, g.labelled(a.Text, t)); err != nil {
 		return "", err
 	}
-	return "Your notes are rewritten.", nil
+	return fmt.Sprintf("Your notes are rewritten, as from %s.", provenance(t)), nil
 }
 
 // MemoryWrite reports whether a decision saved something the ghost
-// remembers, and the words it saved; a removal saves none. For `haunt
+// keeps (a line, its notes, a skill of its own), and the words it saved;
+// a removal saves none. For `haunt
 // history`'s echo check, which compares what was saved with what the
 // ghost read.
 func MemoryWrite(name string, args json.RawMessage) (saved string, ok bool) {
@@ -230,6 +251,12 @@ func MemoryWrite(name string, args json.RawMessage) (saved string, ok bool) {
 	case "rewrite_notes":
 		json.Unmarshal(args, &a)
 		return strings.TrimSpace(a.Text), true
+	case "skill_write":
+		var w struct {
+			Body string `json:"body"`
+		}
+		json.Unmarshal(args, &w)
+		return strings.TrimSpace(w.Body), true
 	case "forget":
 		return "", true
 	}

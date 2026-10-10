@@ -61,18 +61,18 @@ base_url = ""                   # the SearXNG instance, e.g. "http://127.0.0.1:8
 api_key_env = ""                # Brave only; the variable holding the key
 results = 5                     # results a search returns, 1 to 10
 safesearch = "moderate"         # "off", "moderate" or "strict"
-unprompted = "skills"           # when a ghost may search on a turn you did not start: "never", "skills", "any"
+unprompted = "skills"           # cloud only: when a ghost may search on a turn you did not start: "never", "skills", "any"
 
 [backend.budget]                # per hour, shared across every resident ghost
 image_requests_per_hour = 12
 vision_requests_per_hour = 60
 tool_requests_per_hour = 60
 search_requests_per_hour = 30       # searches and pages read together
-unprompted_search_per_hour = 4      # the slice of that a ghost may spend unwatched
+unprompted_search_per_hour = 4      # the slice of that a ghost may spend unwatched, local or cloud
 unprompted_file_per_hour = 4        # reads of shared folders on turns you did not start; yours are not rationed
 
 [files]                         # what a ghost with `files` may read; see below
-unprompted = "never"            # when a ghost may read on a turn you did not start: "never", "skills", "any"
+unprompted = "never"            # cloud only: when a ghost may read on a turn you did not start: "never", "skills", "any"
 
 [files.roots]                   # name = folder; the name is all a ghost ever sees. None by default
 # notes   = "~/notes"
@@ -140,6 +140,13 @@ is cloud. A host name is judged by its text, never by what it resolves
 to, so a model on your own network reached by name is cloud until
 `trust = "local"` says otherwise. `trust = "cloud"` treats a local server
 as cloud.
+
+A local model reads the web and your shared folders without being asked
+for the capability and on turns you did not start, within quiet hours
+and the unprompted rations; a cloud one is asked, and follows the
+`unprompted` policies below. Telling another ghost and using a tool
+server are asked about the same way on both. [What it may
+do](permissions.md#where-the-model-runs) has the whole table.
 
 `fold` decides how a ghost's turn is shaped. Unfolded, the model first
 decides what to do and then writes the words in a second call; folded,
@@ -259,8 +266,10 @@ a turn is well inside it; if a burst does hit the limit, the ghost is
 told the provider is rate-limiting and says so rather than inventing an
 answer.
 
-`unprompted` decides whether a ghost may search on a turn you did not
-start:
+`unprompted` decides whether a ghost on a cloud model may search on a
+turn you did not start. A ghost on a local model searches on any turn
+of its own, within the ration and outside quiet hours, whatever this
+says ([The model](#the-model)):
 
 | Value | A ghost searches unasked |
 |---|---|
@@ -270,7 +279,8 @@ start:
 
 `search_requests_per_hour` covers searching and reading pages together.
 `unprompted_search_per_hour` is the slice of it a ghost may spend while
-you are not asking, and quiet hours stop unprompted searches outright.
+you are not asking, local or cloud, and quiet hours stop unprompted
+searches outright.
 
 Queries go to the provider you configured; pages are fetched from this
 machine. A page is only ever fetched from a public address: a ghost given
@@ -306,9 +316,12 @@ shared folder, hidden files included, and a search stops after 5,000
 files, so a search of `~` would hit that limit every time and find less
 than a search of `~/notes`.
 
-`unprompted` decides whether a ghost may read on a turn you did not
-start. The values mean what they mean for `[backend.search]`, and the
-default is `never`, because your files are more personal than the web:
+`unprompted` decides whether a ghost on a cloud model may read on a
+turn you did not start. The values mean what they mean for
+`[backend.search]`, and the default is `never`, because your files are
+more personal than the web. A ghost on a local model reads on any turn
+of its own, within the ration and outside quiet hours, whatever this
+says:
 
 | Value | A ghost reads your files unasked |
 |---|---|
@@ -317,7 +330,8 @@ default is `never`, because your files are more personal than the web:
 | `any` | on any turn of its own, within the ration |
 
 Reads you ask for are not rationed. `unprompted_file_per_hour` is how
-many a ghost may make unasked, and quiet hours stop them outright. A
+many a ghost may make unasked, local or cloud, and quiet hours stop them
+outright. A
 picture is described by the `[backend.vision]` model and spends from
 `vision_requests_per_hour` as well; with no vision model, pictures cannot
 be read.

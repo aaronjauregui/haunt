@@ -56,7 +56,7 @@ func skillView(_ context.Context, g *Ghost, _ *turn, args json.RawMessage) (stri
 	return h.View(strings.TrimSpace(a.Name))
 }
 
-func skillWrite(_ context.Context, g *Ghost, _ *turn, args json.RawMessage) (string, error) {
+func skillWrite(_ context.Context, g *Ghost, t *turn, args json.RawMessage) (string, error) {
 	var a struct {
 		Name string `json:"name"`
 		Body string `json:"body"`
@@ -68,9 +68,15 @@ func skillWrite(_ context.Context, g *Ghost, _ *turn, args json.RawMessage) (str
 	if err != nil {
 		return "", err
 	}
-	if err := h.Write(strings.TrimSpace(a.Name), a.Body); err != nil {
+	// A skill is a write like a remembered line: gated on what the turn
+	// read, and labelled with where it came from, as its last line.
+	src := provenance(t)
+	if err := g.mayRemember(t, a.Body); err != nil {
+		return "", err
+	}
+	if err := h.Write(strings.TrimSpace(a.Name), g.labelled(a.Body, t)); err != nil {
 		return "", err
 	}
 	g.execNote("wrote itself a skill: " + clip(a.Name, 64))
-	return "Saved. It is in your skills from the next turn.", nil
+	return fmt.Sprintf("Saved, as from %s. It is in your skills from the next turn.", src), nil
 }

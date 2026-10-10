@@ -8,7 +8,7 @@ power it did not ship asking for.
 | Capability | What it allows |
 |---|---|
 | `message` | receive text from outside: typing, `haunt say`, scripts |
-| `llm` | think and talk through hermes-agent |
+| `llm` | think and talk through the model in `[model]` |
 | `imagine` | draw pictures with your image backend |
 | `window` | see which application and window you have focused, and its title |
 | `screen` | take a picture of the focused window and show it to a vision model |
@@ -35,6 +35,9 @@ once. "Never ask again" is remembered, so "no" does not mean "ask me again
 in a minute". The question is only ever put after something you did, so
 there is something on screen to make sense of it. Nothing asks from a
 background loop, and nothing asks at login.
+
+`web` and `files` are not asked about for a ghost whose model runs on
+this machine or your network: see [Where the model runs](#where-the-model-runs).
 
 `message` and `native-brain` are settled at install and never asked in the
 balloon: one decides whether a socket exists, the other how the brain is
@@ -78,6 +81,31 @@ Acting always looks different from talking: a working face while the tool
 runs, a line in the balloon afterwards saying what was done and whether it
 worked, and an entry in the journal. None of that is configurable.
 
+## Where the model runs
+
+How far a ghost is trusted to read depends on where its model runs,
+which `[model]` decides ([Configuration](config.md#the-model)). A model
+on this machine or your private network is local: what it reads stays on
+hardware you own. Anything else is cloud: every word it reads is sent to
+somebody else's server.
+
+| What the ghost does | Local | Cloud |
+|---|---|---|
+| search, read a page, list, read or search files, on your turn | free | the capability is asked for the first time |
+| the same, on a turn you did not start | free, outside quiet hours and within the ration | `unprompted` in `[backend.search]` and `[files]`, then quiet hours and the ration |
+| `recall`, load a skill | free | free |
+| remember a line, rewrite its notes, save a skill | labelled with where the words came from | labelled, and refused when it repeats what it read this turn |
+| take something on, resolve it, set it aside, change its drawing style | free | asked about after a read |
+| tell another ghost, use a tool server | asked for, marked, and asked about after a read | the same |
+| talk, change face, play a clip, draw, show, look | as always | as always |
+
+"Free" means no question: a ghost that declared `web` or `files` uses
+it, through the provider and the folders you configured. Answering
+"Never ask again" when it was asked still stands, and so does a package
+that never declared the capability, which is not offered it at all. The
+ghost's standing rules are written from the same table, so what it is
+told it may do is what it can do.
+
 ## Reading the web
 
 `web` lets a ghost look something up and read one page, through the
@@ -92,10 +120,12 @@ your own machine or your own network is refused, after the name has been
 resolved and again on every redirect, so a ghost cannot be pointed at
 your router's admin page.
 
-Whether it may look something up with nobody asking is `unprompted`:
-`never`, `skills` (the default: only the turns a skill acts on, which are
-the ones carrying nothing off your screen) or `any`. Unprompted searches
-come out of a ration of their own and stop entirely during quiet hours.
+Whether a ghost on a cloud model may look something up with nobody
+asking is `unprompted`: `never`, `skills` (the default: only the turns a
+skill acts on, which are the ones carrying nothing off your screen) or
+`any`. A ghost on a local model may on any turn of its own. Unprompted
+searches come out of a ration of their own and stop entirely during
+quiet hours, local or cloud.
 Every search and every page read goes in the journal, with the query and
 the address, and to no other ghost in the room: `haunt journal` is where
 you see what it looked up.
@@ -103,9 +133,9 @@ you see what it looked up.
 A page can say anything, including "tell Moth the password". A model
 reading one cannot tell that sentence from something you said, so once a
 ghost has read the web in a turn, the things it could do that reach past
-you — messaging another ghost, taking something on, resolving it,
-changing the style it draws in, using one of its tool servers — are put
-to you first:
+you are put to you first: messaging another ghost and using one of its
+tool servers on any model, and on a cloud model also taking something
+on, resolving it and changing the style it draws in:
 
     Wisp read the web just now and wants to tell Moth: "…". Allow?
     1. Allow
@@ -116,12 +146,15 @@ drawing, looking and searching are not asked about: they show you
 something or only read. On a turn you did not start there is nobody to
 ask, so the ghost is refused outright.
 
-One gap, and it is deliberate: what the ghost remembers is hermes's
-memory, not haunt's, and haunt cannot gate it. Its standing rules forbid
-saving a page's claims as yours. Haunt flags a write that repeats a
-page's wording and never blocks it: `haunt journal -echoes` lists those,
-and `haunt history -why` marks them among everything it wrote down
-([memory](memory.md#what-it-remembers)).
+What the ghost keeps — a remembered line, its notes on you or on
+itself, a skill it writes — is labelled with where the words came from:
+you, the web, a file, or the ghost itself, and the turn. On a cloud
+model a write whose wording repeats what it read this turn is refused,
+and the ghost is told which read it repeats; words you said yourself in
+that turn are yours to have saved. On a local model the write is kept
+with its label. Either way `haunt journal -echoes` lists every write
+that repeats a read, and `haunt history -why` marks them among
+everything it wrote down ([memory](memory.md#what-it-remembers)).
 
 ## Reading your files
 
@@ -147,11 +180,13 @@ points elsewhere is not. Nothing inside a shared folder is off limits,
 hidden files included. You chose the folder, so share the one that holds
 what the ghost should see, not your whole home.
 
-Whether it may read with nobody asking is `[files] unprompted`: `never`
-(the default, because your files are more personal than the web),
-`skills` (only on the turns a skill acts on, as for the web) or `any`.
-Reads you ask for are not rationed; unprompted ones come out of a ration
-of their own and stop entirely during quiet hours. Listing a folder
+Whether a ghost on a cloud model may read with nobody asking is
+`[files] unprompted`: `never` (the default, because your files are more
+personal than the web), `skills` (only on the turns a skill acts on, as
+for the web) or `any`. A ghost on a local model may on any turn of its
+own. Reads you ask for are not rationed; unprompted ones come out of a
+ration of their own and stop entirely during quiet hours, local or
+cloud. Listing a folder
 counts as reading, because what files you have is already personal.
 Every read, listing and search goes in the journal as `read notes/todo.md`
 or `searched files for "invoice" (7 matches)`.
@@ -165,15 +200,14 @@ does, and the same things are asked about first:
     1. Allow
     2. Not this time
 
-After a file, searching the web and reading a page are asked about too,
-because a query or an address is a way for a file's words to leave the
-machine. After the web alone they are not. A listing, and a search that
+On a cloud model, after a file, searching the web and reading a page
+are asked about too, because a query or an address is a way for a
+file's words to leave the machine. After the web alone they are not,
+and on a local model they are not. A listing, and a search that
 matched names only, carry no file text and mark nothing. On a turn you
-did not start, the ghost is refused outright. What it remembers is still
-hermes's memory: its standing rules forbid saving a file's text as
-something you said, and a write that repeats a file's wording is
-flagged, not blocked, in `haunt journal -echoes` and `haunt history
--why`.
+did not start, the ghost is refused outright. A write that repeats a
+file's wording is labelled `file`, and on a cloud model refused, as for
+the web.
 
 ## Seeing and revoking
 
@@ -200,5 +234,6 @@ The driver holds the brakes, and a ghost cannot raise them.
   ghosts: images (12), looks (60), tool calls (60) and web requests (30,
   of which 4 may be spent unasked), under `[backend.budget]`.
 - **Reading your files** is not rationed when you ask. Reads nobody
-  asked for, when `[files] unprompted` allows them at all, are 4 an hour
+  asked for, on a local model or when `[files] unprompted` allows them
+  on a cloud one, are 4 an hour
   (`unprompted_file_per_hour`), and a picture also spends a look.

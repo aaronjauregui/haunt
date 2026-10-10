@@ -72,7 +72,11 @@ func startFilesGhost(t *testing.T, c *testenv.Compositor, o filesOptions) filesR
 		t.Fatal(err)
 	}
 
-	config := fmt.Sprintf("\n[files]\nunprompted = \"never\"\n\n[files.roots]\nnotes = %q\n%s", notes, o.Config)
+	// These tests are about the consent question, the unprompted policy
+	// and the after-file gate, which a cloud model gets and a local one
+	// does not (internal/ghost/trust.go). The fake is on loopback, so the
+	// trust is pinned to cloud, and fold kept off as the rules script it.
+	config := fmt.Sprintf("trust = \"cloud\"\nfold = false\n[files]\nunprompted = \"never\"\n\n[files.roots]\nnotes = %q\n%s", notes, o.Config)
 	rig := newBrainRig(t, dir, o.Rules, config)
 	r := filesRun{rig: rig, c: c, dir: dir, notes: notes, state: filepath.Join(dir, "state"), log: &syncBuffer{}}
 

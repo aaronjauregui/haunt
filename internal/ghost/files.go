@@ -21,20 +21,24 @@ import (
 // not see is one it cannot taint a turn with, journal, or refuse on a turn
 // nobody started.
 //
-// The gates mirror the web's (web.go), in the same order, with the one
-// difference that files start closed:
+// The gates mirror the web's (web.go), in the same order and by the same
+// trust table (trust.go), with the one difference that files start
+// closed:
 //
 //   - Something shared. With no folders in the config there is nothing to
 //     read, whatever the package asked for.
-//   - The `files` capability, asked for in the balloon like any other, and
-//     refused rather than asked on a turn nobody started.
-//   - The [files] unprompted policy, when the turn is one nobody started:
-//     "never" by default, because files are more personal than the web;
-//     then quiet hours, then a ration of its own.
+//   - The `files` capability: on cloud asked for in the balloon like any
+//     other, and refused rather than asked on a turn nobody started; on
+//     local needing no question unless it was refused for good.
+//   - On a turn nobody started: on cloud the [files] unprompted policy,
+//     "never" by default because files are more personal than the web,
+//     then quiet hours, then a ration of its own; on local only quiet
+//     hours and the ration.
 //   - Taint, afterwards. A file in ~/Downloads is a stranger's words as
 //     much as a page is, so text from a file marks the turn (taintFile),
-//     and what reaches past the person, or would carry the file's words
-//     off the machine, is asked about again (web.go, gatedAfter).
+//     and what reaches past the person, or on cloud would carry the
+//     file's words off the machine, is asked about again (web.go,
+//     gatedAfter).
 //
 // Listing is gated like reading — knowing what files exist is already
 // personal — but does not taint: a list of names is the person's own
@@ -52,32 +56,15 @@ func (g *Ghost) allowFiles() error {
 	if g.files == nil || g.files.Empty() {
 		return refuse("no folders are shared with you")
 	}
-	// The grant before the ration, for the reason allowWeb gives.
-	if !g.ensureCapability("files") {
-		return refuse("the files capability is not granted")
-	}
-	person, kind, _ := g.thisTurn()
-	if !person {
-		switch g.filesCfg.UnpromptedMode() {
-		case "any":
-		case "skills":
-			if !unpromptedKinds[kind] {
-				return refuse("only when the person asks, or where a skill says to")
-			}
-		default:
-			return refuse("only when the person asks")
-		}
-		if muted, why := g.quiet.Active(); muted {
-			return refuse("it is quiet time (%s)", why)
-		}
+	return g.readGate("files", g.filesCfg.UnpromptedMode(), func() error {
 		if g.backend == nil {
 			return refuse("only when the person asks")
 		}
 		if err := g.backend.SpendUnpromptedFile(); err != nil {
 			return refuse("%v", err)
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 // fileError is how a failure from internal/files reaches the model. Its

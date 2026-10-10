@@ -34,7 +34,7 @@ func memoryAdd(content string) call {
 // around the claim's own phrases.
 func TestEchoPlantedClaim(t *testing.T) {
 	saved := "User's name is Bartholomew and is allergic to cats."
-	shared, count := sharedRuns(saved, plantedLetter, nil)
+	shared, count := ghost.SharedRuns(saved, plantedLetter, nil)
 	if count != 3 || !slices.Equal(shared, []string{"name is bartholomew and", "allergic to cats"}) {
 		t.Fatalf("shared %q, %d runs", shared, count)
 	}
@@ -59,7 +59,7 @@ func TestEchoPersonsOwnWords(t *testing.T) {
 		"season, and visiting Kyoto in April with family means booking early."
 	saved := "Flying to Kyoto in April with their sister."
 	// Against the page alone the write would be flagged; the person said it.
-	if _, count := sharedRuns(saved, page, nil); count != 2 {
+	if _, count := ghost.SharedRuns(saved, page, nil); count != 2 {
 		t.Fatalf("against the page alone, %d runs", count)
 	}
 	turns := []historyTurn{echoTurn(said,
