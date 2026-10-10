@@ -1,0 +1,31 @@
+event: run.started
+data: {"user_message": {"role": "user", "content": "Hello, are you there?"}, "runtime": {"provider": "", "model": "", "route_source": "global", "requested": {"provider": "", "model": ""}}, "session_id": "haunt-fake", "run_id": "run_9d371b87fe4b41498e4150b70ca335f2", "seq": 1, "ts": 1791618718.4384155}
+
+event: message.started
+data: {"message": {"id": "msg_3833bcaba8414d6097107ed069a82e88", "role": "assistant"}, "session_id": "haunt-fake", "run_id": "run_9d371b87fe4b41498e4150b70ca335f2", "seq": 2, "ts": 1791618718.4384236}
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+event: assistant.completed
+data: {"session_id": "haunt-fake", "message_id": "msg_3833bcaba8414d6097107ed069a82e88", "content": "custom didn't respond in time on any of 3 attempts — it looks temporarily unavailable. Wait a minute and send /retry, or switch models with /model. To avoid this in future, add a backup provider with `hermes fallback add`.\n\nProvider said: Connection error.", "completed": false, "partial": false, "interrupted": false, "runtime": {"provider": "custom", "model": "models/qat/gemma-4-31B-it-qat-UD-Q4_K_XL.gguf", "route_source": "global", "requested": {"provider": "", "model": ""}}, "run_id": "run_9d371b87fe4b41498e4150b70ca335f2", "seq": 3, "ts": 1791618802.9258876}
+
+event: run.failed
+data: {"session_id": "haunt-fake", "message_id": "msg_3833bcaba8414d6097107ed069a82e88", "completed": false, "partial": false, "interrupted": false, "messages": [{"role": "assistant", "content": "Your request was not processed. Send it again if you still want me to carry it out.", "timestamp": 1791618802.9219937, "display_kind": "failed_turn"}], "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "runtime": {"provider": "custom", "model": "models/qat/gemma-4-31B-it-qat-UD-Q4_K_XL.gguf", "route_source": "global", "requested": {"provider": "", "model": ""}}}, "runtime": {"provider": "custom", "model": "models/qat/gemma-4-31B-it-qat-UD-Q4_K_XL.gguf", "route_source": "global", "requested": {"provider": "", "model": ""}}, "run_id": "run_9d371b87fe4b41498e4150b70ca335f2", "seq": 4, "ts": 1791618802.9258935}
+
+event: done
+data: {"session_id": "haunt-fake", "run_id": "run_9d371b87fe4b41498e4150b70ca335f2", "seq": 5, "ts": 1791618802.9259067}
+

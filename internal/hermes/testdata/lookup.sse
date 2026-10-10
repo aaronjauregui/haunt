@@ -1,63 +1,83 @@
 event: run.started
-data: {"user_message": {"role": "user", "content": "Did I burn anything last week?"}, "runtime": {"provider": "", "model": "", "route_source": "global", "requested": {"provider": "", "model": ""}}, "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 1, "ts": 1789614402.1151}
+data: {"user_message": {"role": "user", "content": "Did I burn anything last week? Say one short sentence first telling me you'll check, and in that same message call session_search for \"burned\". Then answer."}, "runtime": {"provider": "", "model": "", "route_source": "global", "requested": {"provider": "", "model": ""}}, "session_id": "haunt-fake", "run_id": "run_d53586fd1b88437c989334438838bbbc", "seq": 1, "ts": 1791618596.0638719}
 
 event: message.started
-data: {"message": {"id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "role": "assistant"}, "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 2, "ts": 1789614402.1181998}
+data: {"message": {"id": "msg_5cd939a4f4134275a8368cdccb49b256", "role": "assistant"}, "session_id": "haunt-fake", "run_id": "run_d53586fd1b88437c989334438838bbbc", "seq": 2, "ts": 1791618596.0638824}
+
+: keepalive
 
 event: assistant.delta
-data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "delta": "Let ", "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 3, "ts": 1789614402.1212997}
+data: {"message_id": "msg_5cd939a4f4134275a8368cdccb49b256", "delta": "I", "session_id": "haunt-fake", "run_id": "run_d53586fd1b88437c989334438838bbbc", "seq": 3, "ts": 1791618607.6865714}
 
 event: assistant.delta
-data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "delta": "me l", "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 4, "ts": 1789614402.1243997}
+data: {"message_id": "msg_5cd939a4f4134275a8368cdccb49b256", "delta": " will", "session_id": "haunt-fake", "run_id": "run_d53586fd1b88437c989334438838bbbc", "seq": 4, "ts": 1791618607.6868827}
 
 event: assistant.delta
-data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "delta": "ook.", "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 5, "ts": 1789614402.1274996}
-
-event: assistant.commentary
-data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "text": "Let me look.", "already_streamed": true, "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 6, "ts": 1789614402.1305995}
-
-event: tool.started
-data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "tool_name": "session_search", "preview": "burned", "args": {"query": "burned"}, "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 7, "ts": 1789614402.1336994}
-
-event: tool.completed
-data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "tool_name": "session_search", "preview": null, "args": null, "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 8, "ts": 1789614402.1367993}
+data: {"message_id": "msg_5cd939a4f4134275a8368cdccb49b256", "delta": " check", "session_id": "haunt-fake", "run_id": "run_d53586fd1b88437c989334438838bbbc", "seq": 5, "ts": 1791618607.7486317}
 
 event: assistant.delta
-data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "delta": "\n\n[s", "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 9, "ts": 1789614402.1398993}
+data: {"message_id": "msg_5cd939a4f4134275a8368cdccb49b256", "delta": " your", "session_id": "haunt-fake", "run_id": "run_d53586fd1b88437c989334438838bbbc", "seq": 6, "ts": 1791618607.7491035}
 
 event: assistant.delta
-data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "delta": "ad] ", "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 10, "ts": 1789614402.1429992}
+data: {"message_id": "msg_5cd939a4f4134275a8368cdccb49b256", "delta": " history", "session_id": "haunt-fake", "run_id": "run_d53586fd1b88437c989334438838bbbc", "seq": 7, "ts": 1791618607.8115673}
 
 event: assistant.delta
-data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "delta": "Yes:", "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 11, "ts": 1789614402.146099}
+data: {"message_id": "msg_5cd939a4f4134275a8368cdccb49b256", "delta": ".", "session_id": "haunt-fake", "run_id": "run_d53586fd1b88437c989334438838bbbc", "seq": 8, "ts": 1791618607.874717}
 
 event: assistant.delta
-data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "delta": " the", "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 12, "ts": 1789614402.149199}
-
-event: assistant.delta
-data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "delta": " bre", "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 13, "ts": 1789614402.152299}
-
-event: assistant.delta
-data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "delta": "ad, ", "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 14, "ts": 1789614402.1553988}
-
-event: assistant.delta
-data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "delta": "on T", "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 15, "ts": 1789614402.1584988}
-
-event: assistant.delta
-data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "delta": "uesd", "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 16, "ts": 1789614402.1615987}
-
-event: assistant.delta
-data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "delta": "ay.", "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 17, "ts": 1789614402.1646986}
+data: {"message_id": "msg_5cd939a4f4134275a8368cdccb49b256", "delta": "\n\n", "session_id": "haunt-fake", "run_id": "run_d53586fd1b88437c989334438838bbbc", "seq": 9, "ts": 1791618607.8750958}
 
 event: tool.progress
-data: {"message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "tool_name": "_thinking", "delta": "[sad] Yes: the bread, on Tuesday.", "session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 18, "ts": 1789614402.1677985}
+data: {"message_id": "msg_5cd939a4f4134275a8368cdccb49b256", "tool_name": "_thinking", "delta": "I will check your history.", "session_id": "haunt-fake", "run_id": "run_d53586fd1b88437c989334438838bbbc", "seq": 10, "ts": 1791618608.2126174}
+
+event: assistant.commentary
+data: {"message_id": "msg_5cd939a4f4134275a8368cdccb49b256", "text": "I will check your history.", "already_streamed": true, "session_id": "haunt-fake", "run_id": "run_d53586fd1b88437c989334438838bbbc", "seq": 11, "ts": 1791618608.2184508}
+
+event: tool.started
+data: {"message_id": "msg_5cd939a4f4134275a8368cdccb49b256", "tool_name": "session_search", "preview": "recall: \"burned\"", "args": {"query": "burned"}, "session_id": "haunt-fake", "run_id": "run_d53586fd1b88437c989334438838bbbc", "seq": 12, "ts": 1791618608.2450955}
+
+event: tool.completed
+data: {"message_id": "msg_5cd939a4f4134275a8368cdccb49b256", "tool_name": "session_search", "preview": null, "args": null, "session_id": "haunt-fake", "run_id": "run_d53586fd1b88437c989334438838bbbc", "seq": 13, "ts": 1791618608.248789}
+
+event: assistant.delta
+data: {"message_id": "msg_5cd939a4f4134275a8368cdccb49b256", "delta": "\n\nI", "session_id": "haunt-fake", "run_id": "run_d53586fd1b88437c989334438838bbbc", "seq": 14, "ts": 1791618610.5918536}
+
+event: assistant.delta
+data: {"message_id": "msg_5cd939a4f4134275a8368cdccb49b256", "delta": " found", "session_id": "haunt-fake", "run_id": "run_d53586fd1b88437c989334438838bbbc", "seq": 15, "ts": 1791618610.5921342}
+
+event: assistant.delta
+data: {"message_id": "msg_5cd939a4f4134275a8368cdccb49b256", "delta": " nothing", "session_id": "haunt-fake", "run_id": "run_d53586fd1b88437c989334438838bbbc", "seq": 16, "ts": 1791618610.655388}
+
+event: assistant.delta
+data: {"message_id": "msg_5cd939a4f4134275a8368cdccb49b256", "delta": " about", "session_id": "haunt-fake", "run_id": "run_d53586fd1b88437c989334438838bbbc", "seq": 17, "ts": 1791618610.7279596}
+
+event: assistant.delta
+data: {"message_id": "msg_5cd939a4f4134275a8368cdccb49b256", "delta": " you", "session_id": "haunt-fake", "run_id": "run_d53586fd1b88437c989334438838bbbc", "seq": 18, "ts": 1791618610.7283762}
+
+event: assistant.delta
+data: {"message_id": "msg_5cd939a4f4134275a8368cdccb49b256", "delta": " burning", "session_id": "haunt-fake", "run_id": "run_d53586fd1b88437c989334438838bbbc", "seq": 19, "ts": 1791618610.7972226}
+
+event: assistant.delta
+data: {"message_id": "msg_5cd939a4f4134275a8368cdccb49b256", "delta": " anything", "session_id": "haunt-fake", "run_id": "run_d53586fd1b88437c989334438838bbbc", "seq": 20, "ts": 1791618610.7977655}
+
+event: assistant.delta
+data: {"message_id": "msg_5cd939a4f4134275a8368cdccb49b256", "delta": " last", "session_id": "haunt-fake", "run_id": "run_d53586fd1b88437c989334438838bbbc", "seq": 21, "ts": 1791618610.7981675}
+
+event: assistant.delta
+data: {"message_id": "msg_5cd939a4f4134275a8368cdccb49b256", "delta": " week", "session_id": "haunt-fake", "run_id": "run_d53586fd1b88437c989334438838bbbc", "seq": 22, "ts": 1791618610.798482}
+
+event: assistant.delta
+data: {"message_id": "msg_5cd939a4f4134275a8368cdccb49b256", "delta": ".", "session_id": "haunt-fake", "run_id": "run_d53586fd1b88437c989334438838bbbc", "seq": 23, "ts": 1791618610.7989209}
+
+event: tool.progress
+data: {"message_id": "msg_5cd939a4f4134275a8368cdccb49b256", "tool_name": "_thinking", "delta": "I found nothing about you burning anything last week.", "session_id": "haunt-fake", "run_id": "run_d53586fd1b88437c989334438838bbbc", "seq": 24, "ts": 1791618610.866163}
 
 event: assistant.completed
-data: {"session_id": "haunt-fake", "message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "content": "[sad] Yes: the bread, on Tuesday.", "completed": true, "partial": false, "interrupted": false, "runtime": {"provider": "custom", "model": "fake", "route_source": "global", "requested": {"provider": "", "model": ""}}, "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 19, "ts": 1789614402.1708984}
+data: {"session_id": "haunt-fake", "message_id": "msg_5cd939a4f4134275a8368cdccb49b256", "content": "I found nothing about you burning anything last week.", "completed": true, "partial": false, "interrupted": false, "runtime": {"provider": "custom", "model": "models/qat/gemma-4-31B-it-qat-UD-Q4_K_XL.gguf", "route_source": "global", "requested": {"provider": "", "model": ""}}, "run_id": "run_d53586fd1b88437c989334438838bbbc", "seq": 25, "ts": 1791618610.879825}
 
 event: run.completed
-data: {"session_id": "haunt-fake", "message_id": "msg_9c2e41b7d05a4f6e8b3a17c9e0d24f58", "completed": true, "partial": false, "interrupted": false, "messages": [{"role": "assistant", "content": "Let me look.", "tool_calls": [{"id": "call_3a7f19c2", "call_id": "call_3a7f19c2", "response_item_id": "fc_3a7f19c2", "type": "function", "function": {"name": "session_search", "arguments": "{\"query\": \"burned\"}"}}], "timestamp": 1789614402.712, "finish_reason": "tool_calls", "reasoning": null}, {"role": "tool", "content": "{\"results\": [\"they burned the bread on Tuesday\"]}", "tool_call_id": "call_3a7f19c2", "tool_name": "session_search", "timestamp": 1789614402.762}, {"role": "assistant", "content": "[sad] Yes: the bread, on Tuesday.", "timestamp": 1789614402.812, "finish_reason": "stop", "reasoning": null}], "usage": {"input_tokens": 20, "output_tokens": 10, "total_tokens": 30, "runtime": {"provider": "custom", "model": "fake", "route_source": "global", "requested": {"provider": "", "model": ""}}}, "runtime": {"provider": "custom", "model": "fake", "route_source": "global", "requested": {"provider": "", "model": ""}}, "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 20, "ts": 1789614402.1739984}
+data: {"session_id": "haunt-fake", "message_id": "msg_5cd939a4f4134275a8368cdccb49b256", "completed": true, "partial": false, "interrupted": false, "messages": [{"role": "assistant", "content": "I will check your history.", "tool_calls": [{"id": "oAxhE1nKIRVAYfwqYKYGjYLFslNyd01n", "call_id": "oAxhE1nKIRVAYfwqYKYGjYLFslNyd01n", "response_item_id": "fc_oAxhE1nKIRVAYfwqYKYGjYLFslNyd01n", "type": "function", "function": {"name": "session_search", "arguments": "{\"query\":\"burned\"}"}}], "timestamp": 1791618608.2159765, "finish_reason": "tool_calls", "reasoning": "The user is asking if they \"burned anything last week\".\nI need to check past conversations for this information.\nThe user specifically requested:\n1. A short sentence saying I'll check.\n2. A `session_search` call for \"burned\" in the same message.\n3. Then answer based on the results.\n\nPlan:\n1. Send the introductory sentence and the `session_search` tool call.\n2. Once the tool results are back, I will answer the question.", "reasoning_content": "The user is asking if they \"burned anything last week\".\nI need to check past conversations for this information.\nThe user specifically requested:\n1. A short sentence saying I'll check.\n2. A `session_search` call for \"burned\" in the same message.\n3. Then answer based on the results.\n\nPlan:\n1. Send the introductory sentence and the `session_search` tool call.\n2. Once the tool results are back, I will answer the question."}, {"role": "tool", "content": "{\"success\": true, \"mode\": \"discover\", \"query\": \"burned\", \"detail\": \"adaptive\", \"results\": [], \"count\": 0, \"sessions_searched\": 0, \"link_hint\": \"When referring the user to a session, write its `link` value verbatim inline mid-sentence (it renders as a titled link) — never as markdown, in backticks, on its own line, or next to the title/id/date. To read more around a compact result, scroll: session_search(session_id=..., around_message_id=match_message_id).\"}", "tool_call_id": "oAxhE1nKIRVAYfwqYKYGjYLFslNyd01n", "tool_name": "session_search", "timestamp": 1791618608.2472363}, {"role": "assistant", "content": "I found nothing about you burning anything last week.", "timestamp": 1791618610.8664176, "finish_reason": "stop", "reasoning": "The user asked \"Did I burn anything last week?\".\nI performed a `session_search` for \"burned\".\nThe result was empty (`results: [], count: 0`).\nI need to answer the user. Since no results were found for \"burned\", the answer is that there is no record of it.", "reasoning_content": "The user asked \"Did I burn anything last week?\".\nI performed a `session_search` for \"burned\".\nThe result was empty (`results: [], count: 0`).\nI need to answer the user. Since no results were found for \"burned\", the answer is that there is no record of it."}], "usage": {"input_tokens": 10835, "output_tokens": 210, "total_tokens": 11045, "runtime": {"provider": "custom", "model": "models/qat/gemma-4-31B-it-qat-UD-Q4_K_XL.gguf", "route_source": "global", "requested": {"provider": "", "model": ""}}}, "runtime": {"provider": "custom", "model": "models/qat/gemma-4-31B-it-qat-UD-Q4_K_XL.gguf", "route_source": "global", "requested": {"provider": "", "model": ""}}, "run_id": "run_d53586fd1b88437c989334438838bbbc", "seq": 26, "ts": 1791618610.879832}
 
 event: done
-data: {"session_id": "haunt-fake", "run_id": "run_5f0d6c1e2a9b4c37b1e0a4d2c8f71b93", "seq": 21, "ts": 1789614402.1770983}
+data: {"session_id": "haunt-fake", "run_id": "run_d53586fd1b88437c989334438838bbbc", "seq": 27, "ts": 1791618610.8798492}
 

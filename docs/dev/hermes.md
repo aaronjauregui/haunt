@@ -179,15 +179,20 @@ then `assistant.completed {content, completed, partial, interrupted}`,
 `run.completed|run.failed|run.cancelled`, and `done`; an exception is
 `error {message}` before `done`. `approval.request` is ignored.
 `tool.progress` with `tool_name` `_thinking` is reasoning and is
-ignored. Captured and hand-made frames live in
-`internal/hermes/testdata` (`lookup.sse` and `lookup-silent.sse` are
-written by hand in the shape of the v0.21.6 source).
+ignored; hermes also sends one after each model call with the text that
+call wrote. The frames in `internal/hermes/testdata` are captured from a
+v0.21.6 gateway: `lookup.sse` (interim words, a lookup, the reply),
+`lookup-interim-off.sse` (the same with interim messages off),
+`lookup-silent.sse` (interim words, a lookup, `NO_REPLY`), `failed.sse`
+and `history-failed.json` (a turn whose provider never answered, and the
+session read back after it).
 
 **Interim words.** Text the model writes alongside a tool call ("let me
 look…") streams as `assistant.delta` like any other, and once that model
 call is over hermes sends it again whole as `assistant.commentary`,
 before the call's `tool.started`; `already_streamed` is true when the
-deltas carried all of it. It is not part of `assistant.completed`'s
+deltas carried all of it. The deltas also carry the blank line the model
+writes before its call, which the commentary's text leaves out. It is not part of `assistant.completed`'s
 `content`, which is the turn's last part only, and the first delta after
 a tool round opens with `\n\n`. Hermes sends commentary while
 `display.interim_assistant_messages` is on (the default), also for a
@@ -232,9 +237,16 @@ does, and a turn that wore a face would sit through four minutes and more
 with the person's words queued. The profile sets the cycles to 2: the
 waits of 15 and 30 s ride out a provider's overload, which on z.ai comes
 as bursts of 429s, and the later ones only make a dead provider slower to
-report. A turn that fails anyway is closed by hermes with an assistant
-row of its own, "Your request was not processed…" (or "This turn did not
-complete…" once a tool ran), marked `display_kind: "failed_turn"`.
+report; against a provider refusing connections a turn fails after about
+85 s. A turn that fails anyway ends its stream with `assistant.completed`
+carrying hermes's notice for the person ("custom didn't respond in time
+on any of 3 attempts…") and `completed: false`, then `run.failed`, with
+no `turn_exit_reason`; the client reads it as a failure and the notice
+is not the ghost's words. Hermes closes the turn in the session with an
+assistant row of its own, "Your request was not processed. Send it again
+if you still want me to carry it out." (or "This turn did not
+complete…" once a tool ran), marked `display_kind: "failed_turn"`, which
+`run.failed`'s `messages` also carries.
 
 **Waking.** The boot event starts the waking indicator ("waking up…")
 the moment the ghost is on screen, and the boot turn carries it
