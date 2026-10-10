@@ -68,6 +68,12 @@ func (g *Ghost) firstTokenTimeout() time.Duration {
 	return g.hermesCfg.FirstTokenTimeout()
 }
 
+// stallTimeout is how long a hermes turn that has shown a sign of life may
+// then go quiet before the driver abandons it, from [hermes] stall_timeout.
+func (g *Ghost) stallTimeout() time.Duration {
+	return g.hermesCfg.StallTimeout()
+}
+
 // waiter is one in-flight "the ghost is thinking" indicator.
 type waiter struct {
 	stop chan struct{}

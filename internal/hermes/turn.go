@@ -25,6 +25,12 @@ type TurnRequest struct {
 	// OnTool hears the model's tool calls starting and finishing, for the
 	// why-trace and the working face. May be nil.
 	OnTool func(ToolEvent)
+	// OnEvent hears the name of every event on the stream as it arrives,
+	// before the callbacks above, including the ones nothing else reports
+	// (run.started, tool.progress with the model's reasoning). Keepalive
+	// comments are not events. It is how the driver tells a turn that is
+	// working from one gone quiet. May be nil.
+	OnEvent func(name string)
 }
 
 // ToolEvent is one tool call seen in a turn's stream.

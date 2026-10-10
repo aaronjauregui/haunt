@@ -254,6 +254,9 @@ func (c *Client) turn(ctx context.Context, id string, req TurnRequest) (Reply, e
 		failure   error
 	)
 	err = readSSE(resp.Body, func(event string, data []byte) bool {
+		if req.OnEvent != nil {
+			req.OnEvent(event)
+		}
 		var ev sseEvent
 		if len(data) > 0 {
 			if err := json.Unmarshal(data, &ev); err != nil {
