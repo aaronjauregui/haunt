@@ -13,6 +13,15 @@ import (
 	"testing"
 )
 
+// personsToolsets are toolsets a ghost has when the person chooses what
+// brings them, and haunt leaves on. context_engine comes with a plugin
+// context engine set in context.engine: hermes adds it beside an explicit
+// list (hermes_cli/tools_config.py _get_platform_tools,
+// _context_engine_active) and the agent gives the model the engine's
+// tools (agent/agent_init.py _inject_context_engine_tools), as it does a
+// memory provider's.
+var personsToolsets = []string{"context_engine"}
+
 // imageToolsets is what testdata/toolsets.py prints: every toolset the
 // image knows, with every bundled plugin enabled.
 type imageToolsets struct {
@@ -44,12 +53,13 @@ type imageToolsets struct {
 // hermes-check`, which needs docker and nothing else (no network, no
 // gateway, no model).
 //
-// A toolset passes when apiServerToolsets or disabledToolsets names it,
-// when hermes keeps it off the API server, or when every tool it has is
-// one a ghost is given or one disabledToolsets subtracts. Anything else
-// fails: were a later hermes to widen an explicit list to it, nothing
-// would take its tools away again. A plugin toolset must be named
-// outright, because hermes turns it on beside an explicit list. A disabledToolsets entry hermes does not know is a
+// A toolset passes when apiServerToolsets, disabledToolsets or
+// personsToolsets names it, when hermes keeps it off the API server, or
+// when every tool it has is one a ghost is given or one disabledToolsets
+// subtracts. Anything else fails: were a later hermes to widen an
+// explicit list to it, nothing would take its tools away again. A plugin
+// toolset must be named outright, because hermes turns it on beside an
+// explicit list. A disabledToolsets entry hermes does not know is a
 // warning: it subtracts nothing, and is likely a toolset since renamed.
 func TestHermesToolsets(t *testing.T) {
 	image := os.Getenv("HERMES_IMAGE")
@@ -108,6 +118,8 @@ func TestHermesToolsets(t *testing.T) {
 			verdict = "allowed"
 		case denied[name]:
 			verdict = "disabled"
+		case slices.Contains(personsToolsets, name):
+			verdict = "the person's: comes with the context engine they chose"
 		case ts.Plugin:
 			verdict = "FAIL: a plugin toolset, which hermes turns on beside an explicit list"
 		case img.PlatformGated[name] != nil && !slices.Contains(img.PlatformGated[name], "api_server"):
@@ -156,6 +168,8 @@ func TestHermesToolsets(t *testing.T) {
 
 	// skills.go names hermes's tools for the pinned commit: the tools a
 	// ghost has, and the pattern that finds a subtracted tool in a skill.
+	// given holds apiServerToolsets' tools only, so a context engine's,
+	// like a memory provider's, is not among them.
 	var ghost []string
 	for tool := range given {
 		ghost = append(ghost, tool)

@@ -297,16 +297,18 @@ var apiServerToolsets = []string{"memory", "session_search", "skills", "haunt"}
 
 // disabledToolsets is subtracted last, whatever else enables them: a later
 // hermes widening an explicit toolset list must not hand a ghost a shell.
-// The second line is plugin toolsets, which hermes turns on alongside an
-// explicit list once the person enables the plugin. `make hermes-check`
-// lists every toolset the pinned image knows and fails on one this and
-// apiServerToolsets leave a ghost (hermescheck_test.go).
+// `make hermes-check` lists every toolset the pinned image knows and fails
+// on one this and apiServerToolsets leave a ghost (hermescheck_test.go).
 var disabledToolsets = []string{
 	"terminal", "file", "browser", "code_execution", "delegation", "web",
 	"cronjob", "computer_use", "todo", "vision", "image_gen", "tts",
 	"kanban", "connections", "clarify",
+	// Plugin toolsets, which hermes turns on alongside an explicit list
+	// once the person enables the plugin.
 	"google_meet", "x_search", "video", "video_gen", "spotify", "a2a",
 	"browser-cdp", "browser-use",
+	// Messaging-platform toolsets.
+	"discord", "discord_admin", "feishu_doc", "feishu_drive", "yuanbao",
 }
 
 // noBundledSkills is hermes's opt-out marker for bundled skills
