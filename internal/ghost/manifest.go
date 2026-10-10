@@ -11,7 +11,6 @@ import (
 
 	"github.com/aaronjauregui/haunt/internal/proto"
 	"github.com/aaronjauregui/haunt/internal/shell"
-	hermesskills "github.com/aaronjauregui/haunt/third_party/hermes-skills"
 )
 
 // Manifest is ghost.toml, the package descriptor: identity and
@@ -40,10 +39,13 @@ type PersonaSection struct {
 type HermesSection struct {
 	// BundledSkills names skills from hermes's own library to install in
 	// the ghost's profile. Profiles opt out of that library, since nearly
-	// all of it needs a shell, files or the web; only the few in
-	// third_party/hermes-skills may be named.
+	// all of it needs a shell, files or the web; only bundledSkillNames
+	// may be named, and none is installed.
 	BundledSkills []string `toml:"bundled_skills"`
 }
+
+// bundledSkillNames are the names bundled_skills accepts.
+var bundledSkillNames = []string{"humanizer", "meeting-action-items", "songwriting-and-ai-music", "weekly-review-planning"}
 
 // ToolSection declares one MCP tool server the ghost would like to act
 // through. The driver runs it, so the ghost package never contains a
@@ -269,9 +271,9 @@ func LoadManifest(dir string) (*Manifest, error) {
 		return nil, err
 	}
 	for _, name := range m.Hermes.BundledSkills {
-		if !slices.Contains(hermesskills.Names(), name) {
+		if !slices.Contains(bundledSkillNames, name) {
 			return nil, fmt.Errorf("%s: hermes.bundled_skills: %q is not one a ghost may use (%s)",
-				path, name, strings.Join(hermesskills.Names(), ", "))
+				path, name, strings.Join(bundledSkillNames, ", "))
 		}
 	}
 	seenTool := map[string]bool{}

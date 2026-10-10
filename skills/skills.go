@@ -1,13 +1,14 @@
-// Package skills carries haunt's own hermes skills: routines a ghost on
-// hermes can follow, written against its haunt tools (docs/dev/hermes.md,
-// "Skills"). The driver installs them into every ghost's profile, read-only,
-// so hermes lists them in the prompt and the model loads one with skill_view
-// when it applies.
+// Package skills carries haunt's own skills: routines any ghost can
+// follow, written against the ghost's tools. internal/skill reads them
+// from the embedded FS, lists them in the prompt's skill index, and serves
+// one's body when the model views it.
 //
-// One directory per skill, holding a SKILL.md and nothing else. Each skill
-// declares `requires_toolsets: [mcp-haunt]`: hermes files MCP tools under
-// `mcp-<server>`, and the index hides a skill whose toolsets are missing,
-// so these never show outside a ghost's profile.
+// One directory per skill, holding a SKILL.md and nothing else, in the
+// agentskills format (docs/ghosts/persona-and-skills.md). A skill that
+// cannot be followed without a tool beyond speaking names those tools
+// under `metadata.haunt.requires_tools`, and the index hides it from a
+// ghost that lacks one, so a ghost without the web is never told how to
+// search it.
 package skills
 
 import "embed"
