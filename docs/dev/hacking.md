@@ -147,8 +147,8 @@ other call hermes files under memory makes the trial an error
 "remembered none of it" pass.
 
 What code cannot grade, the content and tone of a reply, a judge grades:
-`claude -p` on your subscription, asked fixed yes/no questions from a rubric (`eval_rubrics_test.go`), one call per
-reply. Every judged reply is held to the tone questions too, which come
+`claude -p` on your subscription, asked fixed yes/no questions from a
+rubric (`eval_rubrics_test.go`), one call per reply. Every judged reply is held to the tone questions too, which come
 from wisp's persona and the rules every ghost has.
 
 A rubric is only trusted once the judge agrees with its anchors: saved
