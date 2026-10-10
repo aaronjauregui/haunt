@@ -78,6 +78,30 @@ unprompted = "never"            # when a ghost may read on a turn you did not st
 # notes   = "~/notes"
 # recipes = "~/Documents/recipes"
 
+[model]                         # the model persona ghosts think with; see below
+base_url = ""                   # OpenAI-compatible, up to its version: "http://127.0.0.1:8080/v1" for llama-server
+name = ""                       # the model as the server knows it, e.g. "glm-5.3"
+api_key_env = ""                # the variable holding the key; named, never stored here. Empty sends none
+context_length = 0              # the model's context window in tokens
+trust = ""                      # "local" or "cloud"; empty judges by base_url's host
+# fold = false                  # the words in the first call; default false for local, true for cloud
+thinking = ""                   # "off", "low", "medium" or "high"; empty: the provider's default
+first_token_timeout = 30        # seconds a call may go without a word before it is given up on
+stall_timeout = 120             # seconds a call under way may then go quiet
+
+[model.sampling]                # each unset key is the provider's default
+# temperature = 0.8
+# top_p = 0.95
+# min_p = 0.05                  # this and the rest are llama.cpp's; other providers ignore them
+# repeat_penalty = 1.0
+# dry_multiplier = 0.8
+# xtc_probability = 0.0
+
+# [model.ghost.wisp]            # one ghost, by its [ghost] name; any key above, replacing the troupe's
+# name = "gemma-4-31b"
+# [model.ghost.wisp.sampling]   # replaces the troupe's sampling key by key
+# temperature = 1.1
+
 [hermes]                        # the brain; see hermes.md
 command = ["hermes"]
 home = ""                       # $HERMES_HOME, else ~/.hermes
@@ -100,6 +124,38 @@ Any OpenAI-compatible endpoint works for images and vision: Ollama,
 llama.cpp server, vLLM, cloud providers. Cloud keys are named, not
 stored: set `api_key_env` and haunt reads that variable from its own
 environment.
+
+## The model
+
+`[model]` is one OpenAI-compatible chat completions endpoint: llama.cpp's
+`llama-server`, Ollama, vLLM, z.ai, OpenAI or OpenRouter. Every resident
+ghost uses it unless its own `[model.ghost.<name>]` table says otherwise;
+a key set there replaces the troupe's for that ghost alone, and the
+rest carry over. A ghost's package never chooses a model.
+
+Where the model runs decides how far it is trusted. A `base_url` on this
+machine or the private network (`localhost`, `127.0.0.1`, `[::1]`,
+`10.x`, `172.16-31.x`, `192.168.x`, IPv6 `fd..`) is local; any other host
+is cloud. A host name is judged by its text, never by what it resolves
+to, so a model on your own network reached by name is cloud until
+`trust = "local"` says otherwise. `trust = "cloud"` treats a local server
+as cloud.
+
+`fold` decides how a ghost's turn is shaped. Unfolded, the model first
+decides what to do and then writes the words in a second call; folded,
+it writes them in the first. A second call costs a local server little
+and a cloud provider a round trip, hence the defaults.
+
+`thinking` caps the model's reasoning. When a call has it off, haunt
+sends both `reasoning_effort` and `chat_template_kwargs.enable_thinking =
+false`, since providers differ on which they read; a provider ignores
+the one it does not know. The sampling keys are sent only when set.
+
+A call the provider refuses with 429 or a 5xx is tried three times in
+all, a second and then two apart, or after the provider's own
+`Retry-After` when that is under a minute. A call that says nothing for
+`first_token_timeout` seconds, or stops for `stall_timeout` once under
+way, is given up on.
 
 ## Drawing with your own ComfyUI workflow
 

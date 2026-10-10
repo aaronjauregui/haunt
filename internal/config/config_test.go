@@ -317,3 +317,86 @@ func TestAnImpossibleScaleIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// [model.ghost.<name>] changes the model for that ghost alone, key by key,
+// and sampling field by field.
+func TestConfigOverride(t *testing.T) {
+	write(t, `
+[model]
+base_url = "http://127.0.0.1:8080/v1"
+name = "gemma-4"
+context_length = 32768
+thinking = "low"
+
+[model.sampling]
+temperature = 0.7
+min_p = 0.05
+
+[model.ghost.wisp]
+name = "x"
+fold = true
+
+[model.ghost.wisp.sampling]
+temperature = 1.1
+`)
+	f, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wisp := f.ModelFor("wisp")
+	if wisp.Name != "x" {
+		t.Errorf("wisp's name = %q, want x", wisp.Name)
+	}
+	if wisp.BaseURL != "http://127.0.0.1:8080/v1" || wisp.ContextLength != 32768 || wisp.Thinking != "low" {
+		t.Errorf("wisp lost the troupe's keys: %+v", wisp)
+	}
+	if !wisp.Fold() {
+		t.Error("wisp's fold = true was lost")
+	}
+	if s := wisp.Sampling; s.Temperature == nil || *s.Temperature != 1.1 || s.MinP == nil || *s.MinP != 0.05 {
+		t.Errorf("wisp's sampling = %+v", s)
+	}
+	other := f.ModelFor("ember")
+	if other.Name != "gemma-4" || other.Fold() {
+		t.Errorf("ember = %q fold %v, want the troupe's gemma-4, unfolded on a local server", other.Name, other.Fold())
+	}
+	if s := other.Sampling; s.Temperature == nil || *s.Temperature != 0.7 {
+		t.Errorf("ember's sampling = %+v", s)
+	}
+	if !other.IsLocal() {
+		t.Error("a loopback base_url is not local")
+	}
+}
+
+// A missing [model] is the zero config: nothing to reach, nothing assumed.
+func TestNoModelIsEmpty(t *testing.T) {
+	write(t, "[quiet]\nhours = []\n")
+	f, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := f.ModelFor("wisp"); c.BaseURL != "" || c.Name != "" || c.Sampling.Temperature != nil {
+		t.Errorf("ModelFor with no [model] = %+v", c)
+	}
+}
+
+func TestABadModelSectionNamesItself(t *testing.T) {
+	for _, tc := range []struct{ body, want string }{
+		{"[model]\ntrust = \"house\"\n", `[model] trust "house"`},
+		{"[model]\nthinking = \"lots\"\n", `[model] thinking "lots"`},
+		{"[model]\nbase_url = \"127.0.0.1:8080\"\n", `[model] base_url "127.0.0.1:8080"`},
+		{"[model]\nstall_timeout = -1\n", `[model] stall_timeout -1`},
+		{"[model.ghost.\"my ghost\"]\ntrust = \"x\"\n", `[model.ghost."my ghost"] trust "x"`},
+	} {
+		write(t, tc.body)
+		_, err := Load()
+		if err == nil {
+			t.Errorf("%q loaded", tc.body)
+			continue
+		}
+		path, _ := Path()
+		if !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%q: error %q does not name %s and %s", tc.body, err, path, tc.want)
+		}
+	}
+}

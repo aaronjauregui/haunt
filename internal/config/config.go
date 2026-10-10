@@ -17,6 +17,7 @@ package config
 import (
 	"fmt"
 	"maps"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -29,6 +30,7 @@ import (
 
 	"github.com/aaronjauregui/haunt/internal/backend"
 	"github.com/aaronjauregui/haunt/internal/hermes"
+	"github.com/aaronjauregui/haunt/internal/model"
 	"github.com/aaronjauregui/haunt/internal/quiet"
 	"github.com/aaronjauregui/haunt/internal/session"
 )
@@ -51,6 +53,9 @@ type File struct {
 	// Hermes is where the ghosts' brain lives (docs/dev/hermes.md).
 	Hermes     hermes.Config
 	Appearance AppearanceConfig
+	// Model is the model persona ghosts think with; ModelFor is one
+	// ghost's.
+	Model ModelConfig
 }
 
 // root is the on-disk shape. Separate from File so that File can carry
@@ -64,6 +69,7 @@ type root struct {
 	Files      FilesConfig      `toml:"files"`
 	Hermes     hermes.Config    `toml:"hermes"`
 	Appearance AppearanceConfig `toml:"appearance"`
+	Model      ModelConfig      `toml:"model"`
 }
 
 // Path returns the user config file location. HAUNT_CONFIG_DIR overrides
@@ -111,6 +117,7 @@ func Load() (*File, error) {
 		Files:      r.Files,
 		Hermes:     r.Hermes,
 		Appearance: r.Appearance,
+		Model:      r.Model,
 	}
 	if err := f.Awareness.derive(path); err != nil {
 		return nil, err
@@ -119,6 +126,9 @@ func Load() (*File, error) {
 		return nil, err
 	}
 	if err := f.Appearance.validate(path); err != nil {
+		return nil, err
+	}
+	if err := f.Model.validate(path); err != nil {
 		return nil, err
 	}
 	// What [backend] points at is checked here rather than on first use,
@@ -441,4 +451,76 @@ func (f *File) ShellScale(ghost string) float64 {
 		return *f.Appearance.Scale
 	}
 	return 1
+}
+
+// ModelConfig is the [model] section: the OpenAI-compatible endpoint the
+// persona ghosts think with, and [model.ghost.<name>] tables that change
+// it for one ghost. A ghost's manifest never names a model; the person
+// picks it here, per troupe or per ghost.
+type ModelConfig struct {
+	model.Config
+	// Ghost holds per-ghost changes, keyed by [ghost] name. Each key a
+	// ghost's table sets replaces the troupe's; sampling is replaced field
+	// by field.
+	Ghost map[string]model.Config `toml:"ghost"`
+}
+
+// ModelFor is the model one ghost thinks with: [model] with its
+// [model.ghost.<name>] table laid over it.
+func (f *File) ModelFor(ghost string) model.Config {
+	c := f.Model.Config
+	if o, ok := f.Model.Ghost[ghost]; ok {
+		c = c.Over(o)
+	}
+	return c
+}
+
+// validate refuses values that would only fail later, at the first
+// turn, far from the file that holds them. path is only for error
+// messages.
+func (c *ModelConfig) validate(path string) error {
+	if err := checkModel(path, "[model]", c.Config); err != nil {
+		return err
+	}
+	for _, name := range slices.Sorted(maps.Keys(c.Ghost)) {
+		if err := checkModel(path, "[model.ghost."+tomlKey(name)+"]", c.Ghost[name]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkModel(path, section string, c model.Config) error {
+	if c.BaseURL != "" {
+		u, err := url.Parse(c.BaseURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("parsing %s: %s base_url %q: use an http or https URL, such as %q",
+				path, section, c.BaseURL, "http://127.0.0.1:8080/v1")
+		}
+	}
+	switch c.Trust {
+	case "", model.TrustLocal, model.TrustCloud:
+	default:
+		return fmt.Errorf("parsing %s: %s trust %q: use %q or %q, or leave it out to judge by base_url",
+			path, section, c.Trust, model.TrustLocal, model.TrustCloud)
+	}
+	switch c.Thinking {
+	case "", model.ThinkingOff, model.ThinkingLow, model.ThinkingMedium, model.ThinkingHigh:
+	default:
+		return fmt.Errorf("parsing %s: %s thinking %q: use %q, %q, %q or %q, or leave it out for the provider's default",
+			path, section, c.Thinking, model.ThinkingOff, model.ThinkingLow, model.ThinkingMedium, model.ThinkingHigh)
+	}
+	for _, n := range []struct {
+		key string
+		v   int
+	}{
+		{"context_length", c.ContextLength},
+		{"first_token_timeout", c.FirstTokenSeconds},
+		{"stall_timeout", c.StallSeconds},
+	} {
+		if n.v < 0 {
+			return fmt.Errorf("parsing %s: %s %s %d: use a number above 0, or leave it out", path, section, n.key, n.v)
+		}
+	}
+	return nil
 }
