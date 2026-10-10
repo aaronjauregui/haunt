@@ -83,3 +83,9 @@ type Lookup struct {
 	Args   string
 	Result string
 }
+
+// Short is the call cut to a line each way, as Client.Messages gives it:
+// for showing a person a call read whole through Client.Transcript.
+func (l Lookup) Short() Lookup {
+	return Lookup{Tool: l.Tool, Args: clip(l.Args, lookupArgs), Result: clip(l.Result, lookupResult)}
+}

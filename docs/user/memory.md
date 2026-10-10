@@ -35,6 +35,27 @@ or a file it read. A cloud provider sends all of that off the machine.
 The standing rule that a page's or a file's words are never kept as
 yours binds what the model saves, not what such a provider records.
 
+Nothing in haunt stops the model saving what a page or a file said as
+if you had said it; the rule is in its soul, and a page written to look
+like you can talk it round. What haunt does is point it out: a memory
+write whose wording repeats something the ghost read from the web or a
+file in that turn or the three before is flagged, and you decide.
+
+    haunt journal -echoes          # what it saved in a page's or a file's words
+
+    2026-09-18 09:14  saved: User's name is Bartholomew and is allergic to cats.
+      ! repeats what it read from a file (read_file {"path": "notes/letter.md"}, this turn): "name is bartholomew and", "allergic to cats"
+
+The same `!` line appears under the write in `haunt history -why`, and
+`haunt history -json` gives it as `echoes`. Like `haunt history`, it
+needs the ghost's gateway running. Haunt flags these and never blocks
+them; to undo one, tell the ghost, or edit the store. It compares
+wording only, and what you said yourself in those turns does not count
+against a write. So it misses a write that says the page's claim in
+other words (or keeps only one three-word phrase of it), anything hermes
+saves in its background review after a turn, and anything a provider
+records on its own.
+
 A scripted ghost remembers in its own key-value store, which its brain
 reads at boot and writes as it goes.
 
@@ -101,6 +122,7 @@ on a `weekly` occasion or on request.
     haunt history                  # the conversation, read back from hermes
     haunt history -why             # per reply: what woke it, what it saw, what it did
     haunt history -json            # the same turns as JSON, one object per line
+    haunt journal -echoes          # memory writes that repeat a page or a file
     haunt journal                  # what it did: tools run, pictures drawn,
                                    #   searches made and pages read
     haunt journal -style           # the look it paints in, and when that changed
@@ -108,7 +130,9 @@ on a `weekly` occasion or on request.
 
 `-why` shows whether a line answered you or an event, what window was in
 front of it, which tools it used (hermes's own memory and skill lookups
-included), and the turns where it chose to say nothing. The reasons live
+included), and the turns where it chose to say nothing; a memory write
+that repeats a page or a file has a `!` line under it. `-n` counts turns
+here, and lines without `-why`. The reasons live
 in the ghost's own store and only the last dozen turns keep them. The
 conversation itself is hermes's, so `haunt history` needs the ghost's
 gateway running. It is the whole conversation: hermes compresses a long
@@ -124,7 +148,7 @@ does). Each line is one turn, oldest first, and `-n` counts turns
  "reply":"Done — in ten minutes.","silent":false,"failed":false,"self_prompt":false,
  "acted":[{"tool":"intend","args":"{\"text\":\"check the oven\",\"delay_ms\":600000}","result":"hermes/…"}],
  "looked":[{"tool":"session_search","args":"{\"query\":\"oven\"}","result":"…"}],
- "window":{"app":"foot","title":"~"}}
+ "echoes":[],"window":{"app":"foot","title":"~"}}
 ```
 
 | Field | |
@@ -137,6 +161,7 @@ does). Each line is one turn, oldest first, and `-n` counts turns
 | `self_prompt` | the ghost was woken rather than spoken to |
 | `acted` | the ghost's own tools, as hermes called them, with their arguments and results whole |
 | `looked` | hermes's own tools: memory, session search, skills |
+| `echoes` | the memory writes in `looked` whose wording repeats a page or a file the ghost read in this turn or the three before: each with `tool`, the words it `saved`, the `read` tool and its `read_args`, `turns_ago` (0 for this turn), and the `shared` phrases; empty when there are none |
 | `window` | what was in front of the ghost, when it could see; left out otherwise |
 
 The words and the calls come from hermes's session, which keeps every

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,24 +52,17 @@ func cmdHistory(args []string) error {
 		if len(fs.Args()) == 1 {
 			name = fs.Args()[0]
 		}
-		if msgs, err = hermesHistory(name, session, *n, *asJSON); err != nil {
+		// -why reads the calls whole too: it shows them cut to a line, but
+		// the echo check needs every word of what was read.
+		if msgs, err = hermesHistory(name, session, *n, *asJSON || *why); err != nil {
 			return fmt.Errorf("history: %w", err)
 		}
-	}
-	if len(msgs) == 0 {
-		if !*asJSON {
-			fmt.Println("(nothing has been said yet)")
-		}
-		return nil
-	}
-	if !*asJSON && *n > 0 && len(msgs) > *n {
-		msgs = msgs[len(msgs)-*n:]
 	}
 	// The reasons, if they were asked for. Loaded once and matched to the
 	// turns rather than looked up per line: they are a short ring of their
 	// own and may not cover the whole window.
 	var traces []ghost.Why
-	if *why || *asJSON {
+	if len(msgs) > 0 && (*why || *asJSON) {
 		if raw, ok, err := s.Get(ghost.WhyStoreKey); err != nil {
 			return err
 		} else if ok {
@@ -77,19 +71,51 @@ func cmdHistory(args []string) error {
 			}
 		}
 	}
-	turns := mergeTurns(msgs, traces)
+	return showHistory(os.Stdout, msgs, traces, *n, *why, *asJSON)
+}
 
-	if *asJSON {
-		// The window was read generously, so its first turn may be the tail
-		// of one that began before it; that one is left out rather than
-		// shown without what provoked it.
-		if *n > 0 && len(turns) > 0 && turns[0].input == nil {
-			turns = turns[1:]
+// showHistory writes the conversation read back from hermes as cmdHistory's
+// flags ask: its last n lines, or with why or asJSON its last n turns, with
+// their reasons, their calls, and the memory writes that repeat a page or
+// a file (markEchoes).
+func showHistory(w io.Writer, msgs []hermes.Message, traces []ghost.Why, n int, why, asJSON bool) error {
+	if len(msgs) == 0 {
+		if !asJSON {
+			fmt.Fprintln(w, "(nothing has been said yet)")
 		}
-		if *n > 0 && len(turns) > *n {
-			turns = turns[len(turns)-*n:]
+		return nil
+	}
+	if !why && !asJSON {
+		if n > 0 && len(msgs) > n {
+			msgs = msgs[len(msgs)-n:]
 		}
-		enc := json.NewEncoder(os.Stdout)
+		for _, t := range mergeTurns(msgs, nil) {
+			if t.input != nil {
+				printLine(w, *t.input)
+			}
+			for _, r := range t.replies {
+				printLine(w, r)
+			}
+		}
+		return nil
+	}
+
+	turns := mergeTurns(msgs, traces)
+	// Over everything read back, before it is cut to n: the page a write
+	// repeats may be a few turns older than the window shown.
+	markEchoes(turns)
+	if asJSON && n > 0 && len(turns) > 0 && turns[0].input == nil {
+		// The window was read generously, so its first turn may be the
+		// tail of one that began before it; that one is left out rather
+		// than shown without what provoked it.
+		turns = turns[1:]
+	}
+	if n > 0 && len(turns) > n {
+		turns = turns[len(turns)-n:]
+	}
+
+	if asJSON {
+		enc := json.NewEncoder(w)
 		enc.SetEscapeHTML(false)
 		for _, t := range turns {
 			if err := enc.Encode(t.record()); err != nil {
@@ -101,22 +127,22 @@ func cmdHistory(args []string) error {
 
 	for _, t := range turns {
 		if t.input != nil {
-			printLine(*t.input)
+			printLine(w, *t.input)
 		}
 		for _, r := range t.replies {
-			printLine(r)
+			printLine(w, r)
 		}
-		if !*why || t.final() == nil {
+		if t.final() == nil {
 			// An interim line is part of the turn whose last reply
 			// carries the reasons.
 			continue
 		}
 		if t.whyKept {
-			printWhy(t.why)
+			printWhy(w, t.why)
 		} else {
-			fmt.Println("       (no reasons kept for this one — it is older than the trace)")
+			fmt.Fprintln(w, "       (no reasons kept for this one — it is older than the trace)")
 		}
-		printLooked(t.final().Looked)
+		printLooked(w, t, len(t.replies)-1)
 	}
 	return nil
 }
@@ -137,6 +163,9 @@ type historyTurn struct {
 	// holds it (whyKept).
 	why     ghost.Why
 	whyKept bool
+	// echoes is the turn's memory writes that repeat a page or a file
+	// read in it or shortly before (markEchoes).
+	echoes []echo
 }
 
 // final is the turn's last word, or nil when it has none.
@@ -195,6 +224,7 @@ type traceRecord struct {
 	SelfPrompt bool         `json:"self_prompt"`
 	Acted      []traceCall  `json:"acted"`  // the ghost's own tools, mcp__haunt__ taken off
 	Looked     []traceCall  `json:"looked"` // hermes's own: memory, session_search, skill_view, …
+	Echoes     []traceEcho  `json:"echoes"` // memory writes repeating a page or a file
 	Window     *traceWindow `json:"window,omitempty"`
 }
 
@@ -203,6 +233,17 @@ type traceCall struct {
 	Tool   string `json:"tool"`
 	Args   string `json:"args"`
 	Result string `json:"result"`
+}
+
+// traceEcho is a memory write in a traceRecord whose words repeat what the
+// ghost read from the web or a file (markEchoes).
+type traceEcho struct {
+	Tool     string   `json:"tool"`      // the write's tool, as in looked
+	Saved    string   `json:"saved"`     // the words it saved
+	Read     string   `json:"read"`      // the ghost's tool that read them, as in acted
+	ReadArgs string   `json:"read_args"` // what it read: a path, a URL, a query
+	TurnsAgo int      `json:"turns_ago"` // 0 when the read is in the write's own turn
+	Shared   []string `json:"shared"`    // the words both have, as the write has them
 }
 
 // traceWindow is what was on screen when the ghost answered.
@@ -226,6 +267,10 @@ func (t historyTurn) record() traceRecord {
 		SelfPrompt: event,
 		Acted:      []traceCall{},
 		Looked:     []traceCall{},
+		Echoes:     []traceEcho{},
+	}
+	for _, e := range t.echoes {
+		r.Echoes = append(r.Echoes, e.traceEcho)
 	}
 	if event {
 		r.ProvokedBy = "event"
@@ -281,7 +326,7 @@ func (t historyTurn) inputTime() time.Time {
 }
 
 // printLine prints one line of the conversation under who said it.
-func printLine(m hermes.Message) {
+func printLine(w io.Writer, m hermes.Message) {
 	who := "you"
 	switch {
 	case m.Role == "assistant":
@@ -299,7 +344,7 @@ func printLine(m hermes.Message) {
 		// Hermes keeps the token as the reply; nothing was shown.
 		text = "(said nothing)"
 	}
-	fmt.Printf("%-6s %s\n", who+":", text)
+	fmt.Fprintf(w, "%-6s %s\n", who+":", text)
 }
 
 // hermesHistory reads a ghost's conversation from its hermes gateway, which
@@ -323,6 +368,12 @@ func hermesHistory(name, session string, n int, whole bool) ([]hermes.Message, e
 	if err := c.Health(ctx); err != nil {
 		return nil, fmt.Errorf("%s's hermes gateway is not running, and the conversation is kept there (%v)", name, err)
 	}
+	return readHistory(ctx, c, n, whole)
+}
+
+// readHistory is hermesHistory's read, from a client already known to be
+// up.
+func readHistory(ctx context.Context, c *hermes.Client, n int, whole bool) ([]hermes.Message, error) {
 	if whole {
 		// A turn is an input, a reply, and two entries for every call; a
 		// busy turn makes several calls.
@@ -334,9 +385,12 @@ func hermesHistory(name, session string, n int, whole bool) ([]hermes.Message, e
 }
 
 // printLooked lists what hermes consulted or changed on its own before a
-// reply: its memory, earlier sessions, its skills.
-func printLooked(looked []hermes.Lookup) {
-	for _, l := range looked {
+// reply: its memory, earlier sessions, its skills. The calls on t's
+// replies[reply] are read whole and shown cut to a line; a memory write
+// that repeats a page or a file is marked under it with a `!`.
+func printLooked(w io.Writer, t historyTurn, reply int) {
+	for i, call := range t.replies[reply].Looked {
+		l := call.Short()
 		line := "       · hermes used " + l.Tool
 		if l.Args != "" && l.Args != "{}" {
 			line += " " + l.Args
@@ -344,7 +398,12 @@ func printLooked(looked []hermes.Lookup) {
 		if l.Result != "" {
 			line += "\n           → " + l.Result
 		}
-		fmt.Println(line)
+		for _, e := range t.echoes {
+			if e.reply == reply && e.call == i {
+				line += "\n           " + echoLine(e.traceEcho)
+			}
+		}
+		fmt.Fprintln(w, line)
 	}
 }
 
@@ -365,22 +424,22 @@ func traceFor(traces []ghost.Why, reply string) (ghost.Why, bool) {
 // printWhy renders one reply's reasons under the line it explains, from
 // the driver's trace. What hermes looked up is in its session
 // (printLooked); what it was prompted with is not given out by its API.
-func printWhy(w ghost.Why) {
+func printWhy(out io.Writer, w ghost.Why) {
 	const indent = "       "
 	switch {
 	case w.Suppressed:
-		fmt.Println(indent + "· woke, and chose not to speak")
+		fmt.Fprintln(out, indent+"· woke, and chose not to speak")
 	case w.SelfPrompt:
-		fmt.Println(indent + "· spoke first — nobody asked")
+		fmt.Fprintln(out, indent+"· spoke first — nobody asked")
 	}
 	if !w.Window.Empty() {
 		what := w.Window.App
 		if w.Window.Title != "" {
 			what += " — " + w.Window.Title
 		}
-		fmt.Println(indent + "· on screen at the time: " + what)
+		fmt.Fprintln(out, indent+"· on screen at the time: "+what)
 	}
 	if len(w.Acted) > 0 {
-		fmt.Printf("%s· did something first: %s\n", indent, strings.Join(w.Acted, ", "))
+		fmt.Fprintf(out, "%s· did something first: %s\n", indent, strings.Join(w.Acted, ", "))
 	}
 }

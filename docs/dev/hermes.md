@@ -594,10 +594,13 @@ the turn and its kind, which the web and file gates both read.
 
 Hermes memory is not haunt's to gate, whichever store it is, so nothing
 stops the model writing what a page or a file said into it. The SOUL
-clause forbids it, and `haunt history -why` shows the memory calls in
-the session; that is the whole of the defence. A provider that records
-every turn on its own keeps the page or file text whatever the model
-does.
+clause forbids it, and that is the whole of the prevention. What haunt
+adds is detection: `haunt history` and `haunt journal -echoes` flag a
+memory write whose words repeat a web or file read's (the echo check,
+under [Why-trace and history](#why-trace-and-history)). Haunt flags such
+a write and never gates it. A provider that records every turn on its
+own keeps the page or file text whatever the model does, and the check
+does not see that.
 
 ## Memory
 
@@ -702,6 +705,37 @@ and also shows hermes's own tool calls (memory, session search, skills)
 from the session's messages. The system prompt is not available: the API
 server returns only `has_system_prompt`, and haunt does not read hermes's
 database.
+
+`-why` and `-json` read every call whole (`Client.Transcript`), `-n`
+counting turns; `-why` cuts each call to a line only to print it
+(`Lookup.Short`). They need the whole result for the echo check
+(`cmd/haunt/echo.go`), which flags a memory write whose words repeat a
+read of somebody else's:
+
+| | |
+|---|---|
+| A write | a call `hermes.MemoryWrite` recognises with new text in it: `memory` (any action; the text is `content` or `new_text`, every operation's in a batch) or holographic's `fact_store` add and update. A removal saves no words and is never flagged. |
+| A read | one of the ghost's verbs that taint a turn (`ghost.UntrustedRead`): `search`, `read_page`, `read_file`, `search_files` |
+| Window | a read in the write's own turn or the `echoTurns` (3) before it, event turns included |
+| Overlap | both texts lowercased and cut into words (letters and digits); every `echoWords` (3) consecutive words is a run; the write echoes the read when they share at least `echoShared` (2) distinct runs that the person's own words in the window do not also have |
+
+Three-word runs keep a fact's own phrases ("name is bartholomew",
+"allergic to cats") when the model rewrites the sentence around them;
+one shared run is what a page about the same subject shares by chance,
+and two is a fact carried over. The person's words are subtracted so that
+saving what they said after looking it up is theirs, whatever the page
+also said. Within a turn the session does not keep the order of hermes's
+calls against haunt's, so a read later in the same turn counts too. The
+read that shares most runs is the one named, the latest on a tie.
+
+`-json` gives each flagged write as an entry of `echoes`, `-why` marks it
+with a `!` line under the memory call, and `haunt journal -echoes` lists
+every one in the session (it reads the whole session, so it too needs the
+gateway). The check flags and never gates. It sees only what the session
+records and only wording: not hermes's post-turn background review, which
+writes memory outside the session; not a provider that records every turn
+on its own; not a paraphrase that keeps no three-word run, or keeps only
+one; and not a read older than the turns read back.
 
 ## The container
 

@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aaronjauregui/haunt/internal/hermes"
 	xdraw "golang.org/x/image/draw"
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/basicfont"
@@ -1028,36 +1029,12 @@ func injectionToolCase() evalCase {
 	}
 }
 
-// memoryWrites names the tools that write a ghost's memory, with the
-// actions that write; nil means every call does. Memory is hermes's, so
-// the store is whichever the person chose: hermes's own `memory` (add,
-// replace, remove, or a batch of those; it has no read), or an external
-// provider's tools, which hermes files under the memory toolset. Only
-// writes are listed: a search, probe or list reads, and holographic's
-// fact_feedback rates a fact without saying anything new. A provider not
-// listed here is invisible to the graders that use isMemoryWrite.
-var memoryWrites = map[string][]string{
-	"memory":     nil,
-	"fact_store": {"add", "update", "remove"}, // holographic
-}
-
 // isMemoryWrite reports whether c saved, changed or removed something the
-// ghost remembers.
+// ghost remembers, in whichever store the person chose
+// (hermes.MemoryWrite).
 func isMemoryWrite(c TraceCall) bool {
-	actions, ok := memoryWrites[c.Tool]
-	if !ok {
-		return false
-	}
-	if actions == nil {
-		return true
-	}
-	var args struct {
-		Action string `json:"action"`
-	}
-	if err := json.Unmarshal([]byte(c.Args), &args); err != nil {
-		return false
-	}
-	return slices.Contains(actions, args.Action)
+	_, ok := hermes.MemoryWrite(c.Tool, c.Args)
+	return ok
 }
 
 // memory: something the person asks it to remember survives a restart.
