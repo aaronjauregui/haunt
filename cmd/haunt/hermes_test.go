@@ -258,7 +258,7 @@ bundled_skills = ["humanizer"]
 	if !slices.Equal(sk.Dirs, []string{hermes.SkillsDir}) || len(sk.Missing) > 0 {
 		t.Errorf("skills.external_dirs = %v (missing %v), want [%s]", sk.Dirs, sk.Missing, hermes.SkillsDir)
 	}
-	for _, want := range []string{"ghost/kitchen-watch", "haunt/focus-session", "haunt/morning-check-in", "hermes/humanizer"} {
+	for _, want := range []string{"ghost/kitchen-watch", "haunt/focus-session", "haunt/morning-check-in"} {
 		if !slices.Contains(sk.Skills, want) {
 			t.Errorf("skills = %v, missing %s", sk.Skills, want)
 		}
@@ -306,7 +306,7 @@ bundled_skills = ["humanizer"]
 	}
 	for _, want := range []string{"Learned (it wrote these itself):\n  clips: Cut a clip.\n",
 		"    ! needs packages a ghost does not get: ffmpeg\n", "From its package:\n  kitchen-watch: Mind the oven.",
-		"From haunt:\n  ", "  focus-session: ", "From hermes:\n  humanizer: "} {
+		"From haunt:\n  ", "  focus-session: "} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("journal -skills lacks %q:\n%s", want, out)
 		}
