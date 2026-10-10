@@ -16,7 +16,7 @@ haunt ls | rm <name>
 haunt switch <name> | add <name> | drop <name>
 haunt perms [name] | perms grant|revoke <capability> [name]
 haunt shush [duration] | unshush
-haunt journal [-intentions] [-skills] [-style [-reset]] [name | -state DIR]
+haunt journal [-intentions] [-echoes] [-skills] [-style [-reset]] [name | -state DIR]
 haunt history [-n N] [-why | -json] [name | -state DIR]
 haunt mcp-serve -ghost NAME
 ```
@@ -36,8 +36,8 @@ haunt mcp-serve -ghost NAME
 | `switch`, `add`, `drop` | This ghost alone; this one as well; this one no longer. The set is read when `run` starts. |
 | `perms` | What a ghost asked for and what it has. `grant` and `revoke` take a capability, or `tool:<server>.<tool>`, and apply to a running ghost within seconds. |
 | `shush`, `unshush` | Quiet now, for an hour or the given duration; and back. |
-| `journal` | What the ghost did. `-intentions` is what it is still meaning to do; `-skills` lists its routines by source, including the ones it wrote itself; `-style` is the style it draws its pictures in, and `-style -reset` puts it back to the one its package ships. |
-| `history` | The conversation, read from the ghost's hermes gateway, which must be running. `-why` adds what woke it, what it saw and what it did before each reply; `-json` gives the turns as JSON with every tool call whole ([memory](memory.md#why-did-it-say-that)). |
+| `journal` | What the ghost did. `-intentions` is what it is still meaning to do; `-echoes` lists what it saved to memory in the words of a page or a file it read, and like `history` needs the gateway running; `-skills` lists its routines by source, including the ones it wrote itself; `-style` is the style it draws its pictures in, and `-style -reset` puts it back to the one its package ships. |
+| `history` | The conversation, read from the ghost's hermes gateway, which must be running. `-why` adds what woke it, what it saw and what it did before each reply, with a `!` under a memory write that repeats a page or a file; `-json` gives the turns as JSON with every tool call whole ([memory](memory.md#why-did-it-say-that)). |
 | `mcp-serve` | The MCP stdio server hermes spawns to reach a running ghost. Not meant to be run by hand. |
 
 ## haunt-seriko

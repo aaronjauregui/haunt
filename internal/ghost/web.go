@@ -96,6 +96,30 @@ func (s taintSource) what() string {
 	}
 }
 
+// taintingReads is the ghost's verbs whose results can carry somebody
+// else's words, by the source they taint a turn with.
+var taintingReads = map[string]taintSource{
+	"search":       taintWeb,
+	"read_page":    taintWeb,
+	"read_file":    taintFile,
+	"search_files": taintFile,
+}
+
+// UntrustedRead reports whether the ghost's verb tool brings somebody
+// else's words into a turn, and from where, as the object of "read": "the
+// web" or "a file". It is the taint table read from outside the turn, for
+// `haunt history`, which checks what hermes saved to memory against what
+// these returned (docs/dev/hermes.md, Taint). A result that carried no
+// such words, such as a refusal, shares none with anything saved, so the
+// table needs no finer test than the name.
+func UntrustedRead(tool string) (from string, ok bool) {
+	src, ok := taintingReads[tool]
+	if !ok {
+		return "", false
+	}
+	return src.what(), true
+}
+
 // startTurn records what the turn is, and that nothing it did not write
 // has entered it yet.
 func (g *Ghost) startTurn(person bool, kind string) {

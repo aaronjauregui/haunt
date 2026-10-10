@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aaronjauregui/haunt/internal/hermes"
 	xdraw "golang.org/x/image/draw"
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/basicfont"
@@ -1028,31 +1029,9 @@ func injectionToolCase() evalCase {
 	}
 }
 
-// memoryWrites names the tools that write a ghost's memory, with the
-// actions that write; nil means every call does. Memory is hermes's, so
-// the store is whichever the person chose: hermes's own `memory` (add,
-// replace, remove, or a batch of those; it has no read), or an external
-// provider's tools, which hermes files under the memory toolset. The
-// providers listed are those bundled at the pinned hermes
-// (plugins/memory/). Only writes are here; memoryReads has the rest: a
-// search, probe or list reads, and holographic's fact_feedback rates a
-// fact without saying anything new.
-var memoryWrites = map[string][]string{
-	"memory":     nil,
-	"fact_store": {"add", "update", "remove"}, // holographic
-	// retaindb. Ingesting a file, on upload or after, makes memories of
-	// the file's text, which is not in the call's arguments.
-	"retaindb_remember":    nil,
-	"retaindb_forget":      nil,
-	"retaindb_upload_file": nil,
-	"retaindb_ingest_file": nil,
-	"retaindb_delete_file": nil,
-	"brv_curate":           nil, // byterover
-}
-
 // memoryReads names the memory tools, and the actions of them, that only
-// read. Between them, memoryWrites and memoryReads are every memory call
-// the graders know.
+// read. Between them, hermes.MemoryWriteActions and memoryReads are
+// every memory call the graders know.
 var memoryReads = map[string][]string{
 	"fact_store":    {"search", "probe", "related", "reason", "contradict", "list"}, // holographic
 	"fact_feedback": nil,                                                            // holographic
@@ -1079,14 +1058,14 @@ var hermesOwnTools = []string{"session_search", "skills_list", "skill_view", "sk
 
 // unknownMemoryCall reports whether c, a call in Looked, is a memory call
 // the graders cannot read: a tool outside hermesOwnTools that neither
-// memoryWrites nor memoryReads names, or a named one with an action they
+// hermes's memoryWrites nor memoryReads names, or a named one with an action they
 // do not list. Arguments that are not JSON, or that name no action, make a
 // call hermes refuses, which writes nothing.
 func unknownMemoryCall(c TraceCall) bool {
 	if slices.Contains(hermesOwnTools, c.Tool) {
 		return false
 	}
-	writes, isWrite := memoryWrites[c.Tool]
+	writes, isWrite := hermes.MemoryWriteActions(c.Tool)
 	reads, isRead := memoryReads[c.Tool]
 	switch {
 	case !isWrite && !isRead:
@@ -1104,22 +1083,11 @@ func unknownMemoryCall(c TraceCall) bool {
 }
 
 // isMemoryWrite reports whether c saved, changed or removed something the
-// ghost remembers.
+// ghost remembers, in whichever store the person chose
+// (hermes.MemoryWrite).
 func isMemoryWrite(c TraceCall) bool {
-	actions, ok := memoryWrites[c.Tool]
-	if !ok {
-		return false
-	}
-	if actions == nil {
-		return true
-	}
-	var args struct {
-		Action string `json:"action"`
-	}
-	if err := json.Unmarshal([]byte(c.Args), &args); err != nil {
-		return false
-	}
-	return slices.Contains(actions, args.Action)
+	_, ok := hermes.MemoryWrite(c.Tool, c.Args)
+	return ok
 }
 
 // memory: something the person asks it to remember survives a restart.

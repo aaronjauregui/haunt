@@ -25,6 +25,7 @@ type TraceTurn struct {
 	SelfPrompt bool        `json:"self_prompt"`
 	Acted      []TraceCall `json:"acted"`  // haunt's own tools, mcp__haunt__ stripped
 	Looked     []TraceCall `json:"looked"` // hermes's own tools: memory, skill_view, …
+	Echoes     []TraceEcho `json:"echoes"` // memory writes repeating a page or a file
 	Window     *struct {
 		App   string `json:"app"`
 		Title string `json:"title"`
@@ -37,6 +38,17 @@ type TraceCall struct {
 	Tool   string `json:"tool"`
 	Args   string `json:"args"`
 	Result string `json:"result"`
+}
+
+// TraceEcho is a memory write whose words repeat what the ghost read from
+// the web or a file.
+type TraceEcho struct {
+	Tool     string   `json:"tool"`
+	Saved    string   `json:"saved"`
+	Read     string   `json:"read"`
+	ReadArgs string   `json:"read_args"`
+	TurnsAgo int      `json:"turns_ago"`
+	Shared   []string `json:"shared"`
 }
 
 // Evidence is everything a trial leaves behind for its graders.

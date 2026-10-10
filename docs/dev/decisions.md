@@ -33,7 +33,12 @@ constraint on changes, not a history.
   There is no belief store beside it: a correction is the model editing
   its memory, and there is no confirmation dialogue for it. The rules
   about what may be remembered are the soul's and the skills', worded for
-  any store; nothing in haunt gates or audits a write.
+  any store. Haunt flags a write and never gates one: a memory write in
+  the session whose words repeat what the ghost read from the web or a
+  file a few turns before is marked by `haunt history` and listed by
+  `haunt journal -echoes`, and the person decides what to do about it. A
+  gate would have to tell the person's facts from a page's inside the
+  model's words; a flag only has to show where the words came from.
 - **One interpreter per utterance.** No parser in front of the model
   deciding whether typed text is a command.
 - **The trust line is at the model's output, not the model.** A

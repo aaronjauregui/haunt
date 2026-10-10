@@ -18,6 +18,8 @@ func TestTraceRecordIsTraceTurn(t *testing.T) {
 		SelfPrompt: true, Silent: true,
 		Acted:  []traceCall{{Tool: "intend", Args: `{"text":"oven"}`, Result: "hermes/1"}},
 		Looked: []traceCall{{Tool: "skill_view", Args: `{"name":"x"}`, Result: "…"}},
+		Echoes: []traceEcho{{Tool: "memory", Saved: "a b c", Read: "read_file", ReadArgs: `{"path":"x"}`,
+			TurnsAgo: 1, Shared: []string{"a b c"}}},
 		Window: &traceWindow{App: "foot", Title: "~"},
 	}
 	out, err := json.Marshal(rec)

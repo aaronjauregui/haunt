@@ -148,8 +148,9 @@ that says haunt itself broke.
 
 Memory is whichever store the person configured in hermes, so the
 graders that look for a memory write know each bundled provider's tools
-by name (`memoryWrites` and `memoryReads` in `eval_cases_test.go`). Any
-other call hermes files under memory makes the trial an error
+by name (`memoryWrites` in `internal/hermes/memory.go`, which `haunt
+history`'s echo check shares, and `memoryReads` in `eval_cases_test.go`).
+Any other call hermes files under memory makes the trial an error
 (`always/memory-known`): a write the graders cannot see would let
 "remembered none of it" pass.
 

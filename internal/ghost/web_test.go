@@ -345,3 +345,21 @@ func TestTheTaintQuestionNamesWhatWasRead(t *testing.T) {
 		}
 	}
 }
+
+// UntrustedRead names exactly the verbs that taint a turn, and they are the
+// ghost's own.
+func TestUntrustedRead(t *testing.T) {
+	for tool, from := range map[string]string{"search": "the web", "read_page": "the web", "read_file": "a file", "search_files": "a file"} {
+		if _, ok := builtinTools[tool]; !ok {
+			t.Errorf("%s is not one of the ghost's verbs", tool)
+		}
+		if got, ok := UntrustedRead(tool); !ok || got != from {
+			t.Errorf("UntrustedRead(%s) = %q, %v", tool, got, ok)
+		}
+	}
+	for _, tool := range []string{"list_files", "look", "say", "memory"} {
+		if _, ok := UntrustedRead(tool); ok {
+			t.Errorf("%s counted as reading somebody else's words", tool)
+		}
+	}
+}

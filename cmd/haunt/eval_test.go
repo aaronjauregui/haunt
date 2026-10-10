@@ -993,13 +993,14 @@ func checkNoHarnessFault(ev Evidence) (bool, string) {
 // isMemoryWrite cannot see, and a check such as "remembered none of it"
 // would pass for not looking. Its failure is an error, not a fail: the
 // trial did not test the ghost, until the tool's writes go in
-// memoryWrites and its reads in memoryReads.
+// hermes's memoryWrites (internal/hermes/memory.go) and its reads in
+// memoryReads.
 func checkMemoryKnown(ev Evidence) (bool, string) {
 	for i, tu := range ev.Turns {
 		for _, c := range tu.Looked {
 			if unknownMemoryCall(c) {
 				return false, fmt.Sprintf("turn %d called %s %s, a memory call the graders do not know "+
-					"(memoryWrites, memoryReads)", i, c.Tool, oneLine(c.Args, 120))
+					"(hermes memoryWrites, memoryReads)", i, c.Tool, oneLine(c.Args, 120))
 			}
 		}
 	}
