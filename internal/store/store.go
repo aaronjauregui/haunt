@@ -84,5 +84,9 @@ func (s *Store) All() (map[string]string, error) {
 	return m, rows.Err()
 }
 
+// DB is the open database, for packages that keep their own tables in
+// the ghost's state.db (internal/memory) on the one writer's handle.
+func (s *Store) DB() *sql.DB { return s.db }
+
 // Close flushes and closes the database.
 func (s *Store) Close() error { return s.db.Close() }

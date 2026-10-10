@@ -65,6 +65,8 @@ func main() {
 		err = cmdJournal(os.Args[2:])
 	case "history":
 		err = cmdHistory(os.Args[2:])
+	case "memory":
+		err = cmdMemory(os.Args[2:])
 	case "mcp-serve":
 		err = cmdMCPServe(os.Args[2:])
 	default:
@@ -105,6 +107,7 @@ func usage() {
   haunt shush [duration] | unshush
   haunt journal [-intentions] [-echoes] [-skills] [-style [-reset]] [name | -state DIR]
   haunt history [-n N] [-why | -json] [name | -state DIR]
+  haunt memory ls|show|rm|reindex [-ghost NAME | -state DIR] [topic [line-number]]
   haunt mcp-serve -ghost NAME`)
 }
 
