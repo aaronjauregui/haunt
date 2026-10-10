@@ -43,6 +43,9 @@ type Chat struct {
 	// wait sleeps between attempts; tests replace it to see the backoff
 	// without spending it.
 	wait func(ctx context.Context, d time.Duration) error
+	// firstToken and stall, when set, replace the Config's deadlines,
+	// which are whole seconds, so tests can run on shorter ones.
+	firstToken, stall time.Duration
 }
 
 var _ Client = (*Chat)(nil)
@@ -112,7 +115,14 @@ func (c *Chat) Stream(ctx context.Context, r Request) (<-chan Event, error) {
 	endpoint := strings.TrimRight(c.Config.BaseURL, "/") + "/chat/completions"
 	for attempt := 1; ; attempt++ {
 		actx, cancel := context.WithCancelCause(ctx)
-		w := watch(cancel, c.Config.FirstToken(), c.Config.Stall())
+		first, stall := c.Config.FirstToken(), c.Config.Stall()
+		if c.firstToken > 0 {
+			first = c.firstToken
+		}
+		if c.stall > 0 {
+			stall = c.stall
+		}
+		w := watch(cancel, first, stall)
 		req, err := http.NewRequestWithContext(actx, http.MethodPost, endpoint, bytes.NewReader(body))
 		if err != nil {
 			w.stop()
@@ -671,10 +681,17 @@ func watch(cancel context.CancelCauseFunc, first, stall time.Duration) *watchdog
 }
 
 // alive records a sign of life.
+// The first one ends the first-token clock and starts the stall clock,
+// so a stall deadline shorter than the first-token one fires on time.
 func (w *watchdog) alive() {
 	w.mu.Lock()
-	w.stirred = true
 	w.last = time.Now()
+	if !w.stirred {
+		w.stirred = true
+		if !w.done {
+			w.timer.Reset(w.stall)
+		}
+	}
 	w.mu.Unlock()
 }
 
