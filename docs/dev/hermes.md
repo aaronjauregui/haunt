@@ -796,7 +796,13 @@ result whose text opens with one of hermes's interrupt notices
 is read as a failed reply with no words
 (`Message.Failed`), which takes the turn's calls, `-json` gives it as
 `"failed": true` and `-why` as `(the turn failed)`, and the evals record
-the trial as an error rather than grade it. `-why` joins the trace
+the trial as an error rather than grade it. Hermes closes a turn after a
+tool with other banners too, through the same
+`close_interrupted_tool_sequence`: a request that no longer fits the
+context window or a dropped stream (`agent/turn_truncation.py`), and a
+tool-validation exit (`agent/turn_tool_validation.py` `_partial_exit`).
+Those are templates that name the provider, are not matched, and read
+as the ghost's words. `-why` joins the trace
 and also shows hermes's own tool calls (memory, session search, skills)
 from the session's messages. The system prompt is not available: the API
 server returns only `has_system_prompt`, and haunt does not read hermes's
