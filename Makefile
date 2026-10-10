@@ -1,6 +1,6 @@
 GO ?= go
 
-.PHONY: build test vet fmt eval eval-baseline demo demo-ai demo-troupe demo-seriko demo-headless demo-record install-user clean
+.PHONY: build test vet fmt hermes-check eval eval-baseline demo demo-ai demo-troupe demo-seriko demo-headless demo-record install-user clean
 
 build:
 	$(GO) build ./...
@@ -12,6 +12,16 @@ test:
 
 vet:
 	$(GO) vet ./...
+
+# Check a ghost's toolset restriction against the hermes image: lists
+# every toolset the image knows, bundled plugins included, and fails on
+# one a ghost would get without anybody choosing it. Run when the pin
+# moves (docs/dev/hermes.md). Needs docker and the image; no network, no
+# gateway, no model.
+HERMES_IMAGE ?= hermes-agent:818c13b
+
+hermes-check:
+	HERMES_IMAGE=$(HERMES_IMAGE) $(GO) test -tags hermescheck -count=1 -v -run '^TestHermesToolsets$$' ./internal/hermes
 
 fmt:
 	gofmt -l -w .

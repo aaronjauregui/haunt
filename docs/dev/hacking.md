@@ -43,6 +43,13 @@ speaks the gateway's HTTP and SSE, spawns `haunt mcp-serve` the way
 hermes does, and follows a script given in `FAKEHERMES_SCRIPT` (match a
 turn, delay, call a tool or several in turn, reply).
 
+    make hermes-check   # the toolset restriction against the hermes image
+
+One check does need hermes: its image, through docker. It lists every
+toolset the pinned image knows and fails on one a ghost's profile
+leaves loose ([Hermes](hermes.md#moving-the-pin)). It runs when the pin
+moves, not in `make test` or CI. `HERMES_IMAGE` picks another image.
+
 ## Demos
 
     make demo                 # whisper, scripted, nested sway window

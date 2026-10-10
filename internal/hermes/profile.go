@@ -289,10 +289,18 @@ func (c Config) EnsureProfile(spec ProfileSpec) (Profile, error) {
 	return p, nil
 }
 
+// apiServerToolsets is platform_toolsets.api_server: only these, and the
+// haunt server's own toolset (named after its key under mcp_servers). No
+// clarify: it is inert on the API server, and haunt's `ask` is the way to
+// put a question.
+var apiServerToolsets = []string{"memory", "session_search", "skills", "haunt"}
+
 // disabledToolsets is subtracted last, whatever else enables them: a later
 // hermes widening an explicit toolset list must not hand a ghost a shell.
 // The second line is plugin toolsets, which hermes turns on alongside an
-// explicit list once the person enables the plugin.
+// explicit list once the person enables the plugin. `make hermes-check`
+// lists every toolset the pinned image knows and fails on one this and
+// apiServerToolsets leave a ghost (hermescheck_test.go).
 var disabledToolsets = []string{
 	"terminal", "file", "browser", "code_execution", "delegation", "web",
 	"cronjob", "computer_use", "todo", "vision", "image_gen", "tts",
@@ -366,11 +374,8 @@ func (c Config) writeConfig(path string, spec ProfileSpec, hasSkills bool) error
 	gateway := section("gateway")
 	gateway["standalone"] = true
 
-	// Only these, and the haunt server's own toolset (named after its key
-	// under mcp_servers). No clarify: it is inert on the API server, and
-	// haunt's `ask` is the way to put a question.
 	pt := section("platform_toolsets")
-	pt["api_server"] = []string{"memory", "session_search", "skills", "haunt"}
+	pt["api_server"] = apiServerToolsets
 	agent := section("agent")
 	agent["disabled_toolsets"] = disabledToolsets
 	agent["auto_recovery_cycles"] = autoRecoveryCycles
@@ -448,12 +453,12 @@ func (c Config) writeConfig(path string, spec ProfileSpec, hasSkills bool) error
 		return err
 	}
 	header := []byte("# Written by haunt for ghost " + spec.Ghost + ". The api_server, toolset,\n" +
-		"# gateway.standalone, agent.auto_recovery_cycles, auxiliary.title_generation.model_upgrade_enabled,\n" +
-		"# tool_search, skills.inline_shell,\n" +
-		"# security.allow_lazy_installs\n" +
-		"# and mcp_servers.haunt settings, and the " + SkillsDir + " entry in\n" +
-		"# skills.external_dirs, are rewritten on every start;\n" +
-		"# everything else (the model above all) is yours to change.\n")
+		"# gateway.standalone, agent.auto_recovery_cycles,\n" +
+		"# auxiliary.title_generation.model_upgrade_enabled, tool_search,\n" +
+		"# skills.inline_shell, security.allow_lazy_installs and mcp_servers.haunt\n" +
+		"# settings, and the " + SkillsDir + " entry in skills.external_dirs, are\n" +
+		"# rewritten on every start; everything else (the model above all) is\n" +
+		"# yours to change.\n")
 	return writeIfChanged(path, append(header, out...), 0o600)
 }
 
