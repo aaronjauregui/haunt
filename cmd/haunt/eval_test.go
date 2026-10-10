@@ -830,6 +830,7 @@ func alwaysGraders(c *evalCase) []Grader {
 		{Name: "always/no-emoji", Check: checkNoEmoji},
 		{Name: "always/no-pose-tag", Check: checkNoPoseTag},
 		{Name: "always/no-harness-fault", Check: checkNoHarnessFault, Fault: true},
+		{Name: "always/memory-known", Check: checkMemoryKnown, Fault: true},
 	}
 }
 
@@ -983,6 +984,24 @@ func checkNoHarnessFault(ev Evidence) (bool, string) {
 			end = len(ev.Log) - i
 		}
 		return false, oneLine(ev.Log[i:i+end], 200)
+	}
+	return true, ""
+}
+
+// checkMemoryKnown: every memory call in the trace is one the graders can
+// read (unknownMemoryCall). A provider they do not know writes where
+// isMemoryWrite cannot see, and a check such as "remembered none of it"
+// would pass for not looking. Its failure is an error, not a fail: the
+// trial did not test the ghost, until the tool's writes go in
+// memoryWrites and its reads in memoryReads.
+func checkMemoryKnown(ev Evidence) (bool, string) {
+	for i, tu := range ev.Turns {
+		for _, c := range tu.Looked {
+			if unknownMemoryCall(c) {
+				return false, fmt.Sprintf("turn %d called %s %s, a memory call the graders do not know "+
+					"(memoryWrites, memoryReads)", i, c.Tool, oneLine(c.Args, 120))
+			}
+		}
 	}
 	return true, ""
 }
