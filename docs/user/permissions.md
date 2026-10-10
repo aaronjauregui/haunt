@@ -118,8 +118,10 @@ ask, so the ghost is refused outright.
 
 One gap, and it is deliberate: what the ghost remembers is hermes's
 memory, not haunt's, and haunt cannot gate it. Its standing rules forbid
-saving a page's claims as yours, and `haunt journal` shows what it wrote
-down, which is how you would catch it.
+saving a page's claims as yours. Haunt flags a write that repeats a
+page's wording and never blocks it: `haunt journal -echoes` lists those,
+and `haunt history -why` marks them among everything it wrote down
+([memory](memory.md#what-it-remembers)).
 
 ## Reading your files
 
@@ -169,7 +171,9 @@ machine. After the web alone they are not. A listing, and a search that
 matched names only, carry no file text and mark nothing. On a turn you
 did not start, the ghost is refused outright. What it remembers is still
 hermes's memory: its standing rules forbid saving a file's text as
-something you said, and `haunt journal` is where you would catch it.
+something you said, and a write that repeats a file's wording is
+flagged, not blocked, in `haunt journal -echoes` and `haunt history
+-why`.
 
 ## Seeing and revoking
 

@@ -184,6 +184,10 @@ type Skill struct {
 	// skill's text names. A learned skill with any is one hermes's review
 	// wrote for an agent with more tools than this one.
 	Assumes []string
+	// Deps is the front matter's `deps:`, the packages hermes installs
+	// when the skill is viewed (tools/skills_tool.py skill_view) where
+	// installs on demand are on. A ghost's profile has them off.
+	Deps []string
 }
 
 // Skill sources that are not a SkillSource.
@@ -194,10 +198,18 @@ const (
 
 // absentTools are the tools of disabledToolsets, as hermes names them
 // (toolsets.resolve_toolset at the pinned commit). `patch` is left out:
-// it is also skill_manage's own action, and an ordinary word.
-var absentTools = regexp.MustCompile(`\b(terminal|process_manage|read_file|write_file|search_files|` +
-	`browser_[a-z_]+|execute_code|delegate_task|web_search|web_extract|cronjob_manage|computer_use|` +
-	`todo_list|vision_analyze|image_generate|text_to_speech|kanban_[a-z_]+|manage_connections|clarify)\b`)
+// it is also skill_manage's own action, and an ordinary word. So is
+// `discord`, the platform's name; `discord_admin` is not.
+var absentTools = regexp.MustCompile(`\b(` + strings.Join([]string{
+	`terminal|process_manage|read_file|write_file|search_files`,
+	`browser_[a-z_]+|execute_code|delegate_task|web_search|web_extract`,
+	`cronjob_manage|computer_use|todo_list|vision_analyze|image_generate`,
+	`text_to_speech|kanban_[a-z_]+|manage_connections|clarify`,
+	// The plugin toolsets'.
+	`a2a_[a-z_]+|meet_[a-z_]+|spotify_[a-z_]+|video_[a-z_]+|xai_video_[a-z_]+|x_search`,
+	// The messaging platforms'.
+	`discord_admin|feishu_[a-z_]+|yb_[a-z_]+`,
+}, "|") + `)\b`)
 
 // Skills lists the skills in a ghost's profile without changing anything:
 // the profile's own skills/ directory, then what haunt installed.
@@ -290,12 +302,16 @@ func walkSkills(root string, fn func(Skill)) error {
 		}
 		s := Skill{Name: filepath.Base(filepath.Dir(p)), Dir: filepath.Dir(p)}
 		if head, _, ok := strings.Cut(strings.TrimPrefix(string(data), "---\n"), "\n---"); ok && strings.HasPrefix(string(data), "---\n") {
-			var fm struct{ Name, Description string }
+			var fm struct {
+				Name, Description string
+				Deps              any
+			}
 			if yaml.Unmarshal([]byte(head), &fm) == nil {
 				if fm.Name != "" {
 					s.Name = fm.Name
 				}
 				s.Description = fm.Description
+				s.Deps = depNames(fm.Deps)
 			}
 		}
 		seen := map[string]bool{}
@@ -313,6 +329,25 @@ func walkSkills(root string, fn func(Skill)) error {
 		return nil
 	}
 	return err
+}
+
+// depNames reads `deps:` as hermes does: one name or a list of them, blank
+// entries dropped.
+func depNames(v any) []string {
+	var list []any
+	switch d := v.(type) {
+	case string:
+		list = []any{d}
+	case []any:
+		list = d
+	}
+	var out []string
+	for _, d := range list {
+		if name := strings.TrimSpace(fmt.Sprint(d)); name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // A ghost's toolsets and hermes tools, as hermes names them for the

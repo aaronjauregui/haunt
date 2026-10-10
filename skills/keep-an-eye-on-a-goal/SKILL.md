@@ -60,5 +60,5 @@ congratulate them.
 - At most one goal per nudge, and never on a quiet-hours or fullscreen
   moment (the driver holds those back anyway).
 - Do not `look` at their screen to check on a goal.
-- If they tell you how they want nudging (less often, never), save it to
-  memory and follow it.
+- If they tell you how they want nudging (less often, never), remember
+  it and follow it.

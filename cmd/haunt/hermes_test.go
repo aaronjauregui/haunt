@@ -189,7 +189,7 @@ bundled_skills = ["humanizer"]
 		t.Fatalf("haunt history: %v: %s", err, out)
 	}
 	for _, want := range []string{"event: kind=boot", "ghost: (said nothing)", "woke, and chose not to speak",
-		"you:   remind me in ten minutes", "ghost: Done: hermes/", "did something first: session_search, mcp__haunt__intend"} {
+		"you:   remind me in ten minutes", "ghost: Let me look.", "ghost: Done: hermes/", "did something first: session_search, mcp__haunt__intend"} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("history lacks %q:\n%s", want, out)
 		}
@@ -216,7 +216,7 @@ bundled_skills = ["humanizer"]
 	}
 	r := turns[ri]
 	if r.ProvokedBy != "person" || r.Input != "remind me in ten minutes to check the oven" || r.Silent ||
-		r.Reply != remind.Reply || r.SelfPrompt || r.Window != nil || r.Time.IsZero() {
+		r.Reply != "Let me look.\n"+remind.Reply || r.SelfPrompt || r.Window != nil || r.Time.IsZero() {
 		t.Errorf("reminder turn %+v", r)
 	}
 	var args map[string]any
@@ -289,14 +289,23 @@ bundled_skills = ["humanizer"]
 	}
 	waitFakeLog(t, fakeLog, time.Second, func(e fakeEntry) bool { return e.Kind == "mcp_stopped" })
 
-	// `haunt journal -skills` reads the profile, with the ghost gone.
+	// `haunt journal -skills` reads the profile, with the ghost gone. The
+	// model has written a skill that needs a package.
+	learned := filepath.Join(profile, "skills", "clips", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(learned), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(learned, []byte("---\nname: clips\ndescription: Cut a clip.\ndeps: [ffmpeg]\n---\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	jc := exec.Command(bin, "journal", "-skills", "-state", stateDir, "wisp")
 	jc.Env = append(os.Environ(), "HAUNT_CONFIG_DIR="+cfgDir)
 	out, err = jc.CombinedOutput()
 	if err != nil {
 		t.Fatalf("haunt journal -skills: %v: %s", err, out)
 	}
-	for _, want := range []string{"Learned (it wrote these itself):\n  (none)", "From its package:\n  kitchen-watch: Mind the oven.",
+	for _, want := range []string{"Learned (it wrote these itself):\n  clips: Cut a clip.\n",
+		"    ! needs packages a ghost does not get: ffmpeg\n", "From its package:\n  kitchen-watch: Mind the oven.",
 		"From haunt:\n  ", "  focus-session: ", "From hermes:\n  humanizer: "} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("journal -skills lacks %q:\n%s", want, out)
@@ -379,16 +388,20 @@ type fakeRule struct {
 	Look       string         `json:"look,omitempty"`
 	LookArgs   map[string]any `json:"look_args,omitempty"`
 	LookResult string         `json:"look_result,omitempty"`
+	Interim    string         `json:"interim,omitempty"`
 	Tool       string         `json:"tool,omitempty"`
 	Args       map[string]any `json:"args,omitempty"`
 	Then       []fakeStep     `json:"then,omitempty"`
+	StallMS    int            `json:"stall_ms,omitempty"`
+	Reasoning  bool           `json:"reasoning,omitempty"`
 	Reply      string         `json:"reply"`
 }
 
 // fakeStep is one more tool call in a fakeRule's turn, after Tool.
 type fakeStep struct {
-	Tool string         `json:"tool"`
-	Args map[string]any `json:"args,omitempty"`
+	Tool    string         `json:"tool"`
+	Args    map[string]any `json:"args,omitempty"`
+	DelayMS int            `json:"delay_ms,omitempty"`
 }
 
 // historyJSON is `haunt history -json` for the ghost in stateDir, every
@@ -416,8 +429,8 @@ func historyJSON(t *testing.T, r hermesRig, stateDir string) []traceRecord {
 }
 
 // newHermesRig builds into dir. rules nil keeps the fake's defaults (events
-// are NO_REPLY, "remind me" searches hermes's sessions and calls intend,
-// anything else is echoed). extra is appended to the config file, so its
+// are NO_REPLY, "remind me" says it will look, searches hermes's sessions
+// and calls intend, anything else is echoed). extra is appended to the config file, so its
 // first lines are still [hermes] keys until it opens a table of its own.
 func newHermesRig(t *testing.T, dir string, rules []fakeRule, extra string) hermesRig {
 	t.Helper()
@@ -504,6 +517,8 @@ func repliedTo(s string) func(fakeEntry) bool {
 type fakeEntry struct {
 	Kind          string            `json:"kind"`
 	PID           int               `json:"pid"`
+	RunID         string            `json:"run_id"`
+	Status        string            `json:"status"`
 	Input         string            `json:"input"`
 	Reply         string            `json:"reply"`
 	SystemMessage string            `json:"system_message"`

@@ -26,7 +26,17 @@ if the gateway is not up within two minutes.
 While it works on an answer its balloon says "thinking…", until the first
 words arrive; wearing a face or looking something up along the way does
 not take that down. A tool with a wait of its own ("painting…") shows its
-own words while it runs.
+own words while it runs. When the model's provider is down, hermes
+retries a few times, then waits about fifteen seconds and thirty more,
+trying again after each; after that an answer to you says in the balloon
+that it failed and what the provider said ("hermes: the turn failed:
+Connection error"), `haunt history` marks the turn `(the turn failed)`, and
+anything you said meanwhile goes to the model next. A provider that asks
+for a longer wait is not waited on: once a turn has gone two minutes
+with nothing new (`stall_timeout`), the ghost gives up on it, says so
+in the balloon, and hermes stops the turn. The ghost's own tools are not
+counted against that, so a picture that takes minutes to paint is
+waited for.
 
 ## Setting it up
 
@@ -73,8 +83,10 @@ writing files, no browser, and hermes's own web toolset stays off
 whatever the ghost may look up. Every verb goes through the same
 consent, budgets and quiet rules as anything else the ghost does.
 
-What hermes holds about you is in the profile, in plain text:
-`memories/MEMORY.md` and `memories/USER.md`.
+What hermes holds about you is hermes's own memory, which haunt leaves
+alone: by default plain text in the profile's `memories/MEMORY.md` and
+`memories/USER.md`, or a provider you chose with `hermes -p haunt-wisp
+memory setup` ([Memory](memory.md#what-it-remembers)).
 
 ## Hermes in a container
 
@@ -82,13 +94,13 @@ What hermes holds about you is in the profile, in plain text:
 hermes image with only what a ghost's brain needs mounted: the ghost's
 profile, the haunt binary read-only, and the control-socket directory.
 
-Build the image from the commit haunt is checked against (hermes's tags
-are date-based):
+Build the image from the commit haunt is checked against, release
+v0.21.6:
 
 ```sh
 git clone https://github.com/nousresearch/hermes-agent && cd hermes-agent
-git checkout 6005aa1
-docker build -t hermes-agent:6005aa1 .
+git checkout 818c13b
+docker build -t hermes-agent:818c13b .
 ```
 
 A 403 from ghcr.io during the build is a stale `docker login ghcr.io`.
@@ -108,6 +120,16 @@ command = ["/abs/path/to/haunt/scripts/hermes-docker"]
 
 `HERMES_IMAGE` picks a different image tag. The container uses host
 networking; the gateway binds loopback only.
+
+The holographic memory provider recalls by keyword alone without numpy,
+which the image does not have. `scripts/hermes-numpy.Dockerfile` adds it:
+
+```sh
+docker build -t hermes-agent:818c13b-numpy - < scripts/hermes-numpy.Dockerfile
+```
+
+The wrapper uses `hermes-agent:818c13b-numpy` whenever that image exists
+and `HERMES_IMAGE` is unset.
 
 A Claude subscription is not a way in: hermes's Anthropic OAuth path bills
 purchased extra-usage credits only. `ANTHROPIC_API_KEY` is pay-per-token.
@@ -134,3 +156,4 @@ All under `[hermes]` in the config ([Configuration](config.md)):
 | `model` | unset | written into every profile; unset keeps each profile's own |
 | `tool_timeout` | 600 | seconds one tool call may take, which is how long an `ask` may wait on you |
 | `first_token_timeout` | 30 | seconds of silence before a turn is given up on |
+| `stall_timeout` | 120 | seconds a turn that has started answering may then go with nothing new before it is given up on; the ghost's own tools running do not count |

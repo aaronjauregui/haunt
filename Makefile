@@ -1,6 +1,6 @@
 GO ?= go
 
-.PHONY: build test vet fmt eval eval-baseline demo demo-ai demo-troupe demo-seriko demo-headless demo-record install-user clean
+.PHONY: build test vet fmt hermes-check eval eval-baseline demo demo-ai demo-troupe demo-seriko demo-headless demo-record install-user clean
 
 build:
 	$(GO) build ./...
@@ -13,6 +13,16 @@ test:
 vet:
 	$(GO) vet ./...
 
+# Check a ghost's toolset restriction against the hermes image: lists
+# every toolset the image knows, bundled plugins included, and fails on
+# one a ghost would get without anybody choosing it. Run when the pin
+# moves (docs/dev/hermes.md). Needs docker and the image; no network, no
+# gateway, no model.
+HERMES_IMAGE ?= hermes-agent:818c13b
+
+hermes-check:
+	HERMES_IMAGE=$(HERMES_IMAGE) $(GO) test -tags hermescheck -count=1 -v -run '^TestHermesToolsets$$' ./internal/hermes
+
 fmt:
 	gofmt -l -w .
 
@@ -23,11 +33,14 @@ fmt:
 # EVAL_CASES=focus|reminder picks cases, EVAL_JUDGE=off skips the judge,
 # EVAL_STRICT=1 fails on a drop of more than one trial below the baseline
 # or on a case skipped for a missing prerequisite. -count=1 because a
-# cached eval would be no eval at all.
+# cached eval would be no eval at all. The test binary gives every test
+# an empty config unless HAUNT_CONFIG_DIR is set, and the evals run on the
+# person's own, so the recipe sets it (to the person's, unless given).
 EVAL_OUT ?= .eval
 export EVAL_OUT
 
 eval:
+	HAUNT_CONFIG_DIR="$${HAUNT_CONFIG_DIR:-$(or $(XDG_CONFIG_HOME),$(HOME)/.config)/haunt}" \
 	$(GO) test -tags eval -count=1 -run '^TestEval$$' -parallel 4 -timeout 120m ./cmd/haunt; \
 	status=$$?; \
 	latest=$$(ls -1 "$(EVAL_OUT)" 2>/dev/null | grep '^[0-9]' | sort | tail -n 1); \

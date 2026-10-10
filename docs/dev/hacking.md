@@ -43,6 +43,13 @@ speaks the gateway's HTTP and SSE, spawns `haunt mcp-serve` the way
 hermes does, and follows a script given in `FAKEHERMES_SCRIPT` (match a
 turn, delay, call a tool or several in turn, reply).
 
+    make hermes-check   # the toolset restriction against the hermes image
+
+One check does need hermes: its image, through docker. It lists every
+toolset the pinned image knows and fails on one a ghost's profile
+leaves loose ([Hermes](hermes.md#moving-the-pin)). It runs when the pin
+moves, not in `make test` or CI. `HERMES_IMAGE` picks another image.
+
 ## Demos
 
     make demo                 # whisper, scripted, nested sway window
@@ -137,10 +144,19 @@ reminder, keep a banned phrase out of a reply. Every trial also gets the
 `always/` checks: no envelope or `NO_REPLY` in what it says, no Markdown,
 no emoji, no tool names, no pose tag left in the words, at most 60 words
 a reply, and nothing in the log
-that says haunt itself broke. What code cannot grade, the content and tone
-of a reply, a judge grades: `claude -p` on your subscription, asked fixed
-yes/no questions from a rubric (`eval_rubrics_test.go`), one call per
-reply. Every judged reply is held to the tone questions too, which come
+that says haunt itself broke.
+
+Memory is whichever store the person configured in hermes, so the
+graders that look for a memory write know each bundled provider's tools
+by name (`memoryWrites` in `internal/hermes/memory.go`, which `haunt
+history`'s echo check shares, and `memoryReads` in `eval_cases_test.go`).
+Any other call hermes files under memory makes the trial an error
+(`always/memory-known`): a write the graders cannot see would let
+"remembered none of it" pass.
+
+What code cannot grade, the content and tone of a reply, a judge grades:
+`claude -p` on your subscription, asked fixed yes/no questions from a
+rubric (`eval_rubrics_test.go`), one call per reply. Every judged reply is held to the tone questions too, which come
 from wisp's persona and the rules every ghost has.
 
 A rubric is only trusted once the judge agrees with its anchors: saved

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +16,7 @@ import (
 	"sync"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -82,7 +85,7 @@ func newFakeHermes(t *testing.T) (*fakeHermes, *httptest.Server) {
 		w.Write([]byte(f.stream(id, input)))
 	}))
 	mux.HandleFunc("GET /api/sessions/{id}/messages", auth(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("order") != "latest" || r.URL.Query().Get("limit") != "10" {
+		if q := r.URL.Query(); q.Get("order") != "latest" || q.Get("limit") != "10" || q.Get("include_compacted") != "true" {
 			t.Errorf("history asked with %s", r.URL.RawQuery)
 		}
 		if f.history != "" {
@@ -185,6 +188,145 @@ func TestTurnReturnsSilence(t *testing.T) {
 	}
 }
 
+// streamParts is a turn's stream as the caller sees it: the parts OnInterim
+// ends, each with what OnDelta delivered for it and hermes's own text, and
+// the order the callbacks came in.
+type streamParts struct {
+	cur     strings.Builder
+	interim []string // hermes's text for each part OnInterim ended
+	deltas  []string // what OnDelta delivered for those parts
+	order   []string
+}
+
+func (p *streamParts) request(input string) TurnRequest {
+	return TurnRequest{
+		Input: input,
+		OnDelta: func(d string) {
+			p.cur.WriteString(d)
+			if n := len(p.order); n == 0 || p.order[n-1] != "delta" {
+				p.order = append(p.order, "delta")
+			}
+		},
+		OnInterim: func(text string) {
+			p.interim = append(p.interim, text)
+			p.deltas = append(p.deltas, p.cur.String())
+			p.cur.Reset()
+			p.order = append(p.order, "interim")
+		},
+		OnTool: func(e ToolEvent) {
+			if !e.Done {
+				p.order = append(p.order, "tool")
+			}
+		},
+	}
+}
+
+// Words written alongside a tool call stream as deltas and are then marked
+// as commentary, before the call starts. They are not the reply: the reply
+// is what follows the mark, which hermes opens with a blank line, and
+// assistant.completed carries the reply alone.
+func TestTurnMarksInterimWords(t *testing.T) {
+	f, srv := newFakeHermes(t)
+	f.stream = func(string, string) string {
+		return strings.ReplaceAll(fixture(t, "lookup.sse"), `"haunt-fake"`, `"haunt-moth"`)
+	}
+	saved := ""
+	var p streamParts
+	reply, err := testClient(srv, &saved).Turn(context.Background(), p.request("Did I burn anything last week?"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(p.order, []string{"delta", "interim", "tool", "delta"}) {
+		t.Errorf("callbacks came %v", p.order)
+	}
+	// The deltas also carry the blank line the model wrote before its
+	// call; the commentary is the words alone.
+	const interim = "I will check your history."
+	if !slices.Equal(p.interim, []string{interim}) || len(p.deltas) != 1 || strings.TrimSpace(p.deltas[0]) != interim {
+		t.Errorf("interim %q, streamed as %q", p.interim, p.deltas)
+	}
+	const want = "I found nothing about you burning anything last week."
+	if reply.Text != want || p.cur.String() != "\n\n"+want {
+		t.Errorf("reply %q, streamed after the mark %q", reply.Text, p.cur.String())
+	}
+	if !slices.Equal(reply.Tools, []string{"session_search"}) {
+		t.Errorf("tools %v", reply.Tools)
+	}
+}
+
+// With display.interim_assistant_messages off hermes sends no commentary,
+// and the tool call is what marks the words before it as interim.
+func TestTurnMarksInterimWordsAtTheCall(t *testing.T) {
+	f, srv := newFakeHermes(t)
+	sse := strings.ReplaceAll(fixture(t, "lookup-interim-off.sse"), `"haunt-fake"`, `"haunt-moth"`)
+	if strings.Contains(sse, "assistant.commentary") {
+		t.Fatal("lookup-interim-off.sse has commentary")
+	}
+	f.stream = func(string, string) string { return sse }
+	saved := ""
+	var p streamParts
+	reply, err := testClient(srv, &saved).Turn(context.Background(), p.request("Did I burn anything last week?"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(p.order, []string{"delta", "interim", "tool", "delta"}) {
+		t.Errorf("callbacks came %v", p.order)
+	}
+	// The part is what streamed, the model's trailing blank line with it.
+	if len(p.interim) != 1 || strings.TrimSpace(p.interim[0]) != "I will check." {
+		t.Errorf("interim %q", p.interim)
+	}
+	const want = "I found nothing about you burning anything last week."
+	if reply.Text != want || strings.TrimSpace(p.cur.String()) != want {
+		t.Errorf("reply %q, streamed after the mark %q", reply.Text, p.cur.String())
+	}
+}
+
+// Silence after interim words is the reply's: the part after the mark is
+// the token, though the stream as a whole does not open with it.
+func TestTurnSilenceAfterInterimWords(t *testing.T) {
+	f, srv := newFakeHermes(t)
+	f.stream = func(string, string) string { return fixture(t, "lookup-silent.sse") }
+	saved := ""
+	var p streamParts
+	reply, err := testClient(srv, &saved).Turn(context.Background(), p.request(Envelope("idle")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !Silent(reply.Text) {
+		t.Errorf("reply %q is not silence", reply.Text)
+	}
+	if after := p.cur.String(); !MaybeSilent(after) || !Silent(after) {
+		t.Errorf("the part after the mark, %q, does not read as silence", after)
+	}
+	if whole := strings.Join(p.deltas, "") + p.cur.String(); MaybeSilent(whole) {
+		t.Errorf("the whole stream %q reads as silence; the test proves nothing", whole)
+	}
+}
+
+// A stream that ends without assistant.completed answers with what it
+// streamed after the last mark, not the interim words before it.
+func TestTurnWithoutCompletionAnswersTheLastPart(t *testing.T) {
+	f, srv := newFakeHermes(t)
+	f.sessions["haunt-moth"] = true
+	f.stream = func(string, string) string {
+		return "event: assistant.delta\ndata: {\"delta\":\"One moment.\"}\n\n" +
+			"event: assistant.commentary\ndata: {\"text\":\"One moment.\",\"already_streamed\":true}\n\n" +
+			"event: tool.started\ndata: {\"tool_name\":\"memory\"}\n\n" +
+			"event: tool.completed\ndata: {\"tool_name\":\"memory\"}\n\n" +
+			"event: assistant.delta\ndata: {\"delta\":\"\\n\\nFound it.\"}\n\n" +
+			"event: done\ndata: {}\n\n"
+	}
+	saved := "haunt-moth"
+	reply, err := testClient(srv, &saved).Turn(context.Background(), TurnRequest{Input: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(reply.Text) != "Found it." {
+		t.Errorf("reply %q", reply.Text)
+	}
+}
+
 // A session that exists already is adopted; one that has vanished is made
 // again.
 func TestSessionIsFoundAndRemade(t *testing.T) {
@@ -210,6 +352,226 @@ func TestSessionIsFoundAndRemade(t *testing.T) {
 	}
 	if saved != "haunt-moth" {
 		t.Errorf("a vanished session was not replaced: %q", saved)
+	}
+}
+
+// A turn hermes gives up on, its provider unreachable: failed.sse sends
+// assistant.completed with hermes's own notice and completed false, then
+// run.failed. The notice is not the ghost's words, and the turn fails with
+// what the provider said and nothing else of the notice's.
+func TestTurnReportsAFailedTurn(t *testing.T) {
+	sse := strings.ReplaceAll(fixture(t, "failed.sse"), `"haunt-fake"`, `"haunt-moth"`)
+	const said = `\n\nProvider said: Connection error.`
+	if !strings.Contains(sse, said) {
+		t.Fatal("failed.sse has no provider line")
+	}
+	for _, tc := range []struct {
+		name, sse, want string
+	}{
+		{"failed.sse", sse, "hermes: the turn failed: Connection error"},
+		// A notice without the provider's line, as hermes writes for a
+		// failure that is not the provider's.
+		{"no provider line", strings.Replace(sse, said, "", 1), "hermes: the turn failed"},
+		// Advice after the provider's line is not the provider's.
+		{"advice after", strings.Replace(sse, said, said+`\n\nThe connection kept dropping.`, 1), "hermes: the turn failed: Connection error"},
+	} {
+		f, srv := newFakeHermes(t)
+		f.stream = func(string, string) string { return tc.sse }
+		saved := ""
+		var p streamParts
+		reply, err := testClient(srv, &saved).Turn(context.Background(), p.request("Hello, are you there?"))
+		if err == nil || err.Error() != tc.want {
+			t.Errorf("%s: error %v, want %q", tc.name, err, tc.want)
+		}
+		if reply.Text != "" {
+			t.Errorf("%s: the notice was taken as the reply: %q", tc.name, reply.Text)
+		}
+		if len(p.order) != 0 {
+			t.Errorf("%s: callbacks came %v", tc.name, p.order)
+		}
+	}
+}
+
+// A finished turn's assistant.completed without the completed field is
+// still the reply.
+func TestTurnCompletedWithoutTheField(t *testing.T) {
+	f, srv := newFakeHermes(t)
+	f.sessions["haunt-moth"] = true
+	f.stream = func(string, string) string {
+		return "event: assistant.completed\ndata: {\"content\":\"hi\"}\n\nevent: run.completed\ndata: {}\n\nevent: done\ndata: {}\n\n"
+	}
+	saved := "haunt-moth"
+	reply, err := testClient(srv, &saved).Turn(context.Background(), TurnRequest{Input: "x"})
+	if err != nil || reply.Text != "hi" {
+		t.Errorf("reply %q, error %v", reply.Text, err)
+	}
+}
+
+// OnEvent hears every event on the stream by name, the reasoning that no
+// other callback reports among them, and not the keepalive comments a
+// stream carries while hermes waits.
+func TestTurnReportsEveryEvent(t *testing.T) {
+	f, srv := newFakeHermes(t)
+	stream := fixture(t, "lookup-silent.sse")
+	var want []string
+	for _, line := range strings.Split(stream, "\n") {
+		if name, ok := strings.CutPrefix(line, "event: "); ok {
+			want = append(want, name)
+		}
+	}
+	f.stream = func(string, string) string {
+		return strings.ReplaceAll(stream, "event: tool.progress", ": keepalive\n\n: keepalive\n\nevent: tool.progress")
+	}
+	saved := ""
+	var got []string
+	_, err := testClient(srv, &saved).Turn(context.Background(), TurnRequest{
+		Input:   "x",
+		OnEvent: func(name string) { got = append(got, name) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("events heard:\n%v\nwant:\n%v", got, want)
+	}
+	if !slices.Contains(got, "tool.progress") {
+		t.Error("the model's reasoning was not heard")
+	}
+}
+
+// stoppableHermes is a session stream whose run waits, as one riding out a
+// provider outage does, until it is stopped; it ends settle after the
+// stop, as hermes's agent thread winds down after answering "stopping".
+type stoppableHermes struct {
+	mu      sync.Mutex
+	stops   []string  // the runs asked to stop
+	ended   time.Time // when the run is over
+	status  string
+	stopErr int // a status to fail the stop with
+	settle  time.Duration
+	stopped chan struct{}
+}
+
+func newStoppableHermes(t *testing.T) (*stoppableHermes, *httptest.Server) {
+	h := &stoppableHermes{status: "running", stopped: make(chan struct{}), settle: 300 * time.Millisecond}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/sessions/{id}/chat/stream", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write([]byte("event: run.started\ndata: {\"run_id\":\"run_abc\",\"session_id\":\"haunt-moth\"}\n\n" +
+			"event: message.started\ndata: {\"run_id\":\"run_abc\",\"session_id\":\"haunt-moth\"}\n\n"))
+		w.(http.Flusher).Flush()
+		// Hermes does not see the client go until its next write.
+		<-h.stopped
+		time.Sleep(h.settle)
+		h.mu.Lock()
+		h.status, h.ended = "cancelled", time.Now()
+		h.mu.Unlock()
+	})
+	mux.HandleFunc("POST /v1/runs/{id}/stop", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer sekrit" {
+			t.Errorf("stop sent without the key")
+		}
+		h.mu.Lock()
+		h.stops = append(h.stops, r.PathValue("id"))
+		fail := h.stopErr
+		h.mu.Unlock()
+		if fail != 0 {
+			w.WriteHeader(fail)
+			w.Write([]byte(`{"error":{"message":"no","code":"boom"}}`))
+			return
+		}
+		if r.PathValue("id") != "run_abc" {
+			w.WriteHeader(404)
+			w.Write([]byte(`{"error":{"message":"Run not found","code":"run_not_found"}}`))
+			return
+		}
+		close(h.stopped)
+		w.Write([]byte(`{"run_id":"run_abc","status":"stopping"}`))
+	})
+	mux.HandleFunc("GET /v1/runs/{id}", func(w http.ResponseWriter, r *http.Request) {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		fmt.Fprintf(w, `{"object":"hermes.run","run_id":"run_abc","status":%q}`, h.status)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return h, srv
+}
+
+// A turn given up on is stopped in hermes, by the run id its stream
+// carries, and Turn returns once the run is over and not before.
+func TestTurnStopsTheRunGivenUpOn(t *testing.T) {
+	h, srv := newStoppableHermes(t)
+	saved := "haunt-moth"
+	c := testClient(srv, &saved)
+	var logged []string
+	c.Logf = func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) }
+	ctx, cancel := context.WithCancel(context.Background())
+	_, err := c.Turn(ctx, TurnRequest{Input: "x", OnEvent: func(name string) {
+		if name == "message.started" {
+			cancel()
+		}
+	}})
+	returned := time.Now()
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error %v", err)
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !slices.Equal(h.stops, []string{"run_abc"}) {
+		t.Errorf("stops asked for %v", h.stops)
+	}
+	if h.ended.IsZero() || returned.Before(h.ended) {
+		t.Errorf("Turn returned at %v, before the run was over at %v", returned, h.ended)
+	}
+	if len(logged) != 0 {
+		t.Errorf("logged %q", logged)
+	}
+}
+
+// A stop that fails is logged, and the turn fails as it would have.
+func TestTurnStopFailing(t *testing.T) {
+	h, srv := newStoppableHermes(t)
+	h.stopErr = 500
+	defer close(h.stopped)
+	saved := "haunt-moth"
+	c := testClient(srv, &saved)
+	var logged []string
+	c.Logf = func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) }
+	ctx, cancel := context.WithCancel(context.Background())
+	_, err := c.Turn(ctx, TurnRequest{Input: "x", OnEvent: func(name string) {
+		if name == "message.started" {
+			cancel()
+		}
+	}})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error %v", err)
+	}
+	if len(logged) != 1 || !strings.Contains(logged[0], "stopping run run_abc") || !strings.Contains(logged[0], "500") {
+		t.Errorf("logged %q", logged)
+	}
+}
+
+// A turn whose run hermes has said is over is not stopped.
+func TestTurnOverIsNotStopped(t *testing.T) {
+	f, srv := newFakeHermes(t)
+	f.sessions["haunt-moth"] = true
+	f.stream = func(string, string) string {
+		return "event: run.started\ndata: {\"run_id\":\"run_x\"}\n\nevent: assistant.completed\ndata: {\"run_id\":\"run_x\",\"content\":\"hi\",\"completed\":true}\n\nevent: run.completed\ndata: {\"run_id\":\"run_x\"}\n\n: keepalive\n\n"
+	}
+	saved := "haunt-moth"
+	c := testClient(srv, &saved)
+	var logged []string
+	c.Logf = func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) }
+	ctx, cancel := context.WithCancel(context.Background())
+	c.Turn(ctx, TurnRequest{Input: "x", OnEvent: func(name string) {
+		if name == "run.completed" {
+			cancel()
+		}
+	}})
+	// The fake has no stop endpoint: asking would have been logged.
+	if len(logged) != 0 {
+		t.Errorf("logged %q", logged)
 	}
 }
 
@@ -254,6 +616,31 @@ func TestMessages(t *testing.T) {
 	}
 }
 
+// Interim words are kept in the session on the message that made the call,
+// and read back as interim, their pose tag taken off as the reply's is.
+func TestMessagesInterimWords(t *testing.T) {
+	f, srv := newFakeHermes(t)
+	f.sessions["haunt-moth"] = true
+	f.history = `{"object":"list","data":[
+		{"role":"user","content":"Did I burn anything last week?"},
+		{"role":"assistant","content":"[thinking] Let me look.","tool_calls":[
+			{"id":"c1","type":"function","function":{"name":"session_search","arguments":"{\"query\": \"burned\"}"}}]},
+		{"role":"tool","tool_call_id":"c1","content":"{\"results\": [\"they burned the bread on Tuesday\"]}"},
+		{"role":"assistant","content":"[sad] Yes: the bread, on Tuesday."}]}`
+	saved := "haunt-moth"
+	msgs, err := testClient(srv, &saved).Messages(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 3 || msgs[1].Text != "Let me look." || !msgs[1].Interim ||
+		msgs[2].Text != "Yes: the bread, on Tuesday." || msgs[2].Interim {
+		t.Fatalf("messages %+v", msgs)
+	}
+	if len(msgs[2].Looked) != 1 || msgs[1].Looked != nil {
+		t.Errorf("the lookup rides on %+v, want the reply it led to", msgs)
+	}
+}
+
 // Messages cuts a call to a line for a person; Transcript keeps it whole
 // for a reader that matches on it.
 func TestTranscriptKeepsCallsWhole(t *testing.T) {
@@ -285,6 +672,152 @@ func TestTranscriptKeepsCallsWhole(t *testing.T) {
 	}
 	if r := short[1].Acted[0].Result; r == long || strings.Contains(r, "\n") {
 		t.Errorf("history result not cut to a line: %q", r)
+	}
+}
+
+// Hermes closes a failed turn with a notice of its own in the ghost's
+// place; it reads as a failed turn, not as words, and keeps the turn's
+// calls.
+func TestMessagesFailedTurn(t *testing.T) {
+	f, srv := newFakeHermes(t)
+	f.sessions["haunt-moth"] = true
+	f.history = `{"data":[
+		{"role":"user","content":"what did I burn?","timestamp":1789614336},
+		{"role":"assistant","content":"","tool_calls":[{"id":"c1","function":{"name":"session_search","arguments":"{}"}}],"timestamp":1789614337},
+		{"role":"tool","tool_call_id":"c1","content":"nothing","timestamp":1789614338},
+		{"role":"assistant","content":"This turn did not complete. Some actions may already have run; verify their effects before resending.","display_kind":"failed_turn","timestamp":1789614339},
+		{"role":"user","content":"hello?","timestamp":1789614340},
+		{"role":"assistant","content":"Here.","timestamp":1789614341}
+	]}`
+	saved := "haunt-moth"
+	msgs, err := testClient(srv, &saved).Messages(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 4 || !msgs[1].Failed || msgs[1].Text != "" || msgs[1].Role != "assistant" ||
+		msgs[3].Failed || msgs[3].Text != "Here." {
+		t.Fatalf("messages %+v", msgs)
+	}
+	if len(msgs[1].Looked) != 1 || msgs[1].Looked[0].Tool != "session_search" || msgs[1].Looked[0].Result != "nothing" {
+		t.Errorf("the failed turn's calls %+v", msgs[1].Looked)
+	}
+
+	// history-failed.json is hermes's answer after a turn whose provider
+	// never answered: the notice for a turn in which nothing ran.
+	f.history = fixture(t, "history-failed.json")
+	msgs, err = testClient(srv, &saved).Messages(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 2 || msgs[0].Text != "Hello, are you there?" || !msgs[1].Failed || msgs[1].Text != "" ||
+		msgs[1].Looked != nil || msgs[1].Time.Unix() != 1791618802 {
+		t.Fatalf("messages %+v", msgs)
+	}
+}
+
+// A turn stopped during a recovery wait after a tool is closed with the
+// interrupt's own words in a plain assistant row; it reads as a failed
+// turn, not as the ghost's words, and keeps the turn's calls. A reply
+// that opens the same way but does not follow a tool result is words.
+// history-interrupted.json is hand-built in the shape of
+// history-failed.json, with the row close_interrupted_tool_sequence
+// writes.
+func TestMessagesInterruptedTurn(t *testing.T) {
+	f, srv := newFakeHermes(t)
+	f.sessions["haunt-moth"] = true
+	f.history = fixture(t, "history-interrupted.json")
+	saved := "haunt-moth"
+	msgs, err := testClient(srv, &saved).Messages(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 4 || msgs[0].Text != "What's on my list?" || msgs[1].Role != "assistant" || !msgs[1].Failed || msgs[1].Text != "" ||
+		msgs[1].Time.Unix() != 1791619129 || msgs[2].Text != "Hello again." ||
+		msgs[3].Failed || msgs[3].Text != "Operation interrupted: that is what the pipe said." {
+		t.Fatalf("messages %+v", msgs)
+	}
+	if len(msgs[1].Acted) != 1 || msgs[1].Acted[0].Tool != "intentions" || !strings.Contains(msgs[1].Acted[0].Result, "nothing is pending") {
+		t.Errorf("the interrupted turn's calls %+v", msgs[1].Acted)
+	}
+
+	// Every wording hermes closes an interrupted turn with.
+	for _, notice := range []string{
+		"Operation interrupted: waiting for the provider to recover (cycle 2/2).",
+		"Operation interrupted: handling API error (RateLimitError: slow down).",
+		"Operation interrupted: retrying API call after error (retry 1/3).",
+		"Operation interrupted: retrying empty response from model (retry 1/2).",
+		"Operation interrupted: waiting for model response (4.2s elapsed).",
+		"Operation interrupted during retry (invalid response, attempt 2/3).",
+	} {
+		b, _ := json.Marshal(notice)
+		f.history = `{"data":[
+			{"role":"user","content":"hi","timestamp":1},
+			{"role":"assistant","content":"","tool_calls":[{"id":"c1","function":{"name":"memory","arguments":"{}"}}],"timestamp":2},
+			{"role":"tool","tool_call_id":"c1","content":"ok","timestamp":3},
+			{"role":"assistant","content":` + string(b) + `,"display_kind":null,"timestamp":4}]}`
+		msgs, err := testClient(srv, &saved).Messages(context.Background(), 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 2 || !msgs[1].Failed || msgs[1].Text != "" {
+			t.Errorf("%q read as %+v", notice, msgs)
+		}
+	}
+}
+
+// A compacted session is read whole, and its handoff is not a turn. The
+// fixtures are hermes's own answers, from its session store and API
+// handler: history-compacted.json is an in-place compaction in the middle
+// of a turn, after a lookup and before the reply it led to;
+// history-lineage.json is a session a compression ended and the child
+// that carries it on.
+func TestMessagesAcrossCompaction(t *testing.T) {
+	for _, tc := range []struct {
+		fixture string
+		want    []Message
+	}{
+		{"history-compacted.json", []Message{
+			{Role: "user", Text: "question 1"},
+			{Role: "assistant", Text: "answer 1", Acted: []Lookup{{Tool: "face", Args: `{"pose": "happy"}`, Result: `{"result":"ok"}`}}},
+			{Role: "user", Text: "what did I burn last week?"},
+			{Role: "assistant", Text: "The bread.",
+				Looked: []Lookup{{Tool: "session_search", Args: `{"query": "burn"}`, Result: `{"results": ["the bread"]}`}},
+				Acted:  []Lookup{{Tool: "face", Args: `{"pose": "sad"}`, Result: `{"result":"ok"}`}}},
+		}},
+		{"history-lineage.json", []Message{
+			{Role: "user", Text: "question 1"},
+			{Role: "assistant", Text: "answer 1"},
+			{Role: "user", Text: "question 2"},
+			{Role: "assistant", Text: "answer 2"},
+			{Role: "user", Text: "question 3"},
+			{Role: "assistant", Text: "answer 3"},
+		}},
+	} {
+		f, srv := newFakeHermes(t)
+		f.sessions["haunt-moth"] = true
+		f.history = fixture(t, tc.fixture)
+		saved := "haunt-moth"
+		msgs, err := testClient(srv, &saved).Messages(context.Background(), 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, m := range msgs {
+			got = append(got, m.Role+": "+m.Text)
+		}
+		var want []string
+		for _, m := range tc.want {
+			want = append(want, m.Role+": "+m.Text)
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("%s: messages\n%q\nwant\n%q", tc.fixture, got, want)
+			continue
+		}
+		for i, w := range tc.want {
+			if w.Looked != nil && !slices.Equal(msgs[i].Looked, w.Looked) || w.Acted != nil && !slices.Equal(msgs[i].Acted, w.Acted) {
+				t.Errorf("%s: %q looked %+v acted %+v, want %+v and %+v", tc.fixture, w.Text, msgs[i].Looked, msgs[i].Acted, w.Looked, w.Acted)
+			}
+		}
 	}
 }
 
@@ -329,9 +862,15 @@ func TestEnsureProfile(t *testing.T) {
 	if doc["_config_version"] != configVersion {
 		t.Errorf("_config_version = %v, want %d", doc["_config_version"], configVersion)
 	}
+	if gw, _ := doc["gateway"].(map[string]any); gw["standalone"] != true {
+		t.Errorf("gateway = %v, want standalone: true", doc["gateway"])
+	}
 	doc["_config_version"] = configVersion + 1 // hermes migrated it
 	doc["model"] = map[string]any{"default": "their-model"}
 	doc["platform_toolsets"] = map[string]any{"api_server": []string{"terminal"}}
+	doc["agent"].(map[string]any)["auto_recovery_cycles"] = 5
+	doc["skills"] = map[string]any{"inline_shell": true}
+	doc["security"] = map[string]any{"allow_lazy_installs": true}
 	out, _ := yaml.Marshal(doc)
 	os.WriteFile(cfgPath, out, 0o600)
 	f, _ := os.OpenFile(filepath.Join(p.Dir, ".env"), os.O_APPEND|os.O_WRONLY, 0)
@@ -362,15 +901,24 @@ func TestEnsureProfile(t *testing.T) {
 	if doc["tools"].(map[string]any)["tool_search"].(map[string]any)["enabled"] != "off" {
 		t.Errorf("tool search not off: %v", doc["tools"])
 	}
+	if a := doc["agent"].(map[string]any); a["auto_recovery_cycles"] != autoRecoveryCycles {
+		t.Errorf("auto_recovery_cycles = %v, want %d", a["auto_recovery_cycles"], autoRecoveryCycles)
+	}
+	if s := doc["skills"].(map[string]any); s["inline_shell"] != false {
+		t.Errorf("inline_shell = %v, want false", s["inline_shell"])
+	}
+	if s := doc["security"].(map[string]any); s["allow_lazy_installs"] != false {
+		t.Errorf("allow_lazy_installs = %v, want false", s["allow_lazy_installs"])
+	}
+	if tg := doc["auxiliary"].(map[string]any)["title_generation"].(map[string]any); tg["model_upgrade_enabled"] != false {
+		t.Errorf("title_generation = %v, want model_upgrade_enabled false", tg)
+	}
 	srv := doc["mcp_servers"].(map[string]any)["haunt"].(map[string]any)
 	if srv["command"] != "/usr/bin/haunt" || srv["timeout"] != 600 || srv["env"].(map[string]any)["HAUNT_RUNTIME_DIR"] != "/run/x" {
 		t.Errorf("mcp server entry %v", srv)
 	}
-	if doc["tts"].(map[string]any)["provider"] != "piper" {
-		t.Errorf("tts %v, want piper, whose check installs nothing", doc["tts"])
-	}
-	if doc["memory"].(map[string]any)["write_approval"] != false {
-		t.Errorf("memory %v", doc["memory"])
+	if _, ok := doc["memory"]; ok {
+		t.Errorf("haunt wrote a memory section: %v", doc["memory"])
 	}
 	env, _ := readEnv(filepath.Join(p.Dir, ".env"))
 	if env["OPENROUTER_API_KEY"] != "theirs" || env["HAUNT_GHOST"] != "Moth" {
@@ -384,21 +932,20 @@ func TestEnsureProfile(t *testing.T) {
 		t.Errorf("SOUL.md was not regenerated")
 	}
 
-	// A profile left naming the deleted memory provider loses it.
-	raw, _ = os.ReadFile(cfgPath)
-	stale := strings.Replace(string(raw), "memory:\n", "memory:\n    provider: haunt\n", 1)
-	if stale == string(raw) {
-		t.Fatalf("no memory section to plant a provider in:\n%s", raw)
-	}
-	if err := os.WriteFile(cfgPath, []byte(stale), 0o600); err != nil {
+	// Memory is hermes's: the backend the person chose with hermes stays.
+	doc["memory"] = map[string]any{"provider": "holographic", "memory_enabled": false}
+	out, _ = yaml.Marshal(doc)
+	if err := os.WriteFile(cfgPath, out, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := c.EnsureProfile(spec); err != nil {
 		t.Fatal(err)
 	}
 	raw, _ = os.ReadFile(cfgPath)
-	if strings.Contains(string(raw), "provider: haunt") {
-		t.Errorf("stale memory provider kept:\n%s", raw)
+	doc = nil
+	yaml.Unmarshal(raw, &doc)
+	if m, _ := doc["memory"].(map[string]any); len(m) != 2 || m["provider"] != "holographic" || m["memory_enabled"] != false {
+		t.Errorf("the person's memory settings were changed: %v", doc["memory"])
 	}
 
 	opened, err := c.OpenProfile("Moth")
@@ -533,6 +1080,8 @@ func TestEnsureProfileSkills(t *testing.T) {
 	for rel, body := range map[string]string{
 		"reminders/SKILL.md":          "---\nname: reminders\ndescription: How they like reminders.\n---\nUse mcp__haunt__intend.",
 		"shell/SKILL.md":              "---\nname: shell\ndescription: x\n---\nRun it with terminal, then read_file and terminal again.",
+		"clips/SKILL.md":              "---\nname: clips\ndescription: z\ndeps: [ffmpeg, ' ', yt-dlp]\n---\n",
+		"one-dep/SKILL.md":            "---\nname: one-dep\ndescription: z\ndeps: ripgrep\n---\n",
 		"notes/hermes-agent/SKILL.md": "---\nname: hermes-agent\ndescription: y\n---\n",
 		".archive/old/SKILL.md":       "---\nname: old\n---\n",
 		".bundled_manifest":           "hermes-agent:abc\n",
@@ -546,15 +1095,15 @@ func TestEnsureProfileSkills(t *testing.T) {
 	}
 	var summary []string
 	for _, sk := range list {
-		summary = append(summary, sk.Source+":"+sk.Name+":"+strings.Join(sk.Assumes, "+"))
+		summary = append(summary, sk.Source+":"+sk.Name+":"+strings.Join(sk.Assumes, "+")+":"+strings.Join(sk.Deps, "+"))
 	}
-	wantList := []string{"hermes:hermes-agent:", "learned:reminders:", "learned:shell:terminal+read_file",
-		"haunt:focus-session:", "haunt:morning-check-in:"}
+	wantList := []string{"learned:clips::ffmpeg+yt-dlp", "hermes:hermes-agent::", "learned:one-dep::ripgrep",
+		"learned:reminders::", "learned:shell:terminal+read_file:", "haunt:focus-session::", "haunt:morning-check-in::"}
 	if !slices.Equal(summary, wantList) {
 		t.Errorf("Skills = %v, want %v", summary, wantList)
 	}
-	if list[1].Description != "How they like reminders." || list[1].Dir != filepath.Join(local, "reminders") {
-		t.Errorf("learned skill = %+v", list[1])
+	if list[3].Description != "How they like reminders." || list[3].Dir != filepath.Join(local, "reminders") {
+		t.Errorf("learned skill = %+v", list[3])
 	}
 
 	// No skills at all: haunt's entry goes, the person's stays.

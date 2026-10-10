@@ -41,6 +41,11 @@ type Config struct {
 	// on the person's answer is working, and a gateway that has said
 	// nothing at all has wedged.
 	FirstTokenSeconds int `toml:"first_token_timeout"`
+	// StallSeconds is how long a turn that has shown a sign of life may then
+	// go with nothing on its stream before the driver gives up on it
+	// (default 120). Keepalive comments are not something on the stream,
+	// and the clock stops while one of the ghost's own tools runs.
+	StallSeconds int `toml:"stall_timeout"`
 }
 
 // FirstTokenTimeout is FirstTokenSeconds with its default.
@@ -49,6 +54,30 @@ func (c Config) FirstTokenTimeout() time.Duration {
 		return time.Duration(c.FirstTokenSeconds) * time.Second
 	}
 	return 30 * time.Second
+}
+
+// StallTimeout is StallSeconds with its default.
+//
+// The default is set against what hermes does when the model's provider
+// gives out mid-turn, which sends nothing on the stream but keepalives
+// until the turn either goes on or fails. It first spends
+// agent.api_max_retries (3 attempts, about 2 and 4 s apart with jitter),
+// then waits out the outage autoRecoveryCycles times, at 15 and 30 s with
+// up to a fifth more as jitter, running the retries again after each.
+// Without a Retry-After that came to about 85 s of silence against a
+// provider refusing connections, more where the failed requests are slow,
+// before hermes fails the turn on its own (a run.failed, which the driver
+// hears). 120 s lets both short waits and their retries run with room for
+// jitter, and a provider back within them answers the turn. A provider that
+// names a Retry-After is waited on for up to 120 s a cycle (and up to 600
+// s a retry), which is the case this deadline is for: the turn is cut at
+// 120 s of silence rather than held for minutes. Two minutes is also
+// far more than a model needs between one tool call and its next words.
+func (c Config) StallTimeout() time.Duration {
+	if c.StallSeconds > 0 {
+		return time.Duration(c.StallSeconds) * time.Second
+	}
+	return 120 * time.Second
 }
 
 // ModelConfig is the model block of a profile.
@@ -193,11 +222,15 @@ func (c Config) OpenProfile(ghost string) (Profile, error) {
 //
 // What is haunt's is rewritten every time: SOUL.md, the skills under
 // SkillsDir, and the keys in config.yaml that make the profile a ghost's —
-// the API server, the toolset restriction, the haunt MCP server, haunt's
-// entry in skills.external_dirs. Everything else in
-// config.yaml is left as the person set it, the model above all, and
-// MEMORY.md, USER.md and the session database are never touched: they are
-// the ghost's life, not its configuration.
+// the API server, the toolset restriction, the outage recovery, inline
+// shell off, the haunt MCP server, haunt's entry in skills.external_dirs.
+// Everything else in
+// config.yaml is left as the person set it, the model above all. Memory
+// is hermes's: haunt neither writes, configures nor reads it, so the
+// memory section of config.yaml, MEMORY.md, USER.md, a memory provider's
+// store and the session database are never touched. They are the ghost's
+// life, not its configuration, and which backend holds it is the person's
+// choice, made with `hermes memory setup`.
 func (c Config) EnsureProfile(spec ProfileSpec) (Profile, error) {
 	root, err := c.Root()
 	if err != nil {
@@ -285,12 +318,26 @@ func (c Config) EnsureProfile(spec ProfileSpec) (Profile, error) {
 	return p, nil
 }
 
+// apiServerToolsets is platform_toolsets.api_server: only these, and the
+// haunt server's own toolset (named after its key under mcp_servers). No
+// clarify: it is inert on the API server, and haunt's `ask` is the way to
+// put a question.
+var apiServerToolsets = []string{"memory", "session_search", "skills", "haunt"}
+
 // disabledToolsets is subtracted last, whatever else enables them: a later
 // hermes widening an explicit toolset list must not hand a ghost a shell.
+// `make hermes-check` lists every toolset the pinned image knows and fails
+// on one this and apiServerToolsets leave a ghost (hermescheck_test.go).
 var disabledToolsets = []string{
 	"terminal", "file", "browser", "code_execution", "delegation", "web",
 	"cronjob", "computer_use", "todo", "vision", "image_gen", "tts",
 	"kanban", "connections", "clarify",
+	// Plugin toolsets, which hermes turns on alongside an explicit list
+	// once the person enables the plugin.
+	"google_meet", "x_search", "video", "video_gen", "spotify", "a2a",
+	"browser-cdp", "browser-use",
+	// Messaging-platform toolsets.
+	"discord", "discord_admin", "feishu_doc", "feishu_drive", "yuanbao",
 }
 
 // noBundledSkills is hermes's opt-out marker for bundled skills
@@ -299,7 +346,22 @@ const noBundledSkills = ".no-bundled-skills"
 
 // configVersion is hermes's config schema version (`_config_version` in
 // hermes_cli/config_defaults.py) at the commit docs/dev/hermes.md pins.
-const configVersion = 45
+const configVersion = 50
+
+// autoRecoveryCycles is agent.auto_recovery_cycles: how many times hermes
+// waits out a provider outage once its retries are spent, before it fails
+// the turn (agent/turn_recovery_autorecover.py). The waits are 15 s, then
+// 30, then 60 each, jittered, or the provider's Retry-After up to 120, and
+// nothing reaches the turn's stream during one. Two keep the short waits,
+// which ride out a provider's overload (z.ai's 429s come in bursts), and
+// drop the later ones, which only make a dead provider slower to report:
+// with no Retry-After, hermes fails the turn after about 85 s of waits and
+// retries (measured against a provider refusing connections). A Retry-After stretches each wait to as much as 120 s, and the
+// retries between them honour one of up to 600, so the cycles alone do not
+// bound a turn. What does is the driver's stall deadline ([hermes]
+// stall_timeout, Config.StallTimeout), which gives up on a turn whose
+// stream has been silent that long and leaves room for both short waits.
+const autoRecoveryCycles = 2
 
 func (c Config) writeConfig(path string, spec ProfileSpec, hasSkills bool) error {
 	doc := map[string]any{}
@@ -339,41 +401,34 @@ func (c Config) writeConfig(path string, spec ProfileSpec, hasSkills bool) error
 	platforms := section("platforms")
 	platforms["api_server"] = map[string]any{"enabled": true}
 
-	// Only these, and the haunt server's own toolset (named after its key
-	// under mcp_servers). No clarify: it is inert on the API server, and
-	// haunt's `ask` is the way to put a question.
+	// A ghost's gateway is haunt's to start and stop, and serves this
+	// profile alone. Hermes otherwise refuses a named profile a gateway of
+	// its own, and a gateway the person runs would serve the ghost's
+	// profile too, outside haunt (hermes_cli/profiles.py profiles_to_serve).
+	gateway := section("gateway")
+	gateway["standalone"] = true
+
 	pt := section("platform_toolsets")
-	pt["api_server"] = []string{"memory", "session_search", "skills", "haunt"}
+	pt["api_server"] = apiServerToolsets
 	agent := section("agent")
 	agent["disabled_toolsets"] = disabledToolsets
+	agent["auto_recovery_cycles"] = autoRecoveryCycles
+
+	// Hermes names each session, and upgrades the name it derives from the
+	// first message with a model call (agent/title_generator.py). Nothing
+	// shows a ghost's session title; the call is load on the provider.
+	aux := section("auxiliary")
+	tg, _ := aux["title_generation"].(map[string]any)
+	if tg == nil {
+		tg = map[string]any{}
+		aux["title_generation"] = tg
+	}
+	tg["model_upgrade_enabled"] = false
 
 	// Tool search hides MCP tools behind a lookup the model has to think of
 	// using; a ghost's verbs must be in front of it.
 	tools := section("tools")
 	tools["tool_search"] = map[string]any{"enabled": "off"}
-
-	// Hermes checks every tool's availability before each turn, disabled
-	// toolsets included, and checking its default voice (edge) installs
-	// the edge-tts package on a profile that lacks it: seconds before a
-	// fresh ghost's first word, for a tool it cannot call. Piper's check
-	// only looks for the package. A voice the person chose is kept.
-	tts := section("tts")
-	if _, set := tts["provider"]; !set {
-		tts["provider"] = "piper"
-	}
-
-	memory := section("memory")
-	if _, set := memory["write_approval"]; !set {
-		// A companion that asks permission to remember your cat's name is
-		// not a companion. Only defaulted: the person may want otherwise.
-		memory["write_approval"] = false
-	}
-	// Hermes memory is the ghost's only memory. A profile that names a
-	// haunt memory provider is from a haunt that had one; hermes would
-	// fail to load it.
-	if memory["provider"] == "haunt" {
-		delete(memory, "provider")
-	}
 
 	// Haunt's skill directory is one entry among whatever the person
 	// listed. Relative, because hermes resolves it against HERMES_HOME,
@@ -397,6 +452,17 @@ func (c Config) writeConfig(path string, spec ProfileSpec, hasSkills bool) error
 	} else {
 		delete(skills, "external_dirs")
 	}
+	// A skill's !`cmd` snippets run in a shell when it is viewed, whatever
+	// the toolsets say (agent/skill_preprocessing.py), and the model writes
+	// skills. Off is hermes's default; a ghost does not rely on a default.
+	skills["inline_shell"] = false
+
+	// Hermes installs packages on demand: what a skill's `deps:` names when
+	// it is viewed, a plugin the config names at start. The model writes
+	// skills, so on demand is the model's choosing; a ghost runs on what
+	// the image already has (pm/install.py).
+	security := section("security")
+	security["allow_lazy_installs"] = false
 	if _, set := skills["guard_agent_created"]; !set {
 		// The security scan hermes runs on skills the model writes. A
 		// ghost has no shell to run a bad one, but the person may open
@@ -421,9 +487,12 @@ func (c Config) writeConfig(path string, spec ProfileSpec, hasSkills bool) error
 		return err
 	}
 	header := []byte("# Written by haunt for ghost " + spec.Ghost + ". The api_server, toolset,\n" +
-		"# tool_search and mcp_servers.haunt settings, and the " + SkillsDir + " entry in\n" +
-		"# skills.external_dirs, are rewritten on every start;\n" +
-		"# everything else (the model above all) is yours to change.\n")
+		"# gateway.standalone, agent.auto_recovery_cycles,\n" +
+		"# auxiliary.title_generation.model_upgrade_enabled, tool_search,\n" +
+		"# skills.inline_shell, security.allow_lazy_installs and mcp_servers.haunt\n" +
+		"# settings, and the " + SkillsDir + " entry in skills.external_dirs, are\n" +
+		"# rewritten on every start; everything else (the model above all) is\n" +
+		"# yours to change.\n")
 	return writeIfChanged(path, append(header, out...), 0o600)
 }
 

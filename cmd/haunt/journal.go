@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -16,14 +17,17 @@ import (
 
 // cmdJournal prints a ghost's journal: the action log, a line for each thing
 // it did. What a ghost on hermes remembers about the person is hermes
-// memory, readable in the profile's memories/ (and editable by telling the
-// ghost). -skills lists the routines it has on hermes, and which of them it
-// wrote itself. -style is the look its pictures have, and whether the ghost
-// was asked for one of its own.
+// memory, which haunt does not read: `hermes -p haunt-<ghost> memory
+// status` says where it is, and telling the ghost edits it. -echoes lists
+// what it saved there in the words of a page or a file it read, from the
+// conversation hermes keeps. -skills lists the routines it has on hermes,
+// and which of them it wrote itself. -style is the look its pictures have,
+// and whether the ghost was asked for one of its own.
 func cmdJournal(args []string) error {
 	fs := flag.NewFlagSet("journal", flag.ExitOnError)
 	state := fs.String("state", "", "override state directory")
 	intentions := fs.Bool("intentions", false, "print what it is still meaning to do")
+	echoes := fs.Bool("echoes", false, "list what it saved to memory in the words of a page or a file it read (needs its hermes gateway running)")
 	skills := fs.Bool("skills", false, "list its hermes skills: the ones it learned, the package's and haunt's")
 	style := fs.Bool("style", false, "the style it draws in, and where that came from")
 	reset := fs.Bool("reset", false, "with -style: go back to the style its package ships")
@@ -56,6 +60,13 @@ func cmdJournal(args []string) error {
 	}
 	if *intentions {
 		return printIntentions(s)
+	}
+	if *echoes {
+		name := filepath.Base(stateDir)
+		if len(fs.Args()) == 1 {
+			name = fs.Args()[0]
+		}
+		return printEchoes(os.Stdout, s, name)
 	}
 	raw, ok, err := s.Get(ghost.NotesStoreKey)
 	if err != nil {
@@ -115,6 +126,12 @@ func printSkills(name string) error {
 					// Hermes's review writes skills for an agent with a
 					// shell; one that needs one is dead weight here.
 					fmt.Printf("    ! names tools a ghost does not have: %s\n", strings.Join(s.Assumes, ", "))
+				}
+				if len(s.Deps) > 0 {
+					// Hermes would install these when the skill is
+					// viewed; a ghost's profile has installs off, so
+					// a skill that needs them is dead weight here.
+					fmt.Printf("    ! needs packages a ghost does not get: %s\n", strings.Join(s.Deps, ", "))
 				}
 			}
 		}

@@ -55,7 +55,7 @@ Skip it, and reply `NO_REPLY`, when:
 
 ## Pitfalls
 
-- If they say "stop doing this", save that to memory, and skip the
+- If they say "stop doing this", remember that, and skip the
   check-in from then on.
 - Do not stack questions. One `ask`, and one `ask_text` at most.
 - Do not `look` at their screen for this.

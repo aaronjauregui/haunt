@@ -1,0 +1,42 @@
+{
+  "object": "list",
+  "session_id": "haunt-fake",
+  "data": [
+    {
+      "id": 13,
+      "session_id": "haunt-fake",
+      "role": "user",
+      "content": "Hello, are you there?",
+      "tool_call_id": null,
+      "tool_calls": null,
+      "tool_name": null,
+      "timestamp": 1791618718.4557655,
+      "token_count": null,
+      "finish_reason": null,
+      "reasoning": null,
+      "reasoning_content": null,
+      "display_kind": null
+    },
+    {
+      "id": 14,
+      "session_id": "haunt-fake",
+      "role": "assistant",
+      "content": "Your request was not processed. Send it again if you still want me to carry it out.",
+      "tool_call_id": null,
+      "tool_calls": null,
+      "tool_name": null,
+      "timestamp": 1791618802.9219937,
+      "token_count": null,
+      "finish_reason": null,
+      "reasoning": null,
+      "reasoning_content": null,
+      "display_kind": "failed_turn"
+    }
+  ],
+  "pagination": {
+    "limit": 500,
+    "offset": 0,
+    "order": "latest",
+    "returned": 2
+  }
+}

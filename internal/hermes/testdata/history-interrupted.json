@@ -1,0 +1,111 @@
+{
+  "object": "list",
+  "session_id": "haunt-fake",
+  "data": [
+    {
+      "id": 21,
+      "session_id": "haunt-fake",
+      "role": "user",
+      "content": "What's on my list?",
+      "tool_call_id": null,
+      "tool_calls": null,
+      "tool_name": null,
+      "timestamp": 1791619001.1023417,
+      "token_count": null,
+      "finish_reason": null,
+      "reasoning": null,
+      "reasoning_content": null,
+      "display_kind": null
+    },
+    {
+      "id": 22,
+      "session_id": "haunt-fake",
+      "role": "assistant",
+      "content": "",
+      "tool_call_id": null,
+      "tool_calls": [
+        {
+          "id": "call_5a1f0c2e9b7d4c11",
+          "type": "function",
+          "function": {
+            "name": "mcp__haunt__intentions",
+            "arguments": "{}"
+          }
+        }
+      ],
+      "tool_name": null,
+      "timestamp": 1791619004.5530121,
+      "token_count": null,
+      "finish_reason": "tool_calls",
+      "reasoning": null,
+      "reasoning_content": null,
+      "display_kind": null
+    },
+    {
+      "id": 23,
+      "session_id": "haunt-fake",
+      "role": "tool",
+      "content": "{\"result\": \"nothing is pending\"}",
+      "tool_call_id": "call_5a1f0c2e9b7d4c11",
+      "tool_calls": null,
+      "tool_name": "mcp__haunt__intentions",
+      "timestamp": 1791619004.6012876,
+      "token_count": null,
+      "finish_reason": null,
+      "reasoning": null,
+      "reasoning_content": null,
+      "display_kind": null
+    },
+    {
+      "id": 24,
+      "session_id": "haunt-fake",
+      "role": "assistant",
+      "content": "Operation interrupted: waiting for the provider to recover (cycle 1/2).",
+      "tool_call_id": null,
+      "tool_calls": null,
+      "tool_name": null,
+      "timestamp": 1791619129.8840515,
+      "token_count": null,
+      "finish_reason": null,
+      "reasoning": null,
+      "reasoning_content": null,
+      "display_kind": null
+    },
+    {
+      "id": 25,
+      "session_id": "haunt-fake",
+      "role": "user",
+      "content": "Hello again.",
+      "tool_call_id": null,
+      "tool_calls": null,
+      "tool_name": null,
+      "timestamp": 1791619131.2207313,
+      "token_count": null,
+      "finish_reason": null,
+      "reasoning": null,
+      "reasoning_content": null,
+      "display_kind": null
+    },
+    {
+      "id": 26,
+      "session_id": "haunt-fake",
+      "role": "assistant",
+      "content": "Operation interrupted: that is what the pipe said.",
+      "tool_call_id": null,
+      "tool_calls": null,
+      "tool_name": null,
+      "timestamp": 1791619133.0519842,
+      "token_count": null,
+      "finish_reason": "stop",
+      "reasoning": null,
+      "reasoning_content": null,
+      "display_kind": null
+    }
+  ],
+  "pagination": {
+    "limit": 500,
+    "offset": 0,
+    "order": "latest",
+    "returned": 6
+  }
+}

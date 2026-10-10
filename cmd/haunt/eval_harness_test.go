@@ -130,6 +130,86 @@ func TestEvalHarnessLengthCap(t *testing.T) {
 	}
 }
 
+// A memory write is any store's write, and only a write.
+func TestEvalHarnessMemoryWrite(t *testing.T) {
+	for _, tc := range []struct {
+		tool, args string
+		want       bool
+	}{
+		{"memory", `{"action":"add","target":"user","content":"takes coffee black"}`, true},
+		{"memory", `{"target":"user","operations":[{"action":"replace","old_text":"tea","content":"coffee"}]}`, true},
+		{"fact_store", `{"action":"add","content":"takes coffee black"}`, true},
+		{"fact_store", `{"action":"update","fact_id":3,"content":"black"}`, true},
+		{"fact_store", `{"action":"remove","fact_id":3}`, true},
+		{"fact_store", `{"action":"search","query":"coffee black"}`, false},
+		{"fact_store", `{"action":"probe","entity":"coffee"}`, false},
+		{"fact_store", `not json`, false},
+		{"fact_feedback", `{"action":"helpful","fact_id":3}`, false},
+		{"retaindb_remember", `{"content":"takes coffee black"}`, true},
+		{"retaindb_search", `{"query":"coffee black"}`, false},
+		{"brv_curate", `{"content":"takes coffee black"}`, true},
+		{"brv_query", `{"query":"coffee black"}`, false},
+		{"session_search", `{"query":"black"}`, false},
+		{"skill_view", `{"name":"memory"}`, false},
+	} {
+		if got := isMemoryWrite(TraceCall{Tool: tc.tool, Args: tc.args}); got != tc.want {
+			t.Errorf("isMemoryWrite(%s %s) = %v, want %v", tc.tool, tc.args, got, tc.want)
+		}
+	}
+}
+
+// A memory call the graders cannot read makes the trial an error: hermes's
+// own non-memory tools and a known provider's reads and writes do not, an
+// unknown provider's tool or action does.
+func TestEvalHarnessUnknownMemory(t *testing.T) {
+	for _, tc := range []struct {
+		tool, args string
+		unknown    bool
+	}{
+		{"memory", `{"action":"add","content":"takes coffee black"}`, false},
+		{"session_search", `{"query":"black"}`, false},
+		{"skills_list", `{}`, false},
+		{"skill_view", `{"name":"memory"}`, false},
+		{"skill_manage", `{"action":"create","name":"coffee"}`, false},
+		{"fact_store", `{"action":"add","content":"black"}`, false},
+		{"fact_store", `{"action":"related","entity":"coffee"}`, false},
+		{"fact_store", `{"action":"merge","fact_id":3}`, true},
+		{"fact_store", `not json`, false},
+		{"fact_feedback", `{"action":"unhelpful","fact_id":3}`, false},
+		{"retaindb_profile", `{}`, false},
+		{"retaindb_ingest_file", `{"file_id":"f1"}`, false},
+		{"brv_status", `{}`, false},
+		{"mem0_add", `{"content":"takes coffee black"}`, true},
+		{"honcho_conclude", `{"conclusion":"takes coffee black"}`, true},
+	} {
+		if got := unknownMemoryCall(TraceCall{Tool: tc.tool, Args: tc.args}); got != tc.unknown {
+			t.Errorf("unknownMemoryCall(%s %s) = %v, want %v", tc.tool, tc.args, got, tc.unknown)
+		}
+	}
+
+	known := Evidence{Turns: []TraceTurn{
+		{Looked: []TraceCall{{Tool: "fact_store", Args: `{"action":"search","query":"coffee"}`}}},
+		spokeTurn("black, no sugar"),
+	}}
+	unknown := Evidence{Turns: []TraceTurn{
+		spokeTurn("hello"),
+		{Looked: []TraceCall{{Tool: "mem0_add", Args: `{"content":"Bartholomew"}`}}},
+	}}
+	c := &evalCase{Name: "x"}
+	if got := trialOutcome(gradeTrial(c, known, false)); got != outPass {
+		t.Errorf("known memory calls: %s, want %s", got, outPass)
+	}
+	gs := gradeTrial(c, unknown, false)
+	if got := trialOutcome(gs); got != outError {
+		t.Errorf("an unknown memory tool: %s, want %s", got, outError)
+	}
+	for _, g := range gs {
+		if g.Name == "always/memory-known" && !strings.Contains(g.Why, "turn 1 called mem0_add") {
+			t.Errorf("always/memory-known says %q", g.Why)
+		}
+	}
+}
+
 func TestEvalHarnessHelpers(t *testing.T) {
 	ev := Evidence{
 		Turns: []TraceTurn{

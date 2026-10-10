@@ -16,9 +16,21 @@ type TurnRequest struct {
 	// OnDelta receives the reply's text as it streams. Called from the
 	// reading goroutine, in order.
 	OnDelta func(delta string)
+	// OnInterim marks the end of words written alongside tool calls rather
+	// than as the reply: what OnDelta delivered since the last mark was
+	// interim, text is those words whole as hermes reports them (streamed
+	// or not), and the deltas after it start the next part afresh. The
+	// reply is the part after the last mark. May be nil.
+	OnInterim func(text string)
 	// OnTool hears the model's tool calls starting and finishing, for the
 	// why-trace and the working face. May be nil.
 	OnTool func(ToolEvent)
+	// OnEvent hears the name of every event on the stream as it arrives,
+	// before the callbacks above, including the ones nothing else reports
+	// (run.started, tool.progress with the model's reasoning). Keepalive
+	// comments are not events. It is how the driver tells a turn that is
+	// working from one gone quiet. May be nil.
+	OnEvent func(name string)
 }
 
 // ToolEvent is one tool call seen in a turn's stream.
@@ -64,6 +76,10 @@ type Message struct {
 	// Interim is a reply written alongside tool calls, before the turn's
 	// last word.
 	Interim bool
+	// Failed marks hermes's own notice closing a turn that failed (the
+	// provider gave out, the turn was cut short): no words of the ghost's,
+	// and Text is empty.
+	Failed bool
 }
 
 // Lookup is one tool call and its result, cut short unless read through
@@ -72,4 +88,10 @@ type Lookup struct {
 	Tool   string
 	Args   string
 	Result string
+}
+
+// Short is the call cut to a line each way, as Client.Messages gives it:
+// for showing a person a call read whole through Client.Transcript.
+func (l Lookup) Short() Lookup {
+	return Lookup{Tool: l.Tool, Args: clip(l.Args, lookupArgs), Result: clip(l.Result, lookupResult)}
 }
