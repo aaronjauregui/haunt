@@ -27,7 +27,7 @@ func init() {
 	})
 	register(verb{
 		id:     "look",
-		desc:   "Look at the person's focused window and get a one-sentence description. The person sees you looking.",
+		desc:   "See the person's focused window, in one sentence, when they ask about what is on their screen. They see you looking.",
 		params: []string{"question?:string"},
 		run:    tool(toolLook),
 	})

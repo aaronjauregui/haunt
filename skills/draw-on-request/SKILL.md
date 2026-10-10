@@ -1,6 +1,6 @@
 ---
 name: draw-on-request
-description: "Asked to draw, paint, or show a picture again"
+description: "Asked to draw, paint, change or show a picture again"
 version: 1.0.0
 author: haunt
 metadata:
@@ -10,94 +10,43 @@ metadata:
 
 # Drawing on request
 
-You paint a small picture in your balloon with `draw`, and put
-one you painted before back up with `show`. Every new picture
-costs the person's image budget and takes a while; showing one again costs
-nothing.
+Only when they ask. A new picture costs their image budget; showing an
+old one costs nothing.
 
-## When
+## A new picture
 
-- They ask you to draw, paint or sketch something.
-- They ask to see a picture again ("show me the whale").
-- They ask for a change to the last one ("make it bluer", "try again").
+Call `draw` with `prompt` written for an image generator: subject first,
+then setting, lighting, composition, e.g. `a whale in a teacup, kitchen
+table, morning light, from above`. No style words (yours is added), no
+real people's names, no text in the picture, one picture per request.
 
-Not for: a picture nobody asked for, decorating a reply, their screen (that
-is `look`, and only when they ask), or anything they would not want on
-their screen at work.
+Your reply is its caption: one short line in your voice, not a
+description of the picture.
 
-## Showing one again
+## Show one again
 
-Your pictures keep their names (`p7`), and they last.
+"Show me the whale": call `pictures`, then `show` with `id`, the name of the
+one they mean. Never redraw what you can show.
 
-1. Call `pictures` to see what you have: newest first, with
-   each one's prompt and the line you said about it.
-2. Call `show` with the name of the one they mean.
+## Change one
 
-Never redraw something you could show. If nothing in the list is what they
-mean, say so and offer to paint a new one.
+"Make it bluer":
 
-## Changing one
+1. Take the old prompt from the `draw` result or from `pictures`.
+2. Change only what they asked for; keep the rest word for word.
+3. Call `draw` with `like` set to the old picture's name, so the
+   composition stays and only the colour moves.
 
-"Make it bluer" is a new picture of the same thing.
-
-1. Get the old prompt: the result of the `draw` call you already made this
-   turn, or `pictures`.
-2. Write the same prompt with only what they asked for changed. Keep the
-   subject and the setting word for word.
-3. Draw it with `like` set to the old picture's name. That keeps the
-   composition, so the whale stays the whale it was and only the colour
-   moves. Without it you get a different whale that happens to be bluer.
-4. Say the old one is still there if they end up preferring it.
-
-Only use `like` when they want *that* picture changed. A fresh request
-deserves a fresh picture, and passing `like` with a prompt you have not
-changed paints the same picture over again.
-
-## Writing the prompt
-
-Write `prompt` for an image generator, not for a person: a concrete visual
-description, subject first, then setting, lighting and composition, e.g.
-`a whale in a teacup, kitchen table, morning light, from above`.
-
-- Do not put style words in it. Your own style is added for you, and the
-  `draw` result tells you which.
-- No names of real people, and no text in the picture.
-- One picture per request. Never a series.
+Without `like` you get a different picture. Pass `like` only for a
+change to that picture.
 
 ## Style
 
-You have a house style: the look every picture of yours gets.
-`style` with no arguments tells you what it is.
-
-- "Draw it as pixel art" is about one picture: pass `style: false` and put
-  the look in the prompt.
-- "Draw everything as pixel art from now on" is a standing change: call
-  `style` with `set`. It works only on a turn they started, so
-  do it there and then, not later.
-- `style` with `reset` goes back to the style your package
-  gave you.
-
-If you are unsure which they mean, it is one picture.
-
-## Seeing what came out
-
-When it matters that the picture is right — they asked for something
-specific, or they are about to use it — pass `see: true` and let what it
-shows guide your caption. It costs a look, so leave it off otherwise.
-
-## Your caption
-
-The picture stays up for a while, and your final reply is its caption: one
-short line, in your voice. Do not describe the picture back to them, unless
-`see` told you it came out wrong, in which case say so plainly and offer
-another go.
+"Draw it as pixel art" is one picture: `style: false`, and put the look
+in the prompt. "Draw everything as pixel art from now on" is standing:
+call `style` with `set`, on the turn they asked. `style` with `reset`
+goes back. If unsure, it is one picture.
 
 ## When it fails
 
-`draw` answers "That was not allowed: …" when the person has
-not granted drawing, and "That did not work: …" when something is
-fullscreen, when the image backend failed, or when the budget is spent.
-`show` answers that there is no such picture when the name is
-wrong; call `pictures` and use a name from the list. Say what
-happened in one sentence, in plain words, and do not retry in the same
-turn.
+Say what happened in one plain sentence and do not retry this turn.

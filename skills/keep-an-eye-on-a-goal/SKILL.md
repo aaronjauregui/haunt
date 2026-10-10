@@ -1,6 +1,6 @@
 ---
 name: keep-an-eye-on-a-goal
-description: "kind=goal_quiet, or a goal to take on or ask about"
+description: "kind=goal_quiet, or a goal to take on, drop or finish"
 version: 1.0.0
 author: haunt
 metadata:
@@ -10,54 +10,40 @@ metadata:
 
 # Keeping an eye on a goal
 
-A goal is something the person wants from the coming weeks ("finish the
-thesis", "learn Rust"), with no moment attached. You hold it with
-`intend` and no `delay_ms`. The driver then watches their
-window titles for it, and tells you if it has gone quiet. A goal is theirs:
-you notice, you do not manage.
+A goal is something they want from the coming weeks ("finish the
+thesis"), with no moment. You notice; you do not manage.
 
 ## Taking one on
 
-When they say something matters to them over time, or ask you to keep an
-eye on something:
+1. Call `intentions`. If you already hold it, say so and stop.
+2. Call `intend` with `text` in their words, naming the subject plainly
+   ("the thesis", not "work stuff"), and no `delay_ms`.
+3. Say in one sentence that you will speak up only if it goes quiet.
 
-1. Call `intentions`. If you already hold the same goal, say
-   so, and stop.
-2. Call `intend` with `text` in their words, short, and naming
-   the subject plainly ("the thesis", not "work stuff"): the driver looks
-   for those words in window titles. No `delay_ms`.
-3. Reply in one sentence: you will keep an eye on it, and you will only
-   speak up if it goes quiet.
+## kind=goal_quiet
 
-## When it has gone quiet
+The event carries `goal`, `goal_name`, `held` and `last_seen`.
 
-`[haunt event] kind=goal_quiet`, with the goal's text (`goal`), its name
-(`goal_name`), how long you have held it (`held`) and when it was last in
-front of them (`last_seen`, or `never`).
-
-1. Say it once, gently, in one sentence to them: the goal, and how long it
-   has been. No guilt, no lecture.
-2. Call `ask` with "Still want this?" and choices like "Yes,
-   back to it", "Later" and "Drop it".
+1. Call `ask`. Its `text` is one gentle sentence naming the goal and
+   how long it has been, then "Still want this?". Its `choices`: "Yes,
+   back to it", "Later", "Drop it". No guilt.
+2. On the answer:
    - "Yes, back to it": a word of encouragement.
-   - "Later": `intend` with `text` like `ask about <goal>
-     again` and `delay_ms` of three days (259200000).
-   - "Drop it": `set_aside` with `goal_name`.
-   - Dismissed (an empty answer): leave it.
-3. The event's own `name` (`_haunt/drift/…`) is cleared once you have
-   said it. Never resolve `goal_name` unless they say the goal is done.
+   - "Later": `intend` with `text` `ask about <goal> again` and
+     `delay_ms` 259200000 (three days).
+   - "Drop it": `set_aside` with `name` set to the event's `goal_name`.
+   - Dismissed: leave it.
+3. End with a few words, or `stay_silent`.
 
-## When they ask how it is going
+## They drop it or finish it
 
-Call `intentions`, and answer from it and from what you
-remember. You cannot see how much time they spent; do not make numbers
-up. If they say it is done, `resolve` the goal and
-congratulate them.
+- "I don't care about X anymore", "forget the marathon": `set_aside`
+  with its `name`, then a short word, no guilt.
+- "I finished X": `resolve` with its `name`, then congratulate them.
 
-## Pitfalls
+The goal names are in your turn context, and in `intentions`.
 
-- At most one goal per nudge, and never on a quiet-hours or fullscreen
-  moment (the driver holds those back anyway).
-- Do not `look` at their screen to check on a goal.
-- If they tell you how they want nudging (less often, never), remember
-  it and follow it.
+## They ask how it is going
+
+Answer from `intentions` and what you remember. You cannot see how
+long they spent; never invent numbers. Do not `look` at their screen.
