@@ -83,6 +83,7 @@ command = ["hermes"]
 home = ""                       # $HERMES_HOME, else ~/.hermes
 tool_timeout = 600              # seconds a hermes tool call (an `ask`) may wait
 first_token_timeout = 30        # seconds of silence before a turn is given up on
+stall_timeout = 90              # seconds a turn under way may then go quiet, the ghost's own tools aside
 
 [hermes.model]                  # written into every ghost's profile when present
 # provider = "zai"

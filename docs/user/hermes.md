@@ -30,7 +30,12 @@ own words while it runs. When the model's provider is down, hermes
 retries a few times, then waits about fifteen seconds and thirty more,
 trying again after each; after that an answer to you says in the balloon
 that it failed, `haunt history` marks the turn `(the turn failed)`, and
-anything you said meanwhile goes to the model next.
+anything you said meanwhile goes to the model next. A provider that asks
+for a longer wait is not waited on: once a turn has gone a minute and a
+half with nothing new (`stall_timeout`), the ghost gives up on it, says so
+in the balloon, and hermes stops the turn. The ghost's own tools are not
+counted against that, so a picture that takes minutes to paint is
+waited for.
 
 ## Setting it up
 
@@ -150,3 +155,4 @@ All under `[hermes]` in the config ([Configuration](config.md)):
 | `model` | unset | written into every profile; unset keeps each profile's own |
 | `tool_timeout` | 600 | seconds one tool call may take, which is how long an `ask` may wait on you |
 | `first_token_timeout` | 30 | seconds of silence before a turn is given up on |
+| `stall_timeout` | 90 | seconds a turn that has started answering may then go with nothing new before it is given up on; the ghost's own tools running do not count |

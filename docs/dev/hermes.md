@@ -209,9 +209,27 @@ why-trace records the reply alone; the session keeps the interim words
 on the message that made the call, and `history` shows them as lines of
 the turn.
 
-On the driver's side: the first-token deadline (`[hermes]
-first_token_timeout`, 30 s) is on the first sign of life, and a tool
-event counts; the waiting indicator comes down when the first words are
+On the driver's side: two deadlines bound silence, not the turn
+(`turnDeadline`, fed every event's name by `TurnRequest.OnEvent`). The
+first-token deadline (`[hermes] first_token_timeout`, 30 s) runs to the
+first sign of life, which is any event past `run.started` and
+`message.started`: words, a tool event, reasoning. The stall deadline
+(`[hermes] stall_timeout`, 90 s) then runs from each event to the next;
+keepalive comments are not events. It stops while one of the ghost's own
+tools runs (`mcp__haunt__*`, from `tool.started` to `tool.completed` or
+`tool.failed`), since `draw` and `ask` take minutes and the MCP timeout
+bounds them; hermes's own tools are local reads and writes that ask no
+model and do not stop it. A turn given up on fails as any other does, with
+the reason in the balloon. Closing the stream stops the run in hermes: the
+API server's next write, a keepalive within 10 s, fails, and it calls
+`agent.interrupt("SSE client disconnected")`
+(`gateway/platforms/api_server.py`, `_handle_session_chat_stream`,
+`_drain_session_stream_task_on_disconnect`); a recovery wait checks for
+the interrupt every 200 ms (`agent/turn_recovery.py`,
+`interruptible_backoff_sleep`) and ends the turn through
+`abort_turn_on_interrupt`, which keeps what the turn had done in the
+session. `POST /v1/runs/{run_id}/stop` does the same at once and is not
+used. The waiting indicator comes down when the first words are
 put on screen, not on a tool event, since a `face` call followed by
 another model round trip is seconds with nothing to show; the talk
 animation runs while deltas arrive; tool events feed the why-trace and
@@ -226,15 +244,25 @@ waits and runs the retries again, `agent.auto_recovery_cycles` times, 5 by
 default, at 15, 30, 60, 60 and 60 s with up to a fifth more as jitter, or
 the provider's `Retry-After` up to 120 s. Its notices go to the status
 and thinking callbacks, which the session stream does not wire, so a
-waiting turn sends nothing but keepalives. Before the first sign of life
-the first-token deadline cuts that short; after a tool event nothing
-does, and a turn that wore a face would sit through four minutes and more
-with the person's words queued. The profile sets the cycles to 2: the
-waits of 15 and 30 s ride out a provider's overload, which on z.ai comes
-as bursts of 429s, and the later ones only make a dead provider slower to
-report. A turn that fails anyway is closed by hermes with an assistant
+waiting turn sends nothing but keepalives. The profile sets the cycles to
+2: the waits of 15 and 30 s ride out a provider's overload, which on z.ai
+comes as bursts of 429s, and the later ones only make a dead provider
+slower to report. With no `Retry-After`, the three attempts of each
+round (about 2 and 4 s apart) and the two waits come to at most about
+80 s of silence before hermes fails the turn itself. A `Retry-After`
+stretches a wait to as much as 120 s, and a retry honours one of up to
+600 s (`RETRY_AFTER_CAP_S` in `agent/retry_utils.py`), so the cycles
+alone do not bound a turn. The driver's deadlines do: before the first
+sign of life the first-token deadline, after it the stall deadline,
+whose 90 s leaves room for both short waits and their retries and cuts
+anything longer. A turn that fails anyway is closed by hermes with an assistant
 row of its own, "Your request was not processed…" (or "This turn did not
-complete…" once a tool ran), marked `display_kind: "failed_turn"`.
+complete…" once a tool ran), marked `display_kind: "failed_turn"`. A
+turn the driver gave up on during a recovery wait after a tool is closed
+instead with the interrupt's own text, "Operation interrupted: waiting
+for the provider to recover (cycle 1/2).", as a plain assistant row
+(`close_interrupted_tool_sequence` in `agent/message_sanitization.py`),
+which `history` reads as the ghost's words.
 
 **Waking.** The boot event starts the waking indicator ("waking up…")
 the moment the ghost is on screen, and the boot turn carries it

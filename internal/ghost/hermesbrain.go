@@ -616,24 +616,18 @@ func (b *hermesBrain) run(t hermesTurn) (out turnOutcome) {
 	began := time.Now()
 	defer func() { out.took = time.Since(began) }()
 
-	// The deadline is on the first sign of life — a word or a tool call —
-	// rather than on the whole turn: a tool that waits on a person's answer
-	// is working, and a gateway that has said nothing at all is not. The
-	// indicator is not a sign of life but a promise of words, so it stays
-	// until there are some on screen: a turn that wears a face and then
-	// thinks again is still a turn somebody is waiting on.
+	// The deadline is on silence rather than on the whole turn: first on
+	// the first sign of life, then on the stream going quiet between
+	// events, and never while one of the ghost's own tools runs, since a
+	// tool that waits on a person's answer is working, and a gateway that
+	// has said nothing at all is not (turnDeadline). The indicator is not
+	// a sign of life but a promise of words, so it stays until there are
+	// some on screen: a turn that wears a face and then thinks again is
+	// still a turn somebody is waiting on.
 	ctx, cancel := context.WithCancel(g.sessionContext())
 	defer cancel()
-	var timedOut atomic.Bool
-	deadline := time.AfterFunc(g.firstTokenTimeout(), func() {
-		timedOut.Store(true)
-		cancel()
-	})
-	defer deadline.Stop()
-	var alive sync.Once
-	wake := func() {
-		alive.Do(func() { deadline.Stop() })
-	}
+	deadline := newTurnDeadline(g.firstTokenTimeout(), g.stallTimeout(), cancel)
+	defer deadline.stop()
 
 	// The words arrive in parts: any written alongside tool calls ("let me
 	// look…"), each ended by OnInterim, and the reply after the last.
@@ -681,14 +675,12 @@ func (b *hermesBrain) run(t hermesTurn) (out turnOutcome) {
 		}
 	}
 	onDelta := func(delta string) {
-		wake()
 		mu.Lock()
 		defer mu.Unlock()
 		acc += delta
 		show(false)
 	}
 	onInterim := func(text string) {
-		wake()
 		mu.Lock()
 		defer mu.Unlock()
 		// Hermes's account of the part is the whole of it, whether or not
@@ -705,7 +697,7 @@ func (b *hermesBrain) run(t hermesTurn) (out turnOutcome) {
 		}
 	}
 	onTool := func(ev hermes.ToolEvent) {
-		wake()
+		deadline.tool(ev)
 		mu.Lock()
 		defer mu.Unlock()
 		switch {
@@ -722,6 +714,7 @@ func (b *hermesBrain) run(t hermesTurn) (out turnOutcome) {
 		OnDelta:   onDelta,
 		OnInterim: onInterim,
 		OnTool:    onTool,
+		OnEvent:   deadline.event,
 	})
 	g.stopTalking()
 	waiting.Stop()
@@ -731,8 +724,10 @@ func (b *hermesBrain) run(t hermesTurn) (out turnOutcome) {
 		}
 	}
 	if err != nil {
-		if timedOut.Load() {
-			err = fmt.Errorf("the brain said nothing for %s — is hermes running?", g.firstTokenTimeout())
+		if quiet, first, ok := deadline.expired(); ok && first {
+			err = fmt.Errorf("the brain said nothing for %s — is hermes running?", quiet)
+		} else if ok {
+			err = fmt.Errorf("the brain went quiet for %s mid-turn — is its model's provider down?", quiet)
 		}
 		b.fail(t, err)
 		out.failed = true

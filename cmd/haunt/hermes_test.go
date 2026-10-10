@@ -392,13 +392,16 @@ type fakeRule struct {
 	Tool       string         `json:"tool,omitempty"`
 	Args       map[string]any `json:"args,omitempty"`
 	Then       []fakeStep     `json:"then,omitempty"`
+	StallMS    int            `json:"stall_ms,omitempty"`
+	Reasoning  bool           `json:"reasoning,omitempty"`
 	Reply      string         `json:"reply"`
 }
 
 // fakeStep is one more tool call in a fakeRule's turn, after Tool.
 type fakeStep struct {
-	Tool string         `json:"tool"`
-	Args map[string]any `json:"args,omitempty"`
+	Tool    string         `json:"tool"`
+	Args    map[string]any `json:"args,omitempty"`
+	DelayMS int            `json:"delay_ms,omitempty"`
 }
 
 // historyJSON is `haunt history -json` for the ghost in stateDir, every

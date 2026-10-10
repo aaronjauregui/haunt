@@ -41,6 +41,11 @@ type Config struct {
 	// on the person's answer is working, and a gateway that has said
 	// nothing at all has wedged.
 	FirstTokenSeconds int `toml:"first_token_timeout"`
+	// StallSeconds is how long a turn that has shown a sign of life may then
+	// go with nothing on its stream before the driver gives up on it
+	// (default 90). Keepalive comments are not something on the stream,
+	// and the clock stops while one of the ghost's own tools runs.
+	StallSeconds int `toml:"stall_timeout"`
 }
 
 // FirstTokenTimeout is FirstTokenSeconds with its default.
@@ -49,6 +54,29 @@ func (c Config) FirstTokenTimeout() time.Duration {
 		return time.Duration(c.FirstTokenSeconds) * time.Second
 	}
 	return 30 * time.Second
+}
+
+// StallTimeout is StallSeconds with its default.
+//
+// The default is set against what hermes does when the model's provider
+// gives out mid-turn, which sends nothing on the stream but keepalives
+// until the turn either goes on or fails. It first spends
+// agent.api_max_retries (3 attempts, about 2 and 4 s apart with jitter),
+// then waits out the outage autoRecoveryCycles times, at 15 and 30 s with
+// up to a fifth more as jitter, running the retries again after each.
+// Without a Retry-After that is at most about 80 s of silence, plus the
+// failed requests themselves, before hermes fails the turn on its own (a
+// run.failed, which the driver hears). 90 s lets both short waits run,
+// and a provider back within them answers the turn. A provider that
+// names a Retry-After is waited on for up to 120 s a cycle (and up to 600
+// s a retry), which is the case this deadline is for: the turn is cut at
+// 90 s of silence rather than held for minutes. Ninety seconds is also
+// far more than a model needs between one tool call and its next words.
+func (c Config) StallTimeout() time.Duration {
+	if c.StallSeconds > 0 {
+		return time.Duration(c.StallSeconds) * time.Second
+	}
+	return 90 * time.Second
 }
 
 // ModelConfig is the model block of a profile.
@@ -313,12 +341,15 @@ const configVersion = 50
 // waits out a provider outage once its retries are spent, before it fails
 // the turn (agent/turn_recovery_autorecover.py). The waits are 15 s, then
 // 30, then 60 each, jittered, or the provider's Retry-After up to 120, and
-// nothing reaches the turn's stream during one. The driver's deadline is on
-// the first sign of life only, so after a tool call hermes's default of
-// five would hold the turn for minutes with the person's words queued
-// behind it. Two keep the short waits, which ride out a provider's
-// overload (z.ai's 429s come in bursts), and still fail a dead one within
-// a minute.
+// nothing reaches the turn's stream during one. Two keep the short waits,
+// which ride out a provider's overload (z.ai's 429s come in bursts), and
+// drop the later ones, which only make a dead provider slower to report:
+// with no Retry-After, hermes fails the turn after about 80 s of waits and
+// retries. A Retry-After stretches each wait to as much as 120 s, and the
+// retries between them honour one of up to 600, so the cycles alone do not
+// bound a turn. What does is the driver's stall deadline ([hermes]
+// stall_timeout, Config.StallTimeout), which gives up on a turn whose
+// stream has been silent that long and leaves room for both short waits.
 const autoRecoveryCycles = 2
 
 func (c Config) writeConfig(path string, spec ProfileSpec, hasSkills bool) error {

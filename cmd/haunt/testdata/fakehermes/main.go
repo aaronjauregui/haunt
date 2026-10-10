@@ -87,6 +87,13 @@ type rule struct {
 	// streamed, then sent as assistant.commentary before the call starts,
 	// and kept on the call's message, as hermes does.
 	Interim string `json:"interim"`
+	// StallMS is silence after the tools and before the reply, as while
+	// hermes waits out a provider outage: nothing on the stream but
+	// keepalive comments, unless Reasoning.
+	StallMS int `json:"stall_ms"`
+	// Reasoning fills the stall with the model's reasoning instead, a
+	// tool.progress for `_thinking` every 100 ms.
+	Reasoning bool `json:"reasoning"`
 	// Reply is what the model says. {tool} is replaced by the last
 	// tool's result and {input} by the input.
 	Reply string `json:"reply"`
@@ -96,6 +103,33 @@ type rule struct {
 type step struct {
 	Tool string         `json:"tool"`
 	Args map[string]any `json:"args"`
+	// DelayMS is how long the call takes before the tool is reached, as
+	// one that waits on an image backend does: tool.started goes out
+	// first, and nothing else until the call is done.
+	DelayMS int `json:"delay_ms"`
+}
+
+// pause waits d, sending a keepalive comment every 100 ms, or a reasoning
+// event when reasoning; false if the client went away meanwhile.
+func (e *sse) pause(ctx context.Context, d time.Duration, reasoning bool, msgID string) bool {
+	end := time.After(d)
+	tick := time.NewTicker(100 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case <-end:
+			return true
+		case <-ctx.Done():
+			return false
+		case <-tick.C:
+			if reasoning {
+				e.send("tool.progress", map[string]any{"message_id": msgID, "tool_name": "_thinking", "delta": "hmm"})
+			} else {
+				fmt.Fprint(e.w, ": keepalive\n\n")
+				e.fl.Flush()
+			}
+		}
+	}
 }
 
 var defaultRules = []rule{
@@ -636,6 +670,10 @@ func (s *server) chat(w http.ResponseWriter, r *http.Request) {
 		tool := "mcp__haunt__" + st.Tool
 		interim()
 		e.send("tool.started", map[string]any{"message_id": msgID, "tool_name": tool, "preview": "", "args": st.Args})
+		if st.DelayMS > 0 && !e.pause(r.Context(), time.Duration(st.DelayMS)*time.Millisecond, false, msgID) {
+			logEntry(map[string]any{"kind": "abandoned", "session": id, "input": body.Input})
+			return
+		}
 		text, err := s.callTool(r.Context(), st.Tool, st.Args)
 		if err != nil {
 			e.send("tool.failed", map[string]any{"message_id": msgID, "tool_name": tool, "error": err.Error()})
@@ -648,6 +686,10 @@ func (s *server) chat(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(steps) > 0 {
 		reply = strings.ReplaceAll(reply, "{tool}", last)
+	}
+	if rl.StallMS > 0 && !e.pause(r.Context(), time.Duration(rl.StallMS)*time.Millisecond, rl.Reasoning, msgID) {
+		logEntry(map[string]any{"kind": "abandoned", "session": id, "input": body.Input})
+		return
 	}
 	if len(calls) > 0 {
 		stored = append(stored, map[string]any{"role": "assistant", "content": rl.Interim, "tool_calls": calls, "timestamp": now})

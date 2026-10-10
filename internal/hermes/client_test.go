@@ -355,6 +355,38 @@ func TestSessionIsFoundAndRemade(t *testing.T) {
 	}
 }
 
+// OnEvent hears every event on the stream by name, the reasoning that no
+// other callback reports among them, and not the keepalive comments a
+// stream carries while hermes waits.
+func TestTurnReportsEveryEvent(t *testing.T) {
+	f, srv := newFakeHermes(t)
+	stream := fixture(t, "lookup-silent.sse")
+	var want []string
+	for _, line := range strings.Split(stream, "\n") {
+		if name, ok := strings.CutPrefix(line, "event: "); ok {
+			want = append(want, name)
+		}
+	}
+	f.stream = func(string, string) string {
+		return strings.ReplaceAll(stream, "event: tool.progress", ": keepalive\n\n: keepalive\n\nevent: tool.progress")
+	}
+	saved := ""
+	var got []string
+	_, err := testClient(srv, &saved).Turn(context.Background(), TurnRequest{
+		Input:   "x",
+		OnEvent: func(name string) { got = append(got, name) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("events heard:\n%v\nwant:\n%v", got, want)
+	}
+	if !slices.Contains(got, "tool.progress") {
+		t.Error("the model's reasoning was not heard")
+	}
+}
+
 func TestTurnReportsFailure(t *testing.T) {
 	f, srv := newFakeHermes(t)
 	f.sessions["haunt-moth"] = true

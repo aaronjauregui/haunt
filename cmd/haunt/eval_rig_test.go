@@ -1033,8 +1033,8 @@ func rigUserHermes() (hermes.Config, string) {
 }
 
 // rigConfigTOML is a trial's config.toml: the person's hermes command and
-// model, and a hermes home of the trial's own. The first-token timeout
-// goes too, since it is a property of the model's speed; nothing else of
+// model, and a hermes home of the trial's own. The first-token and stall
+// timeouts go too, since they are properties of the model's speed; nothing else of
 // theirs does, so a trial is the same whatever else they have configured.
 func rigConfigTOML(user hermes.Config, home string) (string, error) {
 	var section struct {
@@ -1042,12 +1042,14 @@ func rigConfigTOML(user hermes.Config, home string) (string, error) {
 			Command    []string            `toml:"command"`
 			Home       string              `toml:"home"`
 			FirstToken int                 `toml:"first_token_timeout,omitempty"`
+			Stall      int                 `toml:"stall_timeout,omitempty"`
 			Model      *hermes.ModelConfig `toml:"model,omitempty"`
 		} `toml:"hermes"`
 	}
 	section.Hermes.Command = user.Command
 	section.Hermes.Home = home
 	section.Hermes.FirstToken = user.FirstTokenSeconds
+	section.Hermes.Stall = user.StallSeconds
 	section.Hermes.Model = user.Model
 	var b bytes.Buffer
 	if err := toml.NewEncoder(&b).Encode(section); err != nil {
@@ -1381,6 +1383,7 @@ func TestRigConfig(t *testing.T) {
 command = ["/bin/sh", "-c", "exit 0"]
 home = "/somewhere/else"
 first_token_timeout = 90
+stall_timeout = 120
 
 [hermes.model]
 provider = "zai"
@@ -1410,8 +1413,8 @@ dwell = "5m"
 		t.Fatalf("the trial's config does not load: %v\n%s", err, text)
 	}
 	if strings.Join(got.Hermes.Command, " ") != "/bin/sh -c exit 0" || got.Hermes.Home != home ||
-		got.Hermes.FirstTokenSeconds != 90 {
-		t.Errorf("trial [hermes] = %+v, want the person's command and timeout, and home %s", got.Hermes, home)
+		got.Hermes.FirstTokenSeconds != 90 || got.Hermes.StallSeconds != 120 {
+		t.Errorf("trial [hermes] = %+v, want the person's command and timeouts, and home %s", got.Hermes, home)
 	}
 	if m := got.Hermes.Model; m == nil || m.Provider != "zai" || m.Default != "glm-5.3" {
 		t.Errorf("trial [hermes.model] = %+v, want the person's", m)
