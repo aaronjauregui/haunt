@@ -75,9 +75,11 @@ api_key_env = "ZAI_API_KEY"
 context_length = 131072
 ```
 
-Under the systemd unit, the variable has to be in the unit's environment
-(`systemctl --user set-environment ZAI_API_KEY=…`, or an
-`Environment=` line in a drop-in). An empty `api_key_env` sends no key,
+Under the systemd unit, the variable has to be in the unit's environment:
+a line in `~/.config/environment.d/haunt.conf` (`ZAI_API_KEY=…`, mode
+0600) reaches every user service and the desktop session from the next
+login, and `systemctl --user set-environment ZAI_API_KEY=…` reaches the
+running manager now; an `Environment=` line in a drop-in works too. An empty `api_key_env` sends no key,
 which is what a local server wants.
 
 ## Where it runs decides what it may do
