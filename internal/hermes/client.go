@@ -646,6 +646,7 @@ func (c *Client) messages(ctx context.Context, n, argsMax, resultMax int) ([]Mes
 		}
 		looked, acted, byCall, last = nil, nil, map[string]callAt{}, -1
 	}
+	prev := "" // the role of the last row not hidden
 	for _, m := range out.Data {
 		if m.DisplayKind == "hidden" {
 			// A compaction handoff or a control row, said by nobody. A
@@ -654,11 +655,15 @@ func (c *Client) messages(ctx context.Context, n, argsMax, resultMax int) ([]Mes
 			// as the person's words would.
 			continue
 		}
+		afterTool := prev == "tool"
+		prev = m.Role
 		text := rawText(m.Content)
-		if m.DisplayKind == "failed_turn" {
+		interrupted := afterTool && m.Role == "assistant" && m.DisplayKind == "" && len(m.ToolCalls) == 0 && interruptNotice(text)
+		if m.DisplayKind == "failed_turn" || interrupted {
 			// Hermes's notice, "Your request was not processed…", written
-			// in the ghost's place when a turn failed. The turn's calls go
-			// on it, as they would on a reply.
+			// in the ghost's place when a turn failed, or the interrupt's
+			// own words closing a turn stopped after a tool. The turn's
+			// calls go on it, as they would on a reply.
 			last = len(msgs)
 			msgs = append(msgs, Message{Role: "assistant", Failed: true, Time: unixTime(m.Timestamp)})
 			continue
@@ -711,6 +716,54 @@ func (c *Client) messages(ctx context.Context, n, argsMax, resultMax int) ([]Mes
 	endTurn()
 	// "latest" pages back from the newest and still answers oldest first.
 	return msgs, nil
+}
+
+// interruptNotices open the rows hermes closes an interrupted turn with
+// when its last row is a tool result: a plain assistant row, with no
+// display_kind, whose content is the interrupt's own text
+// (agent/message_sanitization.py, close_interrupted_tool_sequence, called
+// from agent/turn_recovery.py abort_turn_on_interrupt and from
+// agent/turn_finalizer.py _close_transcript_tail). The texts, by where
+// hermes writes them:
+//
+//   - "Operation interrupted: waiting for the provider to recover (cycle
+//     1/2)." agent/turn_recovery_autorecover.py
+//   - "Operation interrupted: handling API error (…)." and "Operation
+//     interrupted: retrying API call after error (retry 1/3)."
+//     agent/turn_api_error.py
+//   - "Operation interrupted: retrying empty response from model (retry
+//     1/3)." agent/turn_empty_response.py
+//   - "Operation interrupted: waiting for model response (4.2s
+//     elapsed)." INTERRUPT_WAITING_FOR_MODEL_PREFIX in
+//     agent/conversation_loop.py, used by agent/turn_api_call.py
+//     handle_api_interrupt and agent/turn_finalizer.py
+//   - "Operation interrupted during retry (…, attempt 1/3)."
+//     agent/turn_response_check.py
+//
+// An interrupt the closed stream causes and one POST
+// /v1/runs/{run_id}/stop causes write the same rows. A turn interrupted
+// before any tool ran gets a failed_turn row instead, one with no text
+// at all gets a hidden row, and one interrupted while the model was
+// writing keeps the words it had written, which are the ghost's.
+//
+// The match is on hermes's wording, and is rechecked when the pin moves
+// (docs/dev/hermes.md, Moving the pin).
+var interruptNotices = []string{
+	"Operation interrupted: ",
+	"Operation interrupted during retry (",
+}
+
+// interruptNotice is whether an assistant row's text is hermes's
+// interrupt notice rather than the ghost's words. Only a row straight
+// after a tool result can be one, which keeps a reply that happens to
+// open the same way the ghost's.
+func interruptNotice(text string) bool {
+	for _, p := range interruptNotices {
+		if strings.HasPrefix(strings.TrimSpace(text), p) {
+			return true
+		}
+	}
+	return false
 }
 
 // unixTime is a hermes timestamp, seconds since the epoch as a float.

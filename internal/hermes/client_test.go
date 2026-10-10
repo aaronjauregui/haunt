@@ -715,6 +715,56 @@ func TestMessagesFailedTurn(t *testing.T) {
 	}
 }
 
+// A turn stopped during a recovery wait after a tool is closed with the
+// interrupt's own words in a plain assistant row; it reads as a failed
+// turn, not as the ghost's words, and keeps the turn's calls. A reply
+// that opens the same way but does not follow a tool result is words.
+// history-interrupted.json is hand-built in the shape of
+// history-failed.json, with the row close_interrupted_tool_sequence
+// writes.
+func TestMessagesInterruptedTurn(t *testing.T) {
+	f, srv := newFakeHermes(t)
+	f.sessions["haunt-moth"] = true
+	f.history = fixture(t, "history-interrupted.json")
+	saved := "haunt-moth"
+	msgs, err := testClient(srv, &saved).Messages(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 4 || msgs[0].Text != "What's on my list?" || msgs[1].Role != "assistant" || !msgs[1].Failed || msgs[1].Text != "" ||
+		msgs[1].Time.Unix() != 1791619129 || msgs[2].Text != "Hello again." ||
+		msgs[3].Failed || msgs[3].Text != "Operation interrupted: that is what the pipe said." {
+		t.Fatalf("messages %+v", msgs)
+	}
+	if len(msgs[1].Acted) != 1 || msgs[1].Acted[0].Tool != "intentions" || !strings.Contains(msgs[1].Acted[0].Result, "nothing is pending") {
+		t.Errorf("the interrupted turn's calls %+v", msgs[1].Acted)
+	}
+
+	// Every wording hermes closes an interrupted turn with.
+	for _, notice := range []string{
+		"Operation interrupted: waiting for the provider to recover (cycle 2/2).",
+		"Operation interrupted: handling API error (RateLimitError: slow down).",
+		"Operation interrupted: retrying API call after error (retry 1/3).",
+		"Operation interrupted: retrying empty response from model (retry 1/2).",
+		"Operation interrupted: waiting for model response (4.2s elapsed).",
+		"Operation interrupted during retry (invalid response, attempt 2/3).",
+	} {
+		b, _ := json.Marshal(notice)
+		f.history = `{"data":[
+			{"role":"user","content":"hi","timestamp":1},
+			{"role":"assistant","content":"","tool_calls":[{"id":"c1","function":{"name":"memory","arguments":"{}"}}],"timestamp":2},
+			{"role":"tool","tool_call_id":"c1","content":"ok","timestamp":3},
+			{"role":"assistant","content":` + string(b) + `,"display_kind":null,"timestamp":4}]}`
+		msgs, err := testClient(srv, &saved).Messages(context.Background(), 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 2 || !msgs[1].Failed || msgs[1].Text != "" {
+			t.Errorf("%q read as %+v", notice, msgs)
+		}
+	}
+}
+
 // A compacted session is read whole, and its handoff is not a turn. The
 // fixtures are hermes's own answers, from its session store and API
 // handler: history-compacted.json is an in-place compaction in the middle

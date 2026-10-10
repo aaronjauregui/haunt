@@ -199,7 +199,9 @@ v0.21.6 gateway: `lookup.sse` (interim words, a lookup, the reply),
 `lookup-interim-off.sse` (the same with interim messages off),
 `lookup-silent.sse` (interim words, a lookup, `NO_REPLY`), `failed.sse`
 and `history-failed.json` (a turn whose provider never answered, and the
-session read back after it).
+session read back after it). `history-interrupted.json` is built by hand
+in the shape of `history-failed.json`, with the row hermes closes a turn
+interrupted after a tool with.
 
 **Interim words.** Text the model writes alongside a tool call ("let me
 look…") streams as `assistant.delta` like any other, and once that model
@@ -311,11 +313,20 @@ assistant row of its own, "Your request was not processed. Send it again
 if you still want me to carry it out." (or "This turn did not
 complete…" once a tool ran), marked `display_kind: "failed_turn"`, which
 `run.failed`'s `messages` also carries. A turn the driver gave up on
-during a recovery wait after a tool is closed instead with the
-interrupt's own text, "Operation interrupted: waiting for the provider to
-recover (cycle 1/2).", as a plain assistant row
-(`close_interrupted_tool_sequence` in `agent/message_sanitization.py`),
-which `history` reads as the ghost's words.
+after a tool ran is closed instead with the interrupt's own text as a
+plain assistant row, no `display_kind`
+(`close_interrupted_tool_sequence` in `agent/message_sanitization.py`):
+"Operation interrupted: waiting for the provider to recover (cycle
+1/2)." during a recovery wait, and other "Operation interrupted…"
+wordings elsewhere (`interruptNotices` in `internal/hermes/client.go`
+lists them with their files). The stop and the closed stream write the
+same rows; the stop's being an explicit one changes only the reason
+hermes gives in the result of a tool it cancels. `history` reads such a
+row as a failed turn (see [Why-trace and history](#why-trace-and-history)).
+Hermes's own context for the model does not: the row goes to the
+model on the next turn as an assistant message, the ghost's own words as
+far as the model can tell. That is hermes's to change, and haunt leaves
+it.
 
 **Waking.** The boot event starts the waking indicator ("waking up…")
 the moment the ghost is on screen, and the boot turn carries it
@@ -778,7 +789,11 @@ placed where the compaction happened, which can be inside a turn between
 a lookup and its reply; a handoff merged into a real message comes back
 as that message's own content. Every `hidden` row is skipped, before it
 can end a turn. A `failed_turn` row is hermes's notice closing a turn
-that failed: it is read as a failed reply with no words
+that failed, and so is a plain assistant row straight after a tool
+result whose text opens with one of hermes's interrupt notices
+("Operation interrupted: " or "Operation interrupted during retry (",
+`interruptNotices`), which closes a turn interrupted after a tool. Either
+is read as a failed reply with no words
 (`Message.Failed`), which takes the turn's calls, `-json` gives it as
 `"failed": true` and `-why` as `(the turn failed)`, and the evals record
 the trial as an error rather than grade it. `-why` joins the trace
@@ -872,6 +887,22 @@ and a subtracted tool `absentTools` (`skills.go`) does not match. The
 check also fails when `ghostTools` (`skills.go`) is not exactly the
 tools of the allowed toolsets; a memory provider's or a context
 engine's tools are the person's and not among them.
+
+Some of what the client reads is hermes's wording, which no check
+covers, and is read again in the new source by hand:
+
+- `interruptNotices` (`internal/hermes/client.go`): the texts hermes
+  closes an interrupted turn with. Search the source for "Operation
+  interrupted" and for callers of `close_interrupted_tool_sequence`;
+  the comment lists every place the current pin writes one. A new
+  wording reads in `history` as the ghost's words.
+- `providerSaidMark`: the "Provider said:" line of a failed turn's
+  notice (`agent/turn_failure_copy.py`). Without it a failed turn's
+  error loses its reason.
+- `Client.stopRun`: `POST /v1/runs/{run_id}/stop` answering before the
+  run is over, and the terminal statuses `GET /v1/runs/{run_id}` reports
+  (`gateway/platforms/api_server_runs.py`,
+  `api_server_run_idempotency.py`).
 
 ## Tests
 
