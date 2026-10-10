@@ -137,9 +137,17 @@ reminder, keep a banned phrase out of a reply. Every trial also gets the
 `always/` checks: no envelope or `NO_REPLY` in what it says, no Markdown,
 no emoji, no tool names, no pose tag left in the words, at most 60 words
 a reply, and nothing in the log
-that says haunt itself broke. What code cannot grade, the content and tone
-of a reply, a judge grades: `claude -p` on your subscription, asked fixed
-yes/no questions from a rubric (`eval_rubrics_test.go`), one call per
+that says haunt itself broke.
+
+Memory is whichever store the person configured in hermes, so the
+graders that look for a memory write know each bundled provider's tools
+by name (`memoryWrites` and `memoryReads` in `eval_cases_test.go`). Any
+other call hermes files under memory makes the trial an error
+(`always/memory-known`): a write the graders cannot see would let
+"remembered none of it" pass.
+
+What code cannot grade, the content and tone of a reply, a judge grades:
+`claude -p` on your subscription, asked fixed yes/no questions from a rubric (`eval_rubrics_test.go`), one call per
 reply. Every judged reply is held to the tone questions too, which come
 from wisp's persona and the rules every ghost has.
 
