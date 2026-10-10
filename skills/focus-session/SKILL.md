@@ -1,67 +1,48 @@
 ---
 name: focus-session
-description: "Timed focus session (pomodoro) when they want to focus"
+description: "They want to focus (pomodoro), or a focus session ends"
 version: 1.0.0
 author: haunt
 metadata:
   haunt:
-    requires_tools: [ask, ask_text, intend, intentions, resolve, set_aside]
+    requires_tools: [ask, intend, intentions, resolve]
 ---
 
 # Focus session
 
-The person wants a stretch of focused work, and you keep time and keep
-quiet. The session is an errand you hold with `intend`, so it survives a
-restart and comes back to you when it ends.
+You keep time and keep quiet while they work.
 
 ## Starting
 
-1. You need two things: what they are working on and for how long.
-   - If they did not say how long, call `ask` with choices
-     such as "25 minutes", "50 minutes" and "Until I say".
-   - If they did not say what on, one `ask_text` is fine.
-     Skip it if the focused window makes it obvious.
-2. Call `intend` with `text` like `focus session on <thing>
-   ends` and `delay_ms` set to the length, in milliseconds (25 minutes is
-   1500000). For "until I say", leave out `delay_ms`, which makes it a
-   goal.
-3. If your shell has a fitting pose (see your instructions), wear it with
-   `face`.
-4. Reply with one short sentence that says when you will be back, then
-   stay out of the way.
+1. Call `intentions`. If a focus session is already running, `ask`
+   whether to end it first.
+2. No length given: call `ask` with `text` "How long?" and `choices`
+   "25 minutes", "50 minutes", "Until I say".
+3. Call `intend` with `text` `focus session on <thing> ends` and
+   `delay_ms` the length (25 minutes is 1500000). "Until I say": no
+   `delay_ms`.
+4. Say when you will be back, in one short sentence.
 
 ## During
 
-- For `[haunt event]` lines (idle, session, observed), call `stay_silent`.
-  Other ghosts chattering are no reason to break the person's focus.
-  A different errand that comes due is still said, briefly.
-- If the person speaks to you, answer briefly. If they say they are done
-  early, go on to "Ending".
-- Do not `look` at their screen, and do not `draw`.
+Call `stay_silent` on every event except a reminder coming due. If they
+speak, answer briefly. Do not `look` or draw.
 
 ## Ending
 
-When the errand comes due (`[haunt event] kind=intention_due`, with your
-focus session's text), or they say they are done:
+On `kind=intention_due` with the session's text, or when they say they
+are done:
 
-1. Tell them time is up, in a few words.
-2. Call `ask` with "How did it go?" and choices such as "Got
-   it done", "Made progress" and "Got distracted".
-3. Call `resolve` with the errand's name, whatever they
-   answered. For a goal the person no longer wants, use
-   `set_aside` instead.
-4. Offer a break: `ask` with choices "5 minute break",
-   "Another round" and "I'm done".
-   - "5 minute break": `intend` with text `break ends` and
-     `delay_ms` 300000. When it comes due, ask whether to go again.
-   - "Another round": start again, with the same thing and length.
-   - "I'm done", or dismissed: a short word of thanks, and nothing more.
+1. Call `ask` with `text` "Time's up. How did it go?" and `choices`
+   "Got it done", "Made progress", "Got distracted".
+2. Call `resolve` with `name` set to the session's name, whatever they
+   picked.
+3. Call `ask` with `text` "Take a break?" and `choices` "5 minute break",
+   "Another round", "I'm done".
+   - "5 minute break": `intend` with `text` `break ends` and `delay_ms`
+     300000.
+   - "Another round": start again, same thing and length.
+   - "I'm done", or dismissed: nothing more to do.
+4. End with a few words of thanks, or `stay_silent`.
 
-## Pitfalls
-
-- One session at a time. Before starting, check with
-  `intentions` whether one is already running, and offer to
-  end it first.
-- If they got distracted, do not lecture them. If they say how they like
-  to work (shorter sessions, no check-in question), remember it and
-  follow it next time.
+Never lecture about distraction.

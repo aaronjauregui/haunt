@@ -17,29 +17,30 @@ import (
 func init() {
 	register(verb{
 		id: "intend",
-		desc: "Take something on so it is not forgotten, across restarts. With delay_ms it is an errand that comes " +
-			"back to you at that moment (a reminder); without, it is a goal you keep an eye on. Returns its name.",
+		desc: "Take something on when they ask you to remind them or keep an eye on something. With delay_ms " +
+			"it is a reminder that comes back to you then; without, a goal you watch for. Returns its name.",
 		params:     []string{"text:string", "delay_ms?:integer", "name?:string"},
 		run:        tool(toolIntend),
 		sideEffect: true,
 	})
 	register(verb{
 		id:         "resolve",
-		desc:       "Discharge something you took on: it was done.",
+		desc:       "Close a reminder or goal that is done: they finished it, or you delivered the reminder.",
 		params:     []string{"name:string"},
 		run:        tool(toolResolve),
 		sideEffect: true,
 	})
 	register(verb{
-		id:         "set_aside",
-		desc:       "Stop keeping an eye on a goal the person no longer cares about, without claiming it was done.",
+		id: "set_aside",
+		desc: "Drop a goal they no longer want (\"I don't care about the marathon anymore\", \"drop it\") " +
+			"without calling it done. Its name is in your context or intentions.",
 		params:     []string{"name:string"},
 		run:        tool(toolSetAside),
 		sideEffect: true,
 	})
 	register(verb{
 		id:   "intentions",
-		desc: "List what you are holding: errands and goals, with their names.",
+		desc: "List the reminders and goals you hold, with the names resolve and set_aside take.",
 		run:  tool(toolIntentions),
 	})
 }

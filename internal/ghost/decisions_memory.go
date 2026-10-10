@@ -21,8 +21,8 @@ import (
 func init() {
 	register(verb{
 		id: "remember",
-		desc: "Keep one line about the person or your life together, under a topic (food, work, family…). " +
-			"One fact per line, in your own words.",
+		desc: "Keep one fact they told you about themselves, in your own words, under a topic (food, work…). " +
+			"Not for a goal they drop: that is set_aside.",
 		params: []string{"topic:string", "line:string"},
 		run:    remember,
 	})

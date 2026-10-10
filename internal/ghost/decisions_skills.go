@@ -17,7 +17,7 @@ import (
 func init() {
 	register(verb{
 		id:     "skill_view",
-		desc:   "Load one of the skills listed in your instructions, by name, and follow it.",
+		desc:   "Open a skill from your list by name. Call it before acting on anything a skill covers, then follow its steps.",
 		params: []string{"name:string"},
 		run:    skillView,
 	})

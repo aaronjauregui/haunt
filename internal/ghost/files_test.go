@@ -461,7 +461,7 @@ func TestThePersonaNamesNoFolders(t *testing.T) {
 	if !p.Files || p.FilesUnprompted != "skills" {
 		t.Errorf("persona files = %v %q", p.Files, p.FilesUnprompted)
 	}
-	if !slices.Contains(p.Abilities, "read the files in folders they have shared with you") {
+	if !slices.Contains(p.Abilities, "read the files in folders they shared") {
 		t.Errorf("abilities %q do not include reading files", p.Abilities)
 	}
 	if s := fmt.Sprint(p); strings.Contains(s, dir) || strings.Contains(s, "notes") {
