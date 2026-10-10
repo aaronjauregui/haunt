@@ -24,7 +24,7 @@ Requirements:
 | For | Needs |
 |---|---|
 | Building | Go 1.25 or later |
-| A ghost that thinks | hermes-agent, see [The brain](hermes.md) |
+| A ghost that thinks | an OpenAI-compatible model endpoint, local or cloud, see [The model](model.md) |
 | A ghost that looks at your screen | `grim` |
 | Running the tests | `sway` and `grim`, and `foot` for the window tests |
 
@@ -51,13 +51,13 @@ Logs, including each ghost's own:
 
     journalctl --user -u haunt -f
 
-A user unit gets a sparse `PATH`. If `hermes` lives somewhere like
-`~/.local/bin`, name it in the config:
+A user unit gets a sparse environment. A cloud model's key, named by
+`[model] api_key_env`, has to be in it:
 
-```toml
-[hermes]
-command = ["/home/you/.local/bin/hermes"]
-```
+    systemctl --user set-environment ZAI_API_KEY=…
+
+or an `Environment=` line in a drop-in made with `systemctl --user edit
+haunt`.
 
 ## Where things live
 
@@ -65,11 +65,10 @@ command = ["/home/you/.local/bin/hermes"]
 |---|---|
 | Config | `~/.config/haunt/config.toml` (`XDG_CONFIG_HOME` respected; `HAUNT_CONFIG_DIR` overrides) |
 | Installed ghosts | `~/.local/share/haunt/ghosts/<name>/` (`XDG_DATA_HOME` respected) |
-| A ghost's memory | `ghosts/<name>/state.db`, its grants in `ghosts/<name>/grants.toml` |
+| A ghost's state | `ghosts/<name>/state.db`, its memory in `memory/`, its conversation in `transcript.db`, its grants in `grants.toml` |
 | Who is resident | `~/.local/share/haunt/resident` |
 | Control sockets | under `XDG_RUNTIME_DIR` (`HAUNT_RUNTIME_DIR` overrides) |
 | Author signing key | see [Packaging](../ghosts/packaging.md) |
-| A ghost's hermes profile | `~/.hermes/profiles/haunt-<name>/` (`[hermes] home` or `HERMES_HOME` overrides) |
 
 Nothing in the config file is required. A missing file is the shipping
 configuration; [Configuration](config.md) lists what can go in it.

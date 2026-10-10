@@ -8,15 +8,14 @@ ghost writes goes to a throwaway directory, so nothing lands in your
 library.
 
     make demo         # whisper: a scripted ghost with a WASM brain
-    make demo-ai      # wisp: no brain of its own, runs on hermes-agent
+    make demo-ai      # wisp: no brain of its own, thinks with your [model]
     make demo-troupe  # both at once
     make demo-seriko SERIKO=<ghost.nar>   # somebody else's ukagaka shell art
 
-`make demo-ai` needs hermes set up first ([The brain](hermes.md)).
+`make demo-ai` needs a model in `[model]` first ([The model](model.md)).
 Wisp declares `screen`, so with `[backend.vision]` configured it can look
-at the focused window; the key named in `api_key_env` has to be in the
-environment `make` runs in, since hermes's key file is the container's
-alone ([Configuration](config.md)).
+at the focused window. The keys named in `api_key_env` have to be in the
+environment `make` runs in ([Configuration](config.md)).
 `IDLE_MS=10000` shortens the wait before a demo ghost may speak first,
 and `GOAL_DELAY=5s` shortens the wait before it checks on goals, so
 initiative is watchable without waiting around.
@@ -50,9 +49,9 @@ resident set is who `haunt run` and the service start.
 ## Talking to it
 
 - **Poke it** (single click). A scripted ghost answers from its brain; a
-  ghost on hermes answers from a short table, without waking the model.
+  persona ghost answers from a short table, without waking the model.
 - **Drag it** anywhere. It remembers where it was left, per screen.
-- **Double-click** for its menu. A ghost on hermes offers "What can you
+- **Double-click** for its menu. A persona ghost offers "What can you
   do?", an offer to keep an eye on what you are working on, and nothing.
   A menu is answered with the mouse or with the digits, arrows, Enter and
   Escape.
@@ -72,7 +71,7 @@ resident set is who `haunt run` and the service start.
 - **From a script**, `haunt say "text"`. With several ghosts resident and
   no `-ghost`, it goes to the one you last interacted with.
 
-A ghost on hermes is talked to in plain language. Telling it something
+A persona ghost is talked to in plain language. Telling it something
 about yourself is remembered; telling it it has something wrong corrects
 that memory; asking it to remind you of something is taken on as an
 intention ([Memory, reminders and goals](memory.md)).

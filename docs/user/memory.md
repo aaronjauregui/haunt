@@ -2,44 +2,64 @@
 
 ## What it remembers
 
-A ghost on hermes remembers in hermes memory, written by the model alone.
-Tell it something and it is kept; tell it it has something wrong and it
-edits that memory. There is no separate belief store and no correction
-menu. Memory is hermes's: haunt neither writes, configures nor reads it.
+A ghost that thinks with your model keeps what it remembers in plain
+Markdown files, in its state directory under `memory/`. They are the
+truth: you can read them, edit them, or delete lines while the ghost
+runs, and it notices within a second.
 
-Out of the box that is hermes's built-in memory, plain text in the
-ghost's profile: `~/.hermes/profiles/haunt-<ghost>/memories/MEMORY.md`
-and `USER.md`. Another backend is chosen with hermes itself:
+    ~/.local/share/haunt/ghosts/wisp/memory/
+    ├── self.md          its notes on itself
+    ├── you.md           its notes on you
+    └── topics/
+        ├── food.md
+        └── work.md
 
-    hermes -p haunt-wisp memory setup     # pick a provider, or built-in only
-    hermes -p haunt-wisp memory status    # what is in use
-    hermes -p haunt-wisp memory off       # back to built-in only
+`self.md` and `you.md` are short free prose, under 1500 bytes each, and
+the ghost has both in front of it on every turn. It rewrites them
+whole when it has something to add.
 
-A provider runs beside the built-in memory. To make it the only store,
-turn the built-in one off as well:
+A topic is a list of facts, one per line, each saying where it came
+from:
 
-    hermes -p haunt-wisp config set memory.memory_enabled false
-    hermes -p haunt-wisp config set memory.user_profile_enabled false
+    ---
+    topic: food
+    updated: 2026-10-10T09:12:00+10:00
+    ---
+    - likes apples <!-- person t=412 2026-10-09 -->
+    - allergic to cats <!-- person t=98 2026-09-30 -->
 
-The ghost works with whichever it has. Holographic, the local provider
-bundled with hermes, keeps its facts in `memory_store.db` in the profile,
-an SQLite file; the container image needs numpy for its fuller recall
-([Hermes](hermes.md#hermes-in-a-container)). `hermes -p haunt-wisp memory
-reset` erases the built-in memory; a provider's store is that provider's
-to clear.
+The comment at the end of a line is invisible in a Markdown viewer. It
+says who the fact came from (`person`, `web`, `file`, or `self` for the
+ghost's own conclusion), the turn and the date. The ghost does not write
+it; haunt does, from what the turn had read: a fact saved after reading
+a page is labelled `web` whatever the model claims. A line you add by
+hand without one is read as yours.
 
-A provider that records every turn stores whatever reaches the model:
-the window titles in the events the ghost is sent, and what its tools
-returned, such as its description of your screen or the text of a page
-or a file it read. A cloud provider sends all of that off the machine.
-The standing rule that a page's or a file's words are never kept as
-yours binds what the model saves, not what such a provider records.
+The ghost sees the list of its topics on every turn, with how many lines
+each has, and searches them (and what was said before) when something
+might be there. Tell it something and it is kept; tell it it has
+something wrong and it takes the line back. There is no separate belief
+store and no correction menu.
 
-Nothing in haunt stops the model saving what a page or a file said as
-if you had said it; the rule is in its soul, and a page written to look
-like you can talk it round. What haunt does is point it out: a memory
-write whose wording repeats something the ghost read from the web or a
-file in that turn or the three before is flagged, and you decide.
+    haunt memory ls              # topics, with their line counts
+    haunt memory show food       # a topic's lines, numbered, with where each came from
+    haunt memory rm food 2       # remove its second line
+    haunt memory rm food         # remove the whole topic
+    haunt memory reindex         # rebuild the search index from the files
+
+Each ghost has its own memory, and two ghosts may disagree about you.
+
+## Words it read are not yours
+
+A page or a file can say anything, including something written to look
+like you. The ghost's rules say never to keep a page's or a file's words
+as yours, and haunt checks: a memory write whose wording repeats
+something the ghost read from the web or a file, in that turn or the
+three before, is an **echo**.
+
+On a cloud model an echo is refused, and the ghost is told why. On a
+local model it is kept, labelled with where it came from. Either way it
+is flagged, and you decide:
 
     haunt journal -echoes          # what it saved in a page's or a file's words
 
@@ -47,14 +67,20 @@ file in that turn or the three before is flagged, and you decide.
       ! repeats what it read from a file (read_file {"path": "notes/letter.md"}, this turn): "name is bartholomew and", "allergic to cats"
 
 The same `!` line appears under the write in `haunt history -why`, and
-`haunt history -json` gives it as `echoes`. Like `haunt history`, it
-needs the ghost's gateway running. Haunt flags these and never blocks
-them; to undo one, tell the ghost, or edit the store. It compares
-wording only, and what you said yourself in those turns does not count
-against a write. So it misses a write that says the page's claim in
-other words (or keeps only one three-word phrase of it), anything hermes
-saves in its background review after a turn, and anything a provider
-records on its own.
+`haunt history -json` gives it as `echoes`. The check compares wording
+only, and what you said yourself in those turns does not count against a
+write, so it misses a write that says the page's claim in other words,
+or keeps only one three-word phrase of it. To undo one, tell the ghost,
+or `haunt memory rm` the line.
+
+## What else it keeps
+
+The conversation is in `transcript.db` beside the memory: every turn, what
+the ghost looked up and what it said. When it grows past most of the
+model's context, the older turns are summarised into a paragraph the
+ghost carries forward, and the last dozen stay word for word. The
+summarised turns are still in the file, for `haunt history` and for the
+ghost's own searches.
 
 A scripted ghost remembers in its own key-value store, which its brain
 reads at boot and writes as it goes.
@@ -95,23 +121,24 @@ fortnight. It knows nothing about the first day on purpose: it watches
 what you named, from when you named it. All it writes down is the words
 it is looking for and the times it saw them, which `haunt journal
 -intentions` prints. Tell it you have stopped caring and it sets the goal
-aside: still on the books, no longer watched.
+aside: still on the books, unwatched.
 
 ## Routines
 
-A ghost on hermes carries a few routines as **skills**, short procedures
-the model follows when one fits: a morning check-in, a focus session, a
-weekly review, keeping an eye on a goal, drawing on request, looking
-something up. A ghost's
-package can add its own, a manifest can ask for a few of hermes's, and the
-ghost may write new ones as it learns how you like things done.
+A ghost carries a few routines as **skills**, short procedures the model
+reads when one fits: a morning check-in, a focus session, a weekly
+review, keeping an eye on a goal, drawing on request, looking something
+up, reading your files. A ghost's package can add its own, and the ghost
+may write new ones as it learns how you like things done. One it wrote
+and has not opened in two weeks is marked stale; after a month it is
+moved to `skills/archive/` in its state directory.
 
     haunt journal -skills          # all of them, and which it wrote itself
 
 Under a skill the ghost wrote itself, a line starting `!` is worth a
-look: the skill names tools a ghost does not have, or declares packages
-(`deps:`) that a ghost's hermes will not install, so it cannot use the
-skill as written. Delete the skill's directory to be rid of it.
+look: the skill names tools a ghost does not have, so it cannot be
+followed as written. Delete the skill's directory under `skills/` in the
+ghost's state directory to be rid of it.
 
 A morning check-in runs on a `morning` occasion if the ghost's manifest
 schedules one, or when you sit down in the morning; a weekly review runs
@@ -119,7 +146,7 @@ on a `weekly` occasion or on request.
 
 ## Why did it say that?
 
-    haunt history                  # the conversation, read back from hermes
+    haunt history                  # the conversation, read back from its transcript
     haunt history -why             # per reply: what woke it, what it saw, what it did
     haunt history -json            # the same turns as JSON, one object per line
     haunt journal -echoes          # memory writes that repeat a page or a file
@@ -129,15 +156,15 @@ on a `weekly` occasion or on request.
     haunt journal -style -reset    # back to the look its package came with
 
 `-why` shows whether a line answered you or an event, what window was in
-front of it, which tools it used (hermes's own memory and skill lookups
-included), and the turns where it chose to say nothing; a memory write
-that repeats a page or a file has a `!` line under it. `-n` counts turns
-here, and lines without `-why`. The reasons live
-in the ghost's own store and only the last dozen turns keep them. The
-conversation itself is hermes's, so `haunt history` needs the ghost's
-gateway running. It is the whole conversation: hermes compresses a long
-one so the model's context stays small, and the turns compressed away
-are still shown, though the ghost now has only a summary of them.
+front of it, what it did, what it looked up in its memory and skills,
+and the turns where it chose to say nothing; a memory write that repeats
+a page or a file has a `!` line under it. `-n` counts turns here, and
+lines without `-why`. The reasons live in the ghost's own store and only
+the last dozen turns keep them. The conversation is read from
+`transcript.db` without writing to it, so `haunt history` works whether
+the ghost is running or not, and it is the whole conversation: turns the
+ghost carries only as a summary are still shown, with the summary as
+`summary:` where it was made.
 
 `-json` is for a program reading the conversation back (the eval harness
 does). Each line is one turn, oldest first, and `-n` counts turns
@@ -146,8 +173,8 @@ does). Each line is one turn, oldest first, and `-n` counts turns
 ```json
 {"time":"2026-09-18T09:14:02+10:00","provoked_by":"person","input":"remind me to check the oven",
  "reply":"Done — in ten minutes.","silent":false,"failed":false,"self_prompt":false,
- "acted":[{"tool":"intend","args":"{\"text\":\"check the oven\",\"delay_ms\":600000}","result":"hermes/…"}],
- "looked":[{"tool":"session_search","args":"{\"query\":\"oven\"}","result":"…"}],
+ "acted":[{"tool":"intend","args":"{\"text\":\"check the oven\",\"delay_ms\":600000}","result":"model/…"}],
+ "looked":[{"tool":"recall","args":"{\"query\":\"oven\"}","result":"…"}],
  "echoes":[],"window":{"app":"foot","title":"~"}}
 ```
 
@@ -157,14 +184,14 @@ does). Each line is one turn, oldest first, and `-n` counts turns
 | `input` | what provoked the turn; an event is given without its envelope prefix |
 | `reply` | every line the ghost wrote in the turn, one per line; empty when it said nothing |
 | `silent` | the ghost said nothing |
-| `failed` | the turn failed (the model's provider gave out, or the ghost gave up on it) and hermes closed it; no words are the ghost's |
+| `failed` | the turn failed (the model's provider gave out, or the ghost gave up on it); no words are the ghost's |
 | `self_prompt` | the ghost was woken rather than spoken to |
-| `acted` | the ghost's own tools, as hermes called them, with their arguments and results whole |
-| `looked` | hermes's own tools: memory, session search, skills |
+| `acted` | what the ghost did and read, with arguments and results whole: `intend`, `search`, `face`, … |
+| `looked` | its memory and skills: `recall`, `remember`, `forget`, `rewrite_notes`, `skill_view`, `skill_write` |
 | `echoes` | the memory writes in `looked` whose wording repeats a page or a file the ghost read in this turn or the three before: each with `tool`, the words it `saved`, the `read` tool and its `read_args`, `turns_ago` (0 for this turn), and the `shared` phrases; empty when there are none |
 | `window` | what was in front of the ghost, when it could see; left out otherwise |
 
-The words and the calls come from hermes's session, which keeps every
+The words and the calls come from the transcript, which keeps every
 turn. `window` comes from the reasons, so it is missing on a turn older
 than the last dozen, and `self_prompt` there is read from the input being
 an event.

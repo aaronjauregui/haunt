@@ -34,7 +34,7 @@ actions_per_day = 12            # unprompted actions per ghost, per rolling 24 h
 # actions_per_day_total = 18    # across every resident ghost; default grows sub-linearly with the room
 obligations_per_day = 24        # things you put on its books (reminders, occasions); a backstop, not a dial
 
-[backend]                       # the models the driver calls itself; conversation is [hermes]
+[backend]                       # the models the driver calls itself; conversation is [model]
 tool_timeout = 120              # seconds one tool-server call may take
 log_prompts = false             # dump vision questions and image parameters to the log (HAUNT_BACKEND_DEBUG=1 does the same)
 
@@ -78,7 +78,7 @@ unprompted = "never"            # when a ghost may read on a turn you did not st
 # notes   = "~/notes"
 # recipes = "~/Documents/recipes"
 
-[model]                         # the model persona ghosts think with; see below
+[model]                         # the model persona ghosts think with; see model.md
 base_url = ""                   # OpenAI-compatible, up to its version: "http://127.0.0.1:8080/v1" for llama-server
 name = ""                       # the model as the server knows it, e.g. "glm-5.3"
 api_key_env = ""                # the variable holding the key; named, never stored here. Empty sends none
@@ -102,19 +102,6 @@ stall_timeout = 120             # seconds a call under way may then go quiet
 # [model.ghost.wisp.sampling]   # replaces the troupe's sampling key by key
 # temperature = 1.1
 
-[hermes]                        # the brain; see hermes.md
-command = ["hermes"]
-home = ""                       # $HERMES_HOME, else ~/.hermes
-tool_timeout = 600              # seconds a hermes tool call (an `ask`) may wait
-first_token_timeout = 30        # seconds of silence before a turn is given up on
-stall_timeout = 120             # seconds a turn under way may then go quiet, the ghost's own tools aside
-
-[hermes.model]                  # written into every ghost's profile when present
-# provider = "zai"
-# name = "glm-5.3"
-# base_url = ""
-# context_length = 0            # tell hermes the window when a server under-reports it
-
 [log]
 level = "info"                  # "error", "warn", "info" or "debug" (every topic)
 debug = []                      # topics whose debug output is wanted, e.g. ["backend", "wayland"]; "all"
@@ -131,33 +118,13 @@ environment.
 `llama-server`, Ollama, vLLM, z.ai, OpenAI or OpenRouter. Every resident
 ghost uses it unless its own `[model.ghost.<name>]` table says otherwise;
 a key set there replaces the troupe's for that ghost alone, and the
-rest carry over. A ghost's package never chooses a model.
+rest carry over. A ghost's package never chooses a model. Choosing one,
+running a local one, keys, and what `trust`, `fold` and `thinking` do are
+in [The model](model.md).
 
-Where the model runs decides how far it is trusted. A `base_url` on this
-machine or the private network (`localhost`, `127.0.0.1`, `[::1]`,
-`10.x`, `172.16-31.x`, `192.168.x`, IPv6 `fd..`) is local; any other host
-is cloud. A host name is judged by its text, never by what it resolves
-to, so a model on your own network reached by name is cloud until
-`trust = "local"` says otherwise. `trust = "cloud"` treats a local server
-as cloud.
-
-`fold` decides how a ghost's turn is shaped. Unfolded, the model first
-decides what to do and then writes the words in a second call; folded,
-it writes them in the first. A second call costs a local server little
-and a cloud provider a round trip, hence the defaults.
-
-`thinking` caps the model's reasoning. When a call has it off, haunt
-sends both `reasoning_effort` and `chat_template_kwargs.enable_thinking =
-false`, since providers differ on which they read; a provider ignores
-the one it does not know. The sampling keys are sent only when set.
-
-A call the provider refuses with 429 or a 5xx is tried three times in
-all, a second and then two apart, or after the provider's own
-`Retry-After` when that is under a minute. A call that says nothing for
-`first_token_timeout` seconds, or stops for `stall_timeout` once under
-way, is given up on. Unset, the first is 120 seconds for a local model,
-which reads a long conversation at a few hundred tokens a second before
-its first word, and 30 for a cloud one.
+A `base_url` that is not an http or https URL, a `trust` or `thinking`
+outside its values, and a negative number are refused when the config
+loads, naming the section.
 
 ## Drawing with your own ComfyUI workflow
 
@@ -374,9 +341,7 @@ where it was left.
 | `HAUNT_LOG` | log level, overriding the config |
 | `HAUNT_DEBUG` | comma-separated debug topics, overriding the config |
 | `HAUNT_BACKEND_DEBUG` | `1` logs backend requests |
-| `HERMES_HOME` | hermes root when `[hermes] home` is unset |
-| `HERMES_IMAGE` | image tag for `scripts/hermes-docker` |
-| `HAUNT_HERMES_ENV` | keys file for the container wrapper (default `~/.config/haunt/hermes.env`) |
+| the variables named by `api_key_env` | the keys for `[model]` and the backends |
 
 A misspelled level or topic is reported at startup rather than silently
 ignored. The log topics are listed by `go doc ./internal/hlog Topics`.

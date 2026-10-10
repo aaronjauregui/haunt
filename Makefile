@@ -1,6 +1,6 @@
 GO ?= go
 
-.PHONY: build test vet fmt hermes-check eval eval-baseline demo demo-ai demo-troupe demo-seriko demo-headless demo-record install-user clean
+.PHONY: build test vet fmt eval eval-baseline demo demo-ai demo-troupe demo-seriko demo-headless demo-record install-user clean
 
 build:
 	$(GO) build ./...
@@ -13,20 +13,10 @@ test:
 vet:
 	$(GO) vet ./...
 
-# Check a ghost's toolset restriction against the hermes image: lists
-# every toolset the image knows, bundled plugins included, and fails on
-# one a ghost would get without anybody choosing it. Run when the pin
-# moves (docs/dev/hermes.md). Needs docker and the image; no network, no
-# gateway, no model.
-HERMES_IMAGE ?= hermes-agent:818c13b
-
-hermes-check:
-	HERMES_IMAGE=$(HERMES_IMAGE) $(GO) test -tags hermescheck -count=1 -v -run '^TestHermesToolsets$$' ./internal/hermes
-
 fmt:
 	gofmt -l -w .
 
-# The evals: wisp on the real model in [hermes] / [hermes.model], each case
+# The evals: wisp on the real model in [model], each case
 # run EVAL_TRIALS times (default 3) four at a time, graded by code and by
 # `claude -p` on a Claude subscription. Spends quota; not part of `test`.
 # Results and report.md go to .eval/<timestamp>/ (EVAL_OUT moves .eval).
@@ -60,17 +50,16 @@ eval-baseline:
 demo:
 	./scripts/demo.sh
 
-# The AI ghost: a persona and no brain at all, run by hermes-agent
-# (docs/user/hermes.md: hermes in its container
-# via scripts/hermes-docker, a model in [hermes.model]). Its hermes profile
-# lives in the demo's workdir and goes with it. Draws via your image backend
-# ([backend.image] in ~/.config/haunt/config.toml).
+# The AI ghost: a persona and no brain at all, thinking with the model in
+# [model] in ~/.config/haunt/config.toml (docs/user/model.md). Its memory
+# and transcript live in the demo's workdir and go with it. Draws via your
+# image backend ([backend.image]).
 # IDLE_MS=10000 shortens the wait before it speaks unprompted.
 demo-ai:
 	GHOST=wisp ./scripts/demo.sh
 
-# Two ghosts at once, in one nested sway. Whisper is scripted and wisp runs
-# on hermes, so they behave differently — which is the point.
+# Two ghosts at once, in one nested sway. Whisper is scripted and wisp
+# thinks with your model, so they behave differently — which is the point.
 # Watch for: the second one opens beside the first rather than on top of it,
 # and from another terminal `haunt say "hello"` with no -ghost goes to
 # whichever you last clicked. `haunt say -ghost wisp ...` addresses one.
@@ -94,7 +83,7 @@ demo-headless:
 
 # Record the README's GIF: runs the demo, captures the nested sway window
 # and encodes it. Needs wf-recorder and ffmpeg. Recording starts and stops
-# on Enter, so a hermes ghost's slow wake stays out of the take.
+# on Enter, so a persona ghost's slow wake stays out of the take.
 #   make demo-record GHOST=wisp
 # The capture is kept beside the GIF, so a take is recut without being
 # performed again. CROP keeps the balloon's text at a readable size and
