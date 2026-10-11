@@ -395,7 +395,7 @@ only decision is whether this event is worth a word.
 | poll answer | the driver files the intention; nothing is sent until it comes due |
 | intention due | `kind=intention_due name=… text=… asked=true\|false` |
 | goal gone quiet | `kind=goal_quiet name=… goal=… goal_name=… held="8 days" last_seen=never` |
-| neighbour spoke, drew, was poked | `kind=observed from=… action=… text=…` |
+| neighbour spoke, drew, left a note, was poked | `kind=observed from=… action=… text=…` |
 | neighbour `tell` | `kind=told from=… text=…` |
 | window changed | not sent per change; rides on the next turn's context |
 

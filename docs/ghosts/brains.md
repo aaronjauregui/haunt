@@ -81,7 +81,7 @@ Every event has `type`, `seq` and `time`. The rest depends on the type.
 | `intention` | `name`, `text` | an intention came due, possibly days later or moments after boot |
 | `ai_image`, `ai_look`, `ai_error` | `name`, `text`, `tag` | answers to `imagine` and `look`, or a refusal |
 | `acted` | `name` (the tool), `text` (what it said), `tag` | a tool ran, whether or not it worked on its own terms |
-| `observed` | `from`, `name` (the action), `text` | a neighbour spoke, moved, changed face, played a clip, drew, was poked, or used a tool |
+| `observed` | `from`, `name` (the action), `text` | a neighbour spoke, moved, changed face, played a clip, drew, left a note, was poked, or used a tool |
 
 `may_pose` on an event is the driver offering a moment at which the face
 may change; the brain decides whether to.
