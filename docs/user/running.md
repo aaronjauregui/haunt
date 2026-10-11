@@ -69,7 +69,8 @@ resident set is who `haunt run` and the service start.
   A long reply on screen pages with the wheel as well as with clicks.
   Taking the pointer off the ghost, or clicking it, puts the past away;
   anything new the ghost says replaces it. The last 50 are kept; the
-  whole conversation is `haunt history` ([memory](memory.md)).
+  whole conversation is `haunt history` ([memory](memory.md)). In a
+  conversation the wheel scrolls the conversation instead.
 - **From a script**, `haunt say "text"`. With several ghosts resident and
   no `-ghost`, it goes to the one you last interacted with.
 
@@ -83,16 +84,26 @@ intention ([Memory, reminders and goals](memory.md)).
 Typing at a ghost opens a conversation. Enter sends the line and the line
 opens again, empty, with the keyboard still held, so the next thing can
 be typed straight away; a line sent while the ghost is still answering
-waits its turn. The balloon widens to 480 pixels, the ghost's words
-stream in above the line, and a persona ghost is told it may write a few
-sentences rather than a remark. Nothing in the balloon goes away while
-the conversation lasts. Pictures the ghost paints meanwhile are not
-shown, and the wheel does not go back through what was said until it
-ends.
+waits its turn. A persona ghost is told it may write a few sentences
+rather than a remark.
 
-It ends when you press Escape, click away (the keyboard goes elsewhere)
-or click the ghost, after three minutes with nothing typed and nothing
-said, or when the ghost says goodbye. A ghost ends one with
+The balloon widens to 480 pixels and shows the conversation: what you
+typed and what the ghost said, each marked `you` or with the ghost's
+name, its pictures as thumbnails, newest at the bottom, with the line you
+are typing beneath. Your line appears there as soon as you press Enter,
+and the ghost's words stream in below it as they arrive. The balloon
+grows until it is about 520 pixels tall; past that, the wheel over the
+ghost scrolls back through the earlier lines, three at a step, and
+anything new brings it back to the bottom. What it shows is the last 50
+things said this session, the same ones the wheel goes back through
+outside a conversation. Nothing in the balloon goes away while the
+conversation lasts.
+
+Clicking the ghost during a conversation pokes it and leaves the
+conversation and the half-typed line alone. The conversation ends when
+you press Escape, click away (the keyboard goes elsewhere), after three
+minutes with nothing typed and nothing said, or when the ghost says
+goodbye. A ghost ends one with
 `end_conversation`, and its goodbye is the last thing shown;
 `[conversation] ghost_may_end = false` takes that away from it
 ([Configuration](config.md)). A question with choices, the ghost's or a

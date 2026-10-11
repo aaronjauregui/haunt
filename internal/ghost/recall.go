@@ -63,16 +63,20 @@ type recallState struct {
 	timer    *time.Timer
 }
 
-// remember notes something that was said.
+// remember notes something that was said. In a conversation that is
+// also what puts it in the view, at the bottom.
 func (g *Ghost) remember(r recalled) {
 	if r.at.IsZero() {
 		r.at = time.Now()
 	}
 	g.recallMu.Lock()
-	defer g.recallMu.Unlock()
 	g.recall.lines = append(g.recall.lines, r)
 	if n := len(g.recall.lines); n > recallKeep {
 		g.recall.lines = append(g.recall.lines[:0:0], g.recall.lines[n-recallKeep:]...)
+	}
+	g.recallMu.Unlock()
+	if g.conversationSaid() {
+		g.drawInput()
 	}
 }
 
@@ -90,8 +94,13 @@ func (g *Ghost) recallMoved(from, to uint64) {
 }
 
 // onScroll steps through what was said: back for a negative count, forward
-// for a positive one, a page at a time.
+// for a positive one, a page at a time. In a conversation it moves the
+// conversation's view instead, a few lines at a time (conversation.go).
 func (g *Ghost) onScroll(steps int) {
+	if g.clickInConversation() {
+		g.scrollConversation(steps)
+		return
+	}
 	// The balloon is taken while a line is being typed or a question is
 	// waiting, and quiet hours mean no balloons at all.
 	if g.inputOpen() || g.choiceOpen() {
