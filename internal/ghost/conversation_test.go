@@ -352,3 +352,57 @@ func TestCloseAfterDrawLeavesNoPanel(t *testing.T) {
 		}
 	}
 }
+
+// A line sent in a conversation puts the waiting indicator up as the
+// view's status line at once, before the model has answered; the first
+// word takes it down, and it is never one of the lines said. A turn that
+// ends in silence takes it down too.
+func TestConversationThinkingStatus(t *testing.T) {
+	args, _ := json.Marshal(map[string]string{"pose": ""})
+	g, b, _ := modelGhost(t, 0,
+		fake.Rule{Match: "hello", AfterTool: speakCue, Reply: "Hello yourself, and welcome back.", GapMS: 20},
+		fake.Rule{Match: "hello", Calls: []fake.Call{{Name: speakName, Args: args}}, DelayMS: 300},
+		fake.Rule{Match: "hush", Calls: []fake.Call{{Name: silentName}}, DelayMS: 300})
+	g.markPrompted()
+	g.openInput()
+	thinking := func() bool {
+		_, _, status := convState(g)
+		return strings.HasPrefix(status, "thinking.")
+	}
+
+	typeString(g, "hello")
+	g.onKey(textinput.KeyEnter, true)
+	b.Deliver(proto.Event{Type: proto.EventMessage, Text: "hello"})
+	if !eventually(thinking) {
+		t.Fatal("no thinking status after the line was sent")
+	}
+	if _, streaming, _ := convState(g); streaming != "" {
+		t.Fatalf("words streaming %q before the model answered", streaming)
+	}
+	if !eventually(func() bool { _, streaming, _ := convState(g); return streaming != "" }) {
+		t.Fatal("no words streamed")
+	}
+	if _, _, status := convState(g); status != "" {
+		t.Errorf("the first word left the status %q up", status)
+	}
+	waitTurns(t, b, 1)
+	if said, _, status := convState(g); status != "" || said != "Hello yourself, and welcome back." {
+		t.Errorf("after the turn: said %q, status %q", said, status)
+	}
+	g.recallMu.Lock()
+	for _, l := range g.recall.lines {
+		if strings.HasPrefix(l.text, "thinking") {
+			t.Errorf("the status was remembered: %q", l.text)
+		}
+	}
+	g.recallMu.Unlock()
+
+	b.Deliver(proto.Event{Type: proto.EventMessage, Text: "hush"})
+	if !eventually(thinking) {
+		t.Fatal("no thinking status for the second line")
+	}
+	waitTurns(t, b, 2)
+	if _, _, status := convState(g); status != "" {
+		t.Errorf("a silent turn left the status %q up", status)
+	}
+}

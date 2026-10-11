@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,6 +38,9 @@ import (
 //     model, which waits on a tool, which waits on an image backend — and
 //     the newest is the one with news, so it speaks and the others hold
 //     their peace until it is done.
+//   - In a conversation the balloon is the conversation's view, so the
+//     indicator is the view's status line instead (waitInConversation):
+//     the same words, the dots ticking after them as text, shown at once.
 //   - It is chrome, not dialogue: not billed to the curiosity budget, not
 //     written to history, silent during quiet hours, and never painted over
 //     a line the user is typing.
@@ -94,6 +98,12 @@ func (g *Ghost) startWaitingFor(text func() string) *waiter {
 	go func() {
 		defer close(w.done)
 		defer g.recoverPanic(hlog.Balloon, "the waiting indicator")
+		// In a conversation the person has just pressed Enter and is
+		// watching the view, so it shows at once.
+		delay := waitDelay
+		if g.inConversation() {
+			delay = 0
+		}
 		select {
 		case <-w.stop:
 			return
@@ -101,7 +111,7 @@ func (g *Ghost) startWaitingFor(text func() string) *waiter {
 			return
 		case <-g.stoppingC():
 			return
-		case <-time.After(waitDelay):
+		case <-time.After(delay):
 		}
 		g.pushWaiter(w)
 
@@ -109,7 +119,12 @@ func (g *Ghost) startWaitingFor(text func() string) *waiter {
 		frame := 0
 		last := ""
 		for {
-			if g.topWaiter(w) {
+			if g.topWaiter(w) && g.waitInConversation(text(), frame) {
+				shown = false
+				if !g.reducedMotion {
+					frame = (frame + 1) % balloon.WaitFrames
+				}
+			} else if g.topWaiter(w) {
 				say := text()
 				// Reduced motion gets the indicator, not the animation: the
 				// dots are decoration on top of the fact that it is there.
@@ -135,6 +150,7 @@ func (g *Ghost) startWaitingFor(text func() string) *waiter {
 				// stays, to be repainted with that one's words.
 				if !g.popWaiter(w) {
 					g.clearWaiting()
+					g.dropWaitStatus()
 				}
 				return
 			case <-g.done:
@@ -270,4 +286,46 @@ func (g *Ghost) balloonBusy() bool {
 	g.blnMu.Lock()
 	defer g.blnMu.Unlock()
 	return g.bln != nil && !g.blnWaiting
+}
+
+// waitInConversation shows one frame of the wait as the conversation
+// view's status line, reporting whether there is a conversation to show it
+// in. It stays out of the way of words already streaming and of a status
+// line of the driver's own ("(looking…)", a question), and comes back when
+// that one is taken down while the wait goes on. Reduced motion gets the
+// words as they are; otherwise the dots after them tick.
+func (g *Ghost) waitInConversation(text string, frame int) bool {
+	if muted, _ := g.quiet.Active(); muted {
+		return g.inConversation()
+	}
+	line := strings.TrimSpace(text)
+	if !g.reducedMotion {
+		line = strings.TrimRight(line, "….") + strings.Repeat(".", frame%3+1)
+	}
+	g.convMu.Lock()
+	if !g.conv.open {
+		g.convMu.Unlock()
+		return false
+	}
+	free := g.conv.status == "" || g.conv.status == g.conv.waitStatus
+	if g.conv.streaming != "" || !free || g.conv.status == line {
+		g.convMu.Unlock()
+		return true
+	}
+	g.conv.status, g.conv.waitStatus, g.conv.offset = line, line, 0
+	g.convMu.Unlock()
+	g.drawInput()
+	return true
+}
+
+// dropWaitStatus takes the wait's status line down when the last wait is
+// over, leaving any other status that replaced it.
+func (g *Ghost) dropWaitStatus() {
+	g.convMu.Lock()
+	line := g.conv.waitStatus
+	g.conv.waitStatus = ""
+	g.convMu.Unlock()
+	if line != "" {
+		g.dropStatus(line)
+	}
 }

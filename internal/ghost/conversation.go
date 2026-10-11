@@ -72,6 +72,10 @@ type conversation struct {
 	// beneath the rest until the ghost next says something and never
 	// remembered: it is the driver reporting, not the ghost speaking.
 	status string
+	// waitStatus is the status line the waiting indicator last put up
+	// (waitInConversation), which it may tick and take down; any other
+	// status line is not its to touch.
+	waitStatus string
 	// offset is how many lines the view is scrolled back, and lines how
 	// many there were at the last draw, to clamp it with.
 	offset, lines int
