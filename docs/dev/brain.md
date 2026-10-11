@@ -71,7 +71,10 @@ and observed are only true in the moment and are dropped.
 on screen, and the boot turn carries that indicator until the greeting
 replaces it. Words sent meanwhile wait under it. A person's turn shows
 "thinking…" from the moment it is queued; the indicator comes down when
-the first words go on screen.
+the first words go on screen. In a conversation it is the view's status
+line, shown at once rather than after the usual half second, with the
+dots ticking as text; it gives way to words streaming and to a driver
+status such as `(looking…)`, and is never remembered.
 
 **The `llm` capability.** A person's turn asks for it in the balloon if
 it is not granted, before the indicator; an unprompted turn without it

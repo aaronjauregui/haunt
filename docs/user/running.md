@@ -94,7 +94,8 @@ The balloon widens to 480 pixels and shows the conversation: what you
 typed and what the ghost said, each marked `you` or with the ghost's
 name, its pictures as thumbnails, newest at the bottom, with the line you
 are typing beneath. Your line appears there as soon as you press Enter,
-and the ghost's words stream in below it as they arrive. The balloon
+with `thinking...` ticking beneath it until the ghost's words start to
+stream in below it, or until it ends its turn without a word. The balloon
 grows until it is about 520 pixels tall; past that, the wheel over the
 ghost scrolls back through the earlier lines, three at a step, and
 anything new brings it back to the bottom. What it shows is the last 50
