@@ -139,6 +139,7 @@ var worthWaking = map[string]bool{
 	proto.ActedSpoke: true,
 	proto.ActedDrew:  true,
 	proto.ActedPoked: true,
+	proto.ActedNoted: true,
 }
 
 // pokes are answered by the driver, from this table, without a model call:

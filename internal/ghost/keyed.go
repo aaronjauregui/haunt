@@ -127,16 +127,9 @@ func (s *keyedState) line() string {
 	return "You remember, relevant now: " + strings.Join(parts, "; ") + "."
 }
 
-// keyedTables holds each ghost's table. The table belongs with the brain
-// that steps it, but the turn context that renders it is the ghost's; a
-// ghost lives as long as its process, so an entry is never removed.
-var keyedTables sync.Map // *Ghost -> *keyedState
-
-// keyedTable is g's table.
-func (g *Ghost) keyedTable() *keyedState {
-	s, _ := keyedTables.LoadOrStore(g, &keyedState{})
-	return s.(*keyedState)
-}
+// keyedTable is g's table. The brain steps it and the turn context, which
+// is the ghost's, renders it, so it lives on the ghost.
+func (g *Ghost) keyedTable() *keyedState { return &g.keyed }
 
 // keyedLine is the turn context's line for the lines memory brought in.
 func (g *Ghost) keyedLine() string { return g.keyedTable().line() }

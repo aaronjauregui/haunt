@@ -375,6 +375,9 @@ type Ghost struct {
 	// notes are the notes the ghost has left on the desktop, on screen
 	// (see desknote.go).
 	notes deskNotes
+	// keyed is the memory lines brought in on the person's words, still
+	// sticky or cooling down (see keyed.go).
+	keyed keyedState
 
 	// bg counts the goroutines go_ starts, so teardown can let them finish
 	// before the store closes (see panic.go).

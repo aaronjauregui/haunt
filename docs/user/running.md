@@ -108,8 +108,8 @@ go in the config ([Configuration](config.md)); for right now:
     haunt shush 30m
     haunt unshush
 
-Nothing speaks over a fullscreen window either, and a ghost hides while
-one has focus. A reminder that comes due during quiet is not lost: it is
+Nothing speaks over a fullscreen window either, and the idle animation
+stops while one has focus. A reminder that comes due during quiet is not lost: it is
 held until it has actually been said.
 
 ## Reduced motion

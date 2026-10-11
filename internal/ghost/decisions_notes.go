@@ -23,10 +23,6 @@ func init() {
 		run:        tool(toolLeaveNote),
 		sideEffect: true,
 	})
-	// The ghost's own bookkeeping, like intend: gated after reading on a
-	// cloud model and nowhere else. Unclassed, it would be treated as
-	// reaching past the person and asked about everywhere.
-	verbClasses["leave_note"] = classKeep
 }
 
 func toolLeaveNote(g *Ghost, _ context.Context, args json.RawMessage) (string, error) {
