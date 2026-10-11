@@ -1128,3 +1128,84 @@ func TestModelWarnsAboutAHiddenSkill(t *testing.T) {
 		t.Errorf("warned %d times:\n%s", n, buf.String())
 	}
 }
+
+// set_aside and resolve take an intention by its name, by its name
+// without `model/`, or by its text when one held intention the model took
+// on has it. Not found, the answer lists what is held.
+func TestIntentionArg(t *testing.T) {
+	g, _, _ := modelGhost(t, 0)
+	g.saveIntentions([]Intention{
+		{Name: "model/thesis", Text: "Finish the thesis"},
+		{Name: "model/a", Text: "water the plants"},
+		{Name: "model/b", Text: "water the plants"},
+		{Name: "_haunt/drift/x", Text: "bring it up"},
+	})
+	for _, c := range []struct{ arg, want string }{
+		{"model/thesis", "model/thesis"},
+		{"thesis", "model/thesis"},
+		{" finish the thesis ", "model/thesis"},
+		{"_haunt/drift/x", "_haunt/drift/x"},
+		{"bring it up", ""},
+		{"water the plants", ""},
+		{"", ""},
+	} {
+		args, _ := json.Marshal(map[string]string{"name": c.arg})
+		got, err := intentionArg(g, args)
+		if got != c.want || (c.want == "") != (err != nil) {
+			t.Errorf("%q: got %q, %v; want %q", c.arg, got, err, c.want)
+		}
+		if err != nil && !strings.Contains(err.Error(), `model/thesis ("Finish the thesis")`) {
+			t.Errorf("%q: the refusal does not list what is held: %v", c.arg, err)
+		}
+	}
+}
+
+// A skill opened in the same round as speak has not been read: the
+// ending is answered "not done", and the loop goes on.
+func TestSkillOpenedBesideTheEnding(t *testing.T) {
+	g, b, srv := modelGhost(t, 3,
+		fake.Rule{Match: "kind=idle", AfterTool: "skill's steps", Calls: []fake.Call{{Name: silentName}}},
+		fake.Rule{Match: "kind=idle", Calls: []fake.Call{
+			{Name: skillViewName, Args: json.RawMessage(`{"name":"morning-check-in"}`)},
+			{Name: speakName, Args: json.RawMessage(`{}`)},
+		}})
+	b.Deliver(proto.Event{Type: proto.EventIdle})
+	waitTurns(t, b, 1)
+	reqs := requests(t, srv)
+	if len(reqs) != 2 {
+		t.Fatalf("%d calls, want two decide rounds and no speak call", len(reqs))
+	}
+	msgs := reqs[1].Messages
+	if last := msgs[len(msgs)-1]; last.Name != speakName || last.Content != unreadCue {
+		t.Errorf("the second round ends %+v, want speak answered %q", last, unreadCue)
+	}
+	whys, _ := DecodeWhy(mustGet(t, g, WhyStoreKey))
+	if len(whys) != 1 || !whys[0].Suppressed {
+		t.Errorf("why = %+v, want silence", whys)
+	}
+}
+
+// A speak call that writes a call where its words go was not done
+// deciding: the call is made, the loop takes up again, and the words are
+// the next speak call's, without the call's text.
+func TestSpeakCallWritesACall(t *testing.T) {
+	leaked := `Dropped.<|tool_call>call:set_aside{name:<|"|>finish the thesis<|"|>}<tool_call|>`
+	g, b, srv := modelGhost(t, 0,
+		fake.Rule{Match: "thesis", AfterTool: speakCue, Reply: leaked},
+		fake.Rule{Match: "thesis", AfterTool: "set aside", Calls: []fake.Call{{Name: speakName, Args: json.RawMessage(`{}`)}}},
+		fake.Rule{Match: "thesis", Calls: []fake.Call{{Name: speakName, Args: json.RawMessage(`{}`)}}})
+	g.saveIntentions([]Intention{{Name: "model/thesis", Text: "finish the thesis"}})
+	g.markPrompted()
+	b.Deliver(proto.Event{Type: proto.EventMessage, Text: "I don't care about the thesis anymore"})
+	waitTurns(t, b, 1)
+	if it, ok := g.intentionNamed("model/thesis"); !ok || !it.Aside {
+		t.Errorf("the goal is %+v, want it set aside", it)
+	}
+	if n := len(requests(t, srv)); n != 4 {
+		t.Errorf("%d calls, want decide, speak, decide, speak", n)
+	}
+	whys, _ := DecodeWhy(mustGet(t, g, WhyStoreKey))
+	if len(whys) != 1 || whys[0].Reply != "Dropped." {
+		t.Errorf("why = %+v", whys)
+	}
+}

@@ -85,7 +85,7 @@ api_key_env = ""                # the variable holding the key; named, never sto
 context_length = 0              # the model's context window in tokens
 trust = ""                      # "local" or "cloud"; empty judges by base_url's host
 # fold = false                  # the words in the first call; default false for local, true for cloud
-thinking = ""                   # "off", "low", "medium" or "high"; empty: the provider's default
+thinking = ""                   # "off", "low", "medium" or "high"; empty: the provider's default. "off" suits a local model
 # first_token_timeout = 120     # seconds a call may go without a sign of life; default 120 local, 90 cloud
 stall_timeout = 120             # seconds a call under way may then go quiet
 

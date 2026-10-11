@@ -659,13 +659,32 @@ func (b *modelBrain) run(t *turn) (out turnOutcome) {
 	defer p.stop()
 	ctx := g.sessionContext()
 
-	end, err := b.decide(ctx, t, msgs, p)
+	end, err := b.decide(ctx, t, msgs, p, nil)
 	words := ""
 	switch {
 	case err != nil:
 	case end.speak:
 		p.speaking(end.pose, !muted)
 		words, err = b.speakWords(ctx, end.msgs, p)
+		r, more := b.speakCalls(words)
+		if err != nil || !more {
+			words = beforeCalls(words)
+			break
+		}
+		// It wrote calls where its words should be: it was not done
+		// deciding. The loop takes up again from those calls, once.
+		p.retract(r.text)
+		end, err = b.decide(ctx, t, end.msgs, p, &r)
+		words = ""
+		switch {
+		case err != nil:
+		case end.speak:
+			p.speaking(end.pose, !muted)
+			words, err = b.speakWords(ctx, end.msgs, p)
+			words = beforeCalls(words)
+		case !end.silent:
+			words = end.words
+		}
 	case !end.silent:
 		words = end.words
 	}

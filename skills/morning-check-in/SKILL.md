@@ -18,9 +18,9 @@ you they do not want check-ins, or they are plainly busy (a call, a
 game).
 
 1. Call `intentions`.
-2. If you have `search`, and on an occasion (not a session) a goal you
-   hold has an outside side to it (a release, an event, the weather where
-   they live), you may search that one thing once. No pages.
+2. If you have `search`, on an occasion only, and a goal you hold has an
+   outside side (a release, the weather where they live): search it
+   once. No pages.
 3. Call `ask`. Its `text` is a one-sentence greeting, naming at most
    two things you hold, then "What's the one thing for today?". Its
    `choices`: "I'll tell you", "Same as yesterday", "Not today".

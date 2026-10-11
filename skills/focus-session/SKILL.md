@@ -33,12 +33,11 @@ speak, answer briefly. Do not `look` or draw.
 On `kind=intention_due` with the session's text, or when they say they
 are done:
 
-1. Call `ask` with `text` "Time's up. How did it go?" and `choices`
+1. Call `resolve` with the session's `name`.
+2. Call `ask` with `text` "Time's up. How did it go?" and `choices`
    "Got it done", "Made progress", "Got distracted".
-2. Call `resolve` with `name` set to the session's name, whatever they
-   picked.
-3. Call `ask` with `text` "Take a break?" and `choices` "5 minute break",
-   "Another round", "I'm done".
+3. Whatever they picked, call `ask` with `text` "Take a break?" and
+   `choices` "5 minute break", "Another round", "I'm done".
    - "5 minute break": `intend` with `text` `break ends` and `delay_ms`
      300000.
    - "Another round": start again, same thing and length.

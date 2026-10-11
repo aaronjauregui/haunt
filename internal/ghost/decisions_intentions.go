@@ -33,7 +33,7 @@ func init() {
 	register(verb{
 		id: "set_aside",
 		desc: "Drop a goal they no longer want (\"I don't care about the marathon anymore\", \"drop it\") " +
-			"without calling it done. Its name is in your context or intentions.",
+			"without calling it done. name: its name or its quoted text.",
 		params:     []string{"name:string"},
 		run:        tool(toolSetAside),
 		sideEffect: true,
@@ -93,7 +93,14 @@ func toolSetAside(g *Ghost, _ context.Context, args json.RawMessage) (string, er
 	return "set aside " + name, nil
 }
 
-// intentionArg reads and checks the name a resolve or set_aside is about.
+// intentionArg reads the intention a resolve or set_aside is about. The
+// model may give its name, its name without the `model/` the driver put
+// on it, or its text as the turn context quotes it ("finish the thesis"):
+// a model deciding without thinking it over reaches for the words, not
+// the handle. Text counts only when one intention the model took on, and
+// still holds, has it; never for the driver's own. Not
+// found, the answer lists what is held, so the retry is a copy rather
+// than another call to intentions.
 func intentionArg(g *Ghost, args json.RawMessage) (string, error) {
 	var a struct {
 		Name string `json:"name"`
@@ -101,10 +108,30 @@ func intentionArg(g *Ghost, args json.RawMessage) (string, error) {
 	if err := decode(args, &a); err != nil {
 		return "", err
 	}
-	if _, ok := g.intentionNamed(a.Name); !ok {
-		return "", fmt.Errorf("you are not holding anything called %q (see intentions)", a.Name)
+	want := strings.TrimSpace(a.Name)
+	list := g.loadIntentions()
+	for _, it := range list {
+		if want != "" && (it.Name == want || it.Name == modelIntentionPrefix+want) {
+			return it.Name, nil
+		}
 	}
-	return a.Name, nil
+	var byText, held []string
+	for _, it := range list {
+		if it.Aside {
+			continue
+		}
+		held = append(held, fmt.Sprintf("%s (%q)", it.Name, it.Text))
+		if want != "" && strings.HasPrefix(it.Name, modelIntentionPrefix) && strings.EqualFold(strings.TrimSpace(it.Text), want) {
+			byText = append(byText, it.Name)
+		}
+	}
+	if len(byText) == 1 {
+		return byText[0], nil
+	}
+	if len(held) == 0 {
+		return "", fmt.Errorf("you are not holding anything")
+	}
+	return "", fmt.Errorf("you are not holding anything called %q; you hold %s", want, strings.Join(held, ", "))
 }
 
 func toolIntentions(g *Ghost, _ context.Context, _ json.RawMessage) (string, error) {

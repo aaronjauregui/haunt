@@ -29,7 +29,10 @@ import (
 //
 // A model that writes a call out as text instead of making it (Gemma's
 // own call syntax, leaked into the content) has the call read back out of
-// the text and applied as if it had been made (textCalls).
+// the text and applied as if it had been made (textCalls), in a decide
+// round or in the speak call, where it means the deciding was not over
+// (speakCalls). A call ending the turn in the round that opens a skill
+// waits until the skill has been read.
 //
 // The registry is how the ghost grows new behaviour without a new call
 // shape. A decision is a name, a description, a JSON schema and an apply
@@ -485,40 +488,53 @@ type ending struct {
 	msgs []model.Message
 }
 
+// decideRound is one decide call.
+func (b *modelBrain) decideRound(ctx context.Context, t *turn, msgs []model.Message, tools []model.Tool, p *parts) (round, error) {
+	req := model.Request{
+		Messages: msgs,
+		Tools:    tools,
+		// Thinking on the person's turns, where an answer is worth
+		// the wait; off for events, which mostly end in silence.
+		Thinking: t.person,
+		Sampling: b.g.manifest.Persona.Sampling,
+	}
+	// The person's turn streams as it comes; an event's words wait
+	// until the model has decided they are words.
+	var onDelta func(string)
+	var held *heldCalls
+	if t.person {
+		held = &heldCalls{out: p.delta}
+		onDelta = held.delta
+	}
+	r, err := stream(ctx, b.client, req, onDelta)
+	if held != nil {
+		held.flush()
+	}
+	if r.usage != nil {
+		b.g.log.Debug(hlog.Brain, "decide: %d prompt tokens (%d cached), %d out",
+			r.usage.PromptTokens, r.usage.CachedTokens, r.usage.CompletionTokens)
+	}
+	return r, err
+}
+
 // decide runs the loop. msgs is the prompt; parts shows words as they
-// stream and as rounds end.
-func (b *modelBrain) decide(ctx context.Context, t *turn, msgs []model.Message, p *parts) (ending, error) {
+// stream and as rounds end. first, when there is one, is a round the
+// model already wrote, taken as the loop's first instead of a call: the
+// calls a speak call wrote as text (speakCalls).
+func (b *modelBrain) decide(ctx context.Context, t *turn, msgs []model.Message, p *parts, first *round) (ending, error) {
 	g := b.g
 	fold := b.cfg.Fold()
 	ds := g.offered(fold)
 	tools := toolsOf(ds)
 	for range maxRounds {
-		req := model.Request{
-			Messages: msgs,
-			Tools:    tools,
-			// Thinking on the person's turns, where an answer is worth
-			// the wait; off for events, which mostly end in silence.
-			Thinking: t.person,
-			Sampling: g.manifest.Persona.Sampling,
-		}
-		// The person's turn streams as it comes; an event's words wait
-		// until the model has decided they are words.
-		var onDelta func(string)
-		var held *heldCalls
-		if t.person {
-			held = &heldCalls{out: p.delta}
-			onDelta = held.delta
-		}
-		r, err := stream(ctx, b.client, req, onDelta)
-		if held != nil {
-			held.flush()
-		}
-		if r.usage != nil {
-			g.log.Debug(hlog.Brain, "decide: %d prompt tokens (%d cached), %d out",
-				r.usage.PromptTokens, r.usage.CachedTokens, r.usage.CompletionTokens)
-		}
-		if err != nil {
-			return ending{}, err
+		var r round
+		if first != nil {
+			r, first = *first, nil
+		} else {
+			var err error
+			if r, err = b.decideRound(ctx, t, msgs, tools, p); err != nil {
+				return ending{}, err
+			}
 		}
 		if len(r.calls) == 0 {
 			calls, rest, found, err := textCalls(r.text, ds)
@@ -564,12 +580,17 @@ func (b *modelBrain) decide(ctx context.Context, t *turn, msgs []model.Message, 
 		b.record(t, row)
 		msgs = append(msgs, assistant)
 		var end *ending
+		// A skill opened in the same round as the call that ends the turn
+		// has not been read: the ending waits for its steps.
+		opened := slices.ContainsFunc(r.calls, func(c model.ToolCall) bool { return c.Name == skillViewName })
 		for _, c := range r.calls {
 			d, known := ds[c.Name]
 			var res toolResult
 			switch {
 			case end != nil:
 				res = toolResult{Text: "Not done: you had already decided."}
+			case known && d.terminal() && opened:
+				res = toolResult{Text: unreadCue}
 			case known && d.terminal():
 				e := ending{silent: c.Name != speakName}
 				if !e.silent {
@@ -611,17 +632,50 @@ func (b *modelBrain) decide(ctx context.Context, t *turn, msgs []model.Message, 
 func (b *modelBrain) speakWords(ctx context.Context, msgs []model.Message, p *parts) (string, error) {
 	prefill := b.g.manifest.Persona.Prefill
 	p.delta(prefill)
+	held := &heldCalls{out: p.delta}
 	r, err := stream(ctx, b.client, model.Request{
 		Messages: msgs,
 		Prefill:  prefill,
 		Thinking: false,
 		Sampling: b.g.manifest.Persona.Sampling,
-	}, p.delta)
+	}, held.delta)
+	held.flush()
 	if r.usage != nil {
 		b.g.log.Debug(hlog.Brain, "speak: %d prompt tokens (%d cached), %d out",
 			r.usage.PromptTokens, r.usage.CachedTokens, r.usage.CompletionTokens)
 	}
 	return prefill + r.text, err
+}
+
+// speakCalls reads the calls a speak call wrote as text. The speak call
+// offers no tools, so a model that decided to speak before it was done
+// (it opened a skill and spoke in the same round, or read the skill and
+// still had an ask to put) writes the rest of its calls in its own
+// notation where the words go. more says there is a call among them to
+// something other than ending the turn, so the deciding is not over; r
+// is those calls as a round, with the words before them as its text.
+func (b *modelBrain) speakCalls(words string) (r round, more bool) {
+	ds := b.g.offered(b.cfg.Fold())
+	calls, rest, found, err := textCalls(words, ds)
+	if !found || err != nil {
+		return round{}, false
+	}
+	for _, c := range calls {
+		if d, ok := ds[c.Name]; ok && !d.terminal() {
+			more = true
+		}
+	}
+	return round{text: rest, calls: calls}, more
+}
+
+// beforeCalls is the words of a speak call without any call written after
+// them, which are not for the balloon: a call only to speak (the pose
+// again), or one that will not read.
+func beforeCalls(words string) string {
+	if i := strings.Index(words, gemmaCallOpen); i >= 0 {
+		words = words[:i]
+	}
+	return strings.TrimSpace(strings.ReplaceAll(words, gemmaCallClose, ""))
 }
 
 // DecisionNames is every decision in the registry, sorted: what a skill

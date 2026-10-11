@@ -14,9 +14,19 @@ import (
 // own, which are kept under the ghost's directory and curated when they go
 // unused. haunt's own and the package's cannot be changed.
 
+const skillViewName = "skill_view"
+
+// unreadCue answers a call ending the turn in the round that opened a
+// skill, which the model wrote before it could read the skill.
+const unreadCue = "Not done: do the skill's steps first, then end the turn."
+
+// nextCue closes skill_view's result, so the last thing the model reads
+// before deciding is the next step: the skill's first, not the turn's end.
+const nextCue = "\n\nNow do its steps as calls, in order. End the turn after the last."
+
 func init() {
 	register(verb{
-		id:     "skill_view",
+		id:     skillViewName,
 		desc:   "Open a skill from your list by name. Call it before acting on anything a skill covers, then follow its steps.",
 		params: []string{"name:string"},
 		run:    skillView,
@@ -53,7 +63,11 @@ func skillView(_ context.Context, g *Ghost, _ *turn, args json.RawMessage) (stri
 	if err != nil {
 		return "", err
 	}
-	return h.View(strings.TrimSpace(a.Name))
+	body, err := h.View(strings.TrimSpace(a.Name))
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(body, "\n") + nextCue, nil
 }
 
 func skillWrite(_ context.Context, g *Ghost, t *turn, args json.RawMessage) (string, error) {

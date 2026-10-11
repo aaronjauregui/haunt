@@ -183,7 +183,13 @@ and its result goes back as a tool message, and every call gets its
 result, a terminal one included, since a provider expects an answer to
 each. The loop ends on a terminal decision: `speak{pose}` or
 `stay_silent{}`. A call after the terminal one in the same round is
-answered "Not done: you had already decided." At most eight rounds; a
+answered "Not done: you had already decided." A terminal call in the
+same round as `skill_view` does not end the loop: the model wrote it
+before it could read the skill, so it is answered "Not done: do the
+skill's steps first", and `skill_view`'s own result ends by saying the
+steps are calls, made in order, with the turn ending after the last.
+Without thinking, a small model opens a skill and speaks in one breath;
+this is what turns that into reading it. At most eight rounds; a
 model still calling tools after that is ended in silence and refunded,
 since `recall` and `skill_view` are cheap enough to run away on.
 
@@ -223,6 +229,17 @@ thinking off, no tools, `[persona.sampling]` laid over the config's. The
 pose goes on with the first words shown, and the prefill is shown as
 the opening of the words. llama-server echoes a prefill in its first
 delta; the client strips a leading copy.
+
+**Calls in the speak call.** The speak call offers no tools, so a model
+that decided to speak with a step still to take (an `ask` from the
+skill it read, a `set_aside`) writes the call in Gemma's notation where
+the words go. The balloon stops at the call token as for a decide
+round. If `textCalls` reads a call to anything but `speak` or
+`stay_silent`, the model was not done deciding: the words before the
+call are interim, and the decide loop takes up again with those calls
+as its first round (`speakCalls`). That happens once a turn; a second
+speak call that writes calls has them cut off (`beforeCalls`), as has
+one whose only call is `speak` again.
 
 **Fold.** With `fold` on (the default for cloud), the words are the text
 of the reply that calls `speak`: one round carries the words and the
@@ -310,7 +327,10 @@ same way.
 
 Intentions the model takes on are named `model/<name>`, so they cannot
 collide with the driver's own (goal checks, drift findings, a poll's
-answer). An errand that comes due is discharged by the driver once the
+answer). `resolve` and `set_aside` take the full name, the name without
+`model/`, or the text the turn context quotes, when exactly one of the
+model's own still held has it; not found, the answer lists what is
+held. An errand that comes due is discharged by the driver once the
 words raising it have reached the screen; a goal only by `resolve`. A
 server tool's name is `<server>__<tool>` with anything outside
 `[A-Za-z0-9_-]` made `_`.

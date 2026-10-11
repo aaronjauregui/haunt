@@ -125,7 +125,10 @@ which: `true` for one call, `false` for two.
 `thinking` caps the model's reasoning: `off`, `low`, `medium` or `high`,
 or unset for the provider's default. The deciding call thinks on your
 turns and not on events, which mostly end in silence; the words are
-always written with thinking off.
+always written with thinking off. On a local model, set `thinking =
+"off"`: Gemma 4 31B answers you in about a third of the time without
+it, and haunt's skills and decisions are built to be followed step by
+step without reasoning.
 
 ## Waiting and failing
 

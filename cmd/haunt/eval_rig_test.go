@@ -319,9 +319,10 @@ func (r *evalRig) start() error {
 	// Debug for balloon and input: their "choices offered" and "input line
 	// opened" lines are how answer and typein know a question is up. Debug
 	// for brain: its "turn over" line is how sayWait and waitTurn know a
-	// turn has ended.
+	// turn has ended. Debug for tool: "the model decided" names every call
+	// a trial made, reads included, for the reader of haunt.log.
 	cmd.Env = append(r.c.Env(), r.env()...)
-	cmd.Env = append(cmd.Env, "HAUNT_LOG=info", "HAUNT_DEBUG=balloon,input,brain",
+	cmd.Env = append(cmd.Env, "HAUNT_LOG=info", "HAUNT_DEBUG=balloon,input,brain,tool",
 		"XDG_DATA_HOME="+filepath.Join(r.Dir, "data"))
 	if r.Notes != "" {
 		cmd.Env = append(cmd.Env, "HAUNT_TEST_NOTES="+r.Notes)

@@ -38,10 +38,8 @@ The event carries `goal`, `goal_name`, `held` and `last_seen`.
 ## They drop it or finish it
 
 - "I don't care about X anymore", "forget the marathon": `set_aside`
-  with its `name`, then a short word, no guilt.
+  with its `name` from your turn context, then a short word, no guilt.
 - "I finished X": `resolve` with its `name`, then congratulate them.
-
-The goal names are in your turn context, and in `intentions`.
 
 ## They ask how it is going
 
