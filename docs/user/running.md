@@ -99,8 +99,10 @@ grows until it is about 520 pixels tall; past that, the wheel over the
 ghost scrolls back through the earlier lines, three at a step, and
 anything new brings it back to the bottom. What it shows is the last 50
 things said this session, the same ones the wheel goes back through
-outside a conversation. Nothing in the balloon goes away while the
-conversation lasts.
+outside a conversation. The driver's own lines, such as `(looking…)` or
+a question it is putting to you, show beneath the rest until the ghost
+next speaks or you answer, and are not kept as anything the ghost said.
+Nothing in the balloon goes away while the conversation lasts.
 
 Clicking the ghost during a conversation pokes it and leaves the
 conversation and the half-typed line alone. The conversation ends when
@@ -110,8 +112,9 @@ goodbye. A ghost ends one with
 `end_conversation`, and its goodbye is the last thing shown;
 `[conversation] ghost_may_end = false` takes that away from it
 ([Configuration](config.md)). A question with choices, the ghost's or a
-consent question, ends it too. Once it has ended, the last words stay up
-for twelve seconds, as a reply does.
+consent question, ends it too. Once it has ended, the last words the
+ghost finished saying stay up for twelve seconds, as a reply does; words
+still arriving when it ended are not kept.
 
 ## Quiet hours
 

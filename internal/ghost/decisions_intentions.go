@@ -68,7 +68,9 @@ func toolIntend(g *Ghost, _ context.Context, args json.RawMessage) (string, erro
 	if err := in.Validate(); err != nil {
 		return "", err
 	}
-	g.execIntend(in)
+	if err := g.execIntend(in); err != nil {
+		return "", err
+	}
 	if a.DelayMS > 0 {
 		return name + " (due " + when(time.Now().Add(time.Duration(a.DelayMS)*time.Millisecond), time.Now()) + ")", nil
 	}

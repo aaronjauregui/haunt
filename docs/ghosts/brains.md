@@ -108,7 +108,7 @@ with `kv_set` as it goes; there is no read intent. Keys starting with
 | `look` | `text` (a question), `tag` | show the focused window to a vision model (`screen`); the answer comes to the brain, never to the balloon |
 | `watch` | | ask the person for window awareness; honoured only right after they acted, so offer it from a menu |
 | `act` | `name` (`server.tool`), `args`, `tag` | run a declared tool (`tools`); the person is asked about each tool the first time |
-| `intend` | `name`, `text`, `delay_ms` | take on a purpose that survives restarts; the same name replaces. No delay makes it a goal. |
+| `intend` | `name`, `text`, `delay_ms` | take on a purpose that survives restarts; the same name replaces, except a note's (`model/note-<n>`), which is refused. No delay makes it a goal. |
 | `resolve`, `set_aside` | `name` | it was done; or stop watching it without claiming it was done |
 | `leave_note` | `text`, `name` (a picture's id, or empty) | put a note on the desktop, at most 160 characters, with the picture pinned above; an intention named `model/note-<n>`, so `resolve` takes it down. At most three are up; a fourth is dropped |
 

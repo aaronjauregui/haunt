@@ -944,7 +944,7 @@ func (p *parts) show(now bool) {
 	if now || time.Since(p.last) >= 120*time.Millisecond {
 		p.last = time.Now()
 		p.waiting.Stop()
-		g.showBalloon(words)
+		g.showWords(words)
 		p.shown = true
 	}
 }

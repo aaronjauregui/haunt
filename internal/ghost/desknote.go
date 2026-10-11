@@ -148,6 +148,7 @@ func (g *Ghost) execLeaveNote(in proto.Intent) (string, error) {
 			return "", fmt.Errorf("no picture %s; call pictures to see what you have", pic)
 		}
 	}
+	g.intentionsMu.Lock()
 	list := g.loadIntentions()
 	last := 0
 	var up []string
@@ -161,6 +162,7 @@ func (g *Ghost) execLeaveNote(in proto.Intent) (string, error) {
 		}
 	}
 	if len(up) >= maxDeskNotes {
+		g.intentionsMu.Unlock()
 		return "", refuse("%d notes are up already: %s; resolve one first", len(up), strings.Join(up, ", "))
 	}
 	note := Intention{
@@ -174,7 +176,10 @@ func (g *Ghost) execLeaveNote(in proto.Intent) (string, error) {
 	}
 	list = append(list, note)
 	sort.SliceStable(list, func(a, b int) bool { return list[a].Made.Before(list[b].Made) })
-	g.saveIntentions(g.capIntentions(list))
+	list, gone := g.capIntentions(list)
+	g.saveIntentions(list)
+	g.intentionsMu.Unlock()
+	g.takeDownNotes(gone)
 	g.showNote(note)
 	g.log.Info(hlog.Memory, "left a note: %s", text)
 	g.announce(proto.ActedNoted, text)
@@ -219,7 +224,15 @@ func (g *Ghost) notesUp() int { return g.notes.count() }
 
 // showNote puts one note's paper on screen: where it was left if that
 // screen is still there, otherwise beside the ghost, and remembers where.
+//
+// Nothing goes up once the session is stopping: destroyNotes has taken
+// the paper down, or is about to, and a note put up after it would stay
+// up, its click resolving into a closed store.
 func (g *Ghost) showNote(it Intention) {
+	if g.isStopping() {
+		g.log.Debug(hlog.Memory, "note %s not shown: the ghost is stopping", it.Name)
+		return
+	}
 	if g.app == nil || g.surface == nil {
 		g.notes.put(it.Name, nil) // no compositor: tests keep the books only
 		return
@@ -251,6 +264,12 @@ func (g *Ghost) showNote(it Intention) {
 	}
 	if old := g.notes.put(name, s); old != nil {
 		old.Destroy()
+	}
+	// Stopping began while the paper was being made, and destroyNotes may
+	// have run before it was recorded.
+	if g.isStopping() {
+		g.takeDownNote(name)
+		return
 	}
 	if !placed {
 		g.moveNote(name, out, x, y)
@@ -333,8 +352,11 @@ func stackNote(x, top, w, h int, others []image.Rectangle) int {
 	return max(y, 0)
 }
 
-// moveNote remembers where a note's paper is.
+// moveNote remembers where a note's paper is, if the note is still held:
+// a drag ending as the note is resolved must not bring it back.
 func (g *Ghost) moveNote(name, out string, x, y int) {
+	g.intentionsMu.Lock()
+	defer g.intentionsMu.Unlock()
 	list := g.loadIntentions()
 	for i := range list {
 		if list[i].Name == name && list[i].Note != nil {

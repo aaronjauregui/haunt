@@ -297,7 +297,12 @@ type Ghost struct {
 	// The conversation the line belongs to, if any (see conversation.go).
 	convMu sync.Mutex
 	conv   conversation
-	// drawMu is held while the input line's panel is drawn (drawInput).
+	// drawMu is held while the input line's panel is drawn (drawInput),
+	// and while closeInputWith takes it down, so a draw that read the line
+	// as open cannot put the panel back after it closed. It is taken
+	// before inputMu, convMu, recallMu and blnMu, never while holding any
+	// of them, and is not held while calling anything that closes the
+	// line or ends a conversation.
 	drawMu sync.Mutex
 
 	// An open menu, if the brain asked a question (see choices.go).
@@ -372,6 +377,13 @@ type Ghost struct {
 	// a map of their own, because a brain naming a timer "check" must not
 	// silently cancel an intention of the same name.
 	intentTimers map[string]*time.Timer
+	// intentionsMu is held around every load, change and save of the
+	// intention list, which the brain, the timers, the watch loop and a
+	// note's clicks and drags all write: unheld, one of two writers puts
+	// back the list as it was before the other. Taken before timersMu and
+	// goalMu; never held while calling the compositor (a note's surface)
+	// or anything that takes it again.
+	intentionsMu sync.Mutex
 	// notes are the notes the ghost has left on the desktop, on screen
 	// (see desknote.go).
 	notes deskNotes
@@ -1307,7 +1319,9 @@ func (g *Ghost) execIntent(in proto.Intent) {
 		// stall while somebody reads.
 		g.go_(hlog.Screen, "watch", func() { g.execWatch() })
 	case proto.IntentIntend:
-		g.execIntend(in)
+		if err := g.execIntend(in); err != nil {
+			g.log.Debug(hlog.Brain, "intend intent dropped: %v", err)
+		}
 	case proto.IntentResolve:
 		g.execResolve(in.Name)
 	case proto.IntentSetAside:
@@ -1386,9 +1400,18 @@ func (g *Ghost) renderer() *balloon.Renderer {
 	return g.conversationRenderer(base)
 }
 
-// showBalloon renders text and places it beside the sprite. During quiet
-// hours it drops the balloon; the driver enforces this, not the ghost.
-func (g *Ghost) showBalloon(text string) {
+// showBalloon renders a line of the driver's own ("(looking…)", a
+// question, a tool's report) and places it beside the sprite. In a
+// conversation it is the view's status line, never one of the ghost's.
+// During quiet hours it drops the balloon; the driver enforces this, not
+// the ghost.
+func (g *Ghost) showBalloon(text string) { g.showLine(text, false) }
+
+// showWords is showBalloon for the ghost's own words as they stream in,
+// which in a conversation go at the bottom of the view.
+func (g *Ghost) showWords(text string) { g.showLine(text, true) }
+
+func (g *Ghost) showLine(text string, words bool) {
 	if muted, why := g.quiet.Active(); muted {
 		g.log.Debug(hlog.Balloon, "balloon suppressed (%s)", why)
 		return
@@ -1400,7 +1423,10 @@ func (g *Ghost) showBalloon(text string) {
 	// Never paint over a line the user is in the middle of typing. In a
 	// conversation the words go above it instead.
 	if g.inputOpen() {
-		if g.streamInConversation(text) {
+		if words && g.streamInConversation(text) {
+			return
+		}
+		if !words && g.statusInConversation(text) {
 			return
 		}
 		g.log.Debug(hlog.Balloon, "balloon suppressed (user is typing)")

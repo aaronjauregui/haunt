@@ -93,6 +93,21 @@ func (g *Ghost) recallMoved(from, to uint64) {
 	}
 }
 
+// recallUp marks the newest line the ghost said with text as the one in
+// balloon to: the last words of a conversation, put up again as it ends.
+// Found by its words rather than by its balloon, because the panel it was
+// said in may have been replaced since by a taller one.
+func (g *Ghost) recallUp(text string, to uint64) {
+	g.recallMu.Lock()
+	defer g.recallMu.Unlock()
+	for i := len(g.recall.lines) - 1; i >= 0; i-- {
+		if l := g.recall.lines[i]; !l.you && l.picture == "" && l.text == text {
+			g.recall.lines[i].gen = to
+			return
+		}
+	}
+}
+
 // onScroll steps through what was said: back for a negative count, forward
 // for a positive one, a page at a time. In a conversation it moves the
 // conversation's view instead, a few lines at a time (conversation.go).

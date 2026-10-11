@@ -32,6 +32,9 @@ const lookQuestion = "In one sentence, what is the person doing in this window? 
 	"Name the application and the specific thing on screen — a file, an error, " +
 	"a page title — rather than describing the layout."
 
+// lookingLine is what the balloon says while the ghost looks.
+const lookingLine = "(looking…)"
+
 // execLook captures the focused window and asks the vision model about it.
 func (g *Ghost) execLook(in proto.Intent) {
 	answer, app, err := g.look(in.Text)
@@ -89,7 +92,7 @@ func (g *Ghost) look(asked string) (answer, app string, err error) {
 	// can look at your screen should never do it invisibly. The picture was
 	// taken a moment ago, but it leaves the machine only now.
 	picture, shown := g.hangingPicture()
-	g.showBalloon("(looking…)")
+	g.showBalloon(lookingLine)
 	looking := g.balloonGen()
 	defer g.doneLooking(looking, picture, shown)
 
@@ -130,8 +133,14 @@ func (g *Ghost) hangingPicture() (id string, gen uint64) {
 // doneLooking takes "(looking…)" down and hangs back the picture it covered,
 // if there was one. A picture is something the person may still be looking
 // at; a line of text had its moment and is in the recall. Anything that
-// replaced "(looking…)" in the meantime is left alone.
+// replaced "(looking…)" in the meantime is left alone. In a conversation
+// "(looking…)" was the view's status line and the balloon is the
+// conversation's panel, which stays: only the line comes down.
 func (g *Ghost) doneLooking(looking uint64, picture string, shown uint64) {
+	if g.inConversation() {
+		g.dropStatus(lookingLine)
+		return
+	}
 	if g.balloonGen() != looking {
 		return
 	}

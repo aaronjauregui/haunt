@@ -193,7 +193,7 @@ func TestSomethingElseSaidClosesTheQuestion(t *testing.T) {
 		{"another line", func(g *Ghost) {
 			g.execIntent(proto.Intent{Type: proto.IntentSay, Text: "never mind"})
 		}},
-		{"a streamed reply", func(g *Ghost) { g.showBalloon("as I was saying") }},
+		{"a streamed reply", func(g *Ghost) { g.showWords("as I was saying") }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			g, b := choosingGhost(t)

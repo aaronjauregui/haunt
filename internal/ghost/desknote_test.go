@@ -268,3 +268,106 @@ func TestDeskNoteStacks(t *testing.T) {
 		t.Errorf("a ghost at the top puts its note at %d, want 0", y)
 	}
 }
+
+// A note set aside is not up, so it gives way with the errands, oldest
+// first, before any note that is: set-aside notes do not pile up and push
+// real errands out.
+func TestDeskNoteSetAsideGivesWay(t *testing.T) {
+	g, _, _ := intendingGhost(t)
+	a, _ := leaveNote(g, "aside one", "")
+	g.execSetAside(a)
+	b, _ := leaveNote(g, "aside two", "")
+	g.execSetAside(b)
+	c, _ := leaveNote(g, "up", "")
+	for i := range maxIntentions - 2 {
+		intend(g, fmt.Sprintf("model/r%d", i), fmt.Sprintf("reminder %d", i), 60*60*1000)
+	}
+	held := map[string]bool{}
+	for _, it := range g.loadIntentions() {
+		held[it.Name] = true
+	}
+	if held[a] {
+		t.Errorf("the oldest note set aside, %s, was kept over an errand", a)
+	}
+	if !held[b] || !held[c] {
+		t.Errorf("holding %v; want %s (set aside, newer than the errands' first) and %s (up)", held, b, c)
+	}
+	for i := range maxIntentions - 2 {
+		if !held[fmt.Sprintf("model/r%d", i)] {
+			t.Errorf("reminder %d was dropped for a note set aside", i)
+		}
+	}
+	if g.notesUp() != 1 {
+		t.Errorf("%d notes up, want 1", g.notesUp())
+	}
+}
+
+// intend cannot take over a note's name: the paper would stay up with an
+// errand's record behind it.
+func TestIntendRefusesANoteName(t *testing.T) {
+	g, _, _ := intendingGhost(t)
+	name, _ := leaveNote(g, "water the plants", "")
+	for _, given := range []string{"note-1", name} {
+		args, _ := json.Marshal(map[string]any{"name": given, "text": "something else", "delay_ms": 60000})
+		_, err := toolIntend(g, context.Background(), args)
+		if err == nil || !strings.Contains(err.Error(), "note") {
+			t.Errorf("intend named %q: %v, want it refused", given, err)
+		}
+	}
+	if err := g.execIntend(proto.Intent{Type: proto.IntentIntend, Name: name, Text: "x"}); err == nil {
+		t.Error("a scripted intend over a note was taken")
+	}
+	if n := notesIn(g.loadIntentions()); len(n) != 1 || n[0].Text != "water the plants" || g.notesUp() != 1 {
+		t.Errorf("after the refusals: %+v and %d up, want the note as left", n, g.notesUp())
+	}
+}
+
+// A click on paper whose record has already gone takes the paper down
+// rather than ignoring the click.
+func TestDeskNoteClickWithNoRecord(t *testing.T) {
+	g, _, _ := intendingGhost(t)
+	name, _ := leaveNote(g, "stale", "")
+	g.saveIntentions(nil)
+	g.execResolve(name)
+	if g.notesUp() != 0 {
+		t.Errorf("%d notes up after a click on one with no record, want 0", g.notesUp())
+	}
+}
+
+// A drag ending as the note is resolved does not bring it back, and
+// moving paper while errands are taken on loses none of them.
+func TestDeskNoteMoveLosesNothing(t *testing.T) {
+	g, _, _ := intendingGhost(t)
+	name, _ := leaveNote(g, "here", "")
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := range 200 {
+			g.moveNote(name, "", i, i)
+		}
+	}()
+	for i := range maxIntentions - 1 {
+		intend(g, fmt.Sprintf("model/r%d", i), "errand", 60*60*1000)
+	}
+	<-done
+	if n := len(g.loadIntentions()); n != maxIntentions {
+		t.Errorf("holding %d after moves and errands, want %d", n, maxIntentions)
+	}
+	g.execResolve(name)
+	g.moveNote(name, "", 5, 5)
+	if n := notesIn(g.loadIntentions()); len(n) != 0 {
+		t.Errorf("a move after the resolve brought the note back: %+v", n)
+	}
+}
+
+// Nothing goes up once the ghost is stopping: the paper would never be
+// taken down.
+func TestDeskNoteNotShownWhileStopping(t *testing.T) {
+	g, _, _ := intendingGhost(t)
+	g.stopping = make(chan struct{})
+	close(g.stopping)
+	g.showNote(Intention{Name: noteNamePrefix + "1", Text: "late", Note: &DeskNote{}})
+	if g.notesUp() != 0 {
+		t.Errorf("%d notes up after stopping began, want 0", g.notesUp())
+	}
+}

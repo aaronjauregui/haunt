@@ -282,6 +282,8 @@ func (g *Ghost) recordSightings(names []string, now time.Time) {
 	for _, n := range names {
 		want[n] = true
 	}
+	g.intentionsMu.Lock()
+	defer g.intentionsMu.Unlock()
 	list := g.loadIntentions()
 	touched := false
 	for i := range list {
@@ -412,10 +414,12 @@ func (g *Ghost) checkGoalsOnce() {
 	g.drifter.timer = nil
 	g.drifter.mu.Unlock()
 
+	g.intentionsMu.Lock()
 	list := g.loadIntentions()
 	now := time.Now()
 	which, ok := drifted(list, now)
 	if !ok {
+		g.intentionsMu.Unlock()
 		return // the common case, and it cost nothing
 	}
 	goal := list[which]
@@ -444,7 +448,10 @@ func (g *Ghost) checkGoalsOnce() {
 	}
 	kept = append(kept, found)
 	sort.SliceStable(kept, func(a, b int) bool { return kept[a].Made.Before(kept[b].Made) })
-	g.saveIntentions(g.capIntentions(kept))
+	kept, gone := g.capIntentions(kept)
+	g.saveIntentions(kept)
+	g.intentionsMu.Unlock()
+	g.takeDownNotes(gone)
 	// The one thing that has to be visible from outside this file: there is
 	// now something owed that nothing is holding a timer for.
 	g.late.Store(true)

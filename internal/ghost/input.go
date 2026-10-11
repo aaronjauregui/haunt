@@ -119,16 +119,17 @@ func (g *Ghost) closeInput() { g.closeInputWith("") }
 // closeInputWith closes the line, handing answer to whoever is waiting for
 // it. Abandoning a line closes it with nothing, which is how a person who
 // turned away says no. Closing a conversation's line ends the
-// conversation, whoever closes it: a click on the ghost, a menu.
-func (g *Ghost) closeInputWith(answer string) {
+// conversation, whoever closes it: a click on the ghost, a menu. It
+// reports whether it put up a line held while the line was open.
+func (g *Ghost) closeInputWith(answer string) bool {
 	if g.inConversation() {
 		g.endConversation("the line was closed")
-		return
+		return false
 	}
 	g.inputMu.Lock()
 	if !g.input.open {
 		g.inputMu.Unlock()
-		return
+		return false
 	}
 	g.input.open = false
 	g.input.focused = false
@@ -147,14 +148,21 @@ func (g *Ghost) closeInputWith(answer string) {
 	g.log.Debug(hlog.Input, "input line closed")
 
 	g.takeKeyboard(false)
+	// After any draw already under way: one that read the line as open
+	// before it closed would otherwise put the panel back up once it has
+	// been taken down.
+	g.drawMu.Lock()
 	g.hideBalloon()
-	if held != "" {
-		g.showPaged(held)
-		g.lingerBalloon(g.balloonGen(), heldLinger)
-		if shown != nil && g.blnShowing() {
-			shown()
-		}
+	g.drawMu.Unlock()
+	if held == "" {
+		return false
 	}
+	g.showPaged(held)
+	g.lingerBalloon(g.balloonGen(), heldLinger)
+	if shown != nil && g.blnShowing() {
+		shown()
+	}
+	return true
 }
 
 // heldLinger is how long a line held back by the input line stays once it
@@ -303,6 +311,9 @@ func (g *Ghost) submitInConversation(text string, empty bool) {
 	switch {
 	case reply != nil:
 		reply <- text
+		// The question was the status line, and it has its answer.
+		g.statusInConversation("")
+		return
 	case !empty:
 		// Into the view at once, before the ghost has answered: remember
 		// draws it.

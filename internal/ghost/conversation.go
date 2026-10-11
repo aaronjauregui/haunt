@@ -60,12 +60,18 @@ type conversation struct {
 	// rend is the conversation's renderer, kept for the scale it was
 	// built at.
 	rend *balloon.Renderer
-	// words are the last words the ghost said or is saying, which stay
-	// up when the conversation ends.
-	words string
+	// said is the last line the ghost finished saying, which stays up
+	// when the conversation ends. Only sayInConversation sets it: words
+	// still streaming may yet be taken back, and are not the ghost's last
+	// words until they are said.
+	said string
 	// streaming is the ghost's words still arriving, shown after what has
-	// been said; empty once they are said.
+	// been said; empty once they are said, or taken back.
 	streaming string
+	// status is a line of the driver's own (statusInConversation), drawn
+	// beneath the rest until the ghost next says something and never
+	// remembered: it is the driver reporting, not the ghost speaking.
+	status string
 	// offset is how many lines the view is scrolled back, and lines how
 	// many there were at the last draw, to clamp it with.
 	offset, lines int
@@ -110,7 +116,7 @@ func (g *Ghost) startConversation() {
 	}
 	now := time.Now()
 	g.conv.open, g.conv.since, g.conv.last = true, now, now
-	g.conv.words, g.conv.streaming, g.conv.ending = "", "", false
+	g.conv.said, g.conv.streaming, g.conv.status, g.conv.ending = "", "", "", false
 	g.conv.offset, g.conv.lines, g.conv.pics = 0, 0, nil
 	d := g.conv.idleAfter
 	if d <= 0 {
@@ -173,13 +179,14 @@ func (g *Ghost) endConversation(why string) {
 		g.conv.idle.Stop()
 		g.conv.idle = nil
 	}
-	words, rend := g.conv.words, g.conv.rend
-	g.conv.words, g.conv.streaming, g.conv.pics = "", "", nil
+	words, rend := g.conv.said, g.conv.rend
+	g.conv.said, g.conv.streaming, g.conv.status, g.conv.pics = "", "", "", nil
 	g.convMu.Unlock()
 	g.log.Debug(hlog.Input, "conversation ended: %s", why)
 
-	g.closeInputWith("")
-	if words == "" || rend == nil {
+	// A reply that landed between the mode closing and the line closing
+	// was held, and has just been shown: it is newer than words.
+	if g.closeInputWith("") || words == "" || rend == nil {
 		return
 	}
 	if muted, _ := g.quiet.Active(); muted {
@@ -188,9 +195,8 @@ func (g *Ghost) endConversation(why string) {
 	g.drawMu.Lock()
 	sp := rend.Render(words)
 	g.drawMu.Unlock()
-	was := g.balloonGen()
 	g.showBalloonSprite(sp)
-	g.recallMoved(was, g.balloonGen())
+	g.recallUp(words, g.balloonGen())
 	g.lingerBalloon(g.balloonGen(), lingerReply)
 }
 
@@ -255,7 +261,8 @@ const conversationScroll = 3
 
 // streamInConversation puts words arriving mid-turn at the bottom of the
 // view, reporting whether there was a conversation to put them in. Empty
-// takes back what had streamed, for a turn that ended up saying nothing.
+// takes back what had streamed, for a turn that ended up saying nothing,
+// which leaves the last words said as the last words.
 func (g *Ghost) streamInConversation(text string) bool {
 	g.convMu.Lock()
 	if !g.conv.open {
@@ -264,11 +271,44 @@ func (g *Ghost) streamInConversation(text string) bool {
 	}
 	g.conv.streaming, g.conv.last = text, time.Now()
 	if text != "" {
-		g.conv.words, g.conv.offset = text, 0
+		g.conv.status, g.conv.offset = "", 0
 	}
 	g.convMu.Unlock()
 	g.drawInput()
 	return true
+}
+
+// statusInConversation puts a line of the driver's own ("(looking…)", a
+// question's prompt, a tool's report) beneath the view, reporting whether
+// there was a conversation to put it in. It is shown, since the person
+// should see the ghost looking or what is being asked, but it is not one
+// of the ghost's lines: it is not remembered, does not linger when the
+// conversation ends, and goes when the ghost next speaks or the person
+// answers. Empty takes it down.
+func (g *Ghost) statusInConversation(text string) bool {
+	g.convMu.Lock()
+	if !g.conv.open {
+		g.convMu.Unlock()
+		return false
+	}
+	g.conv.status = text
+	if text != "" {
+		g.conv.offset = 0
+	}
+	g.convMu.Unlock()
+	g.drawInput()
+	return true
+}
+
+// dropStatus takes text down if it is still the status line, leaving any
+// other that replaced it.
+func (g *Ghost) dropStatus(text string) {
+	g.convMu.Lock()
+	mine := g.conv.open && g.conv.status == text
+	g.convMu.Unlock()
+	if mine {
+		g.statusInConversation("")
+	}
 }
 
 // sayInConversation is a finished line said during a conversation: shown
@@ -285,10 +325,15 @@ func (g *Ghost) sayInConversation(text string) bool {
 		g.convMu.Unlock()
 		return false
 	}
-	g.conv.words, g.conv.streaming, g.conv.last = text, "", time.Now()
+	g.conv.said, g.conv.streaming, g.conv.status, g.conv.last = text, "", "", time.Now()
 	g.convMu.Unlock()
 	g.announce(proto.ActedSpoke, text)
-	g.remember(recalled{text: text, gen: g.balloonGen()})
+	// Remembering draws the view, and a taller panel is a new balloon:
+	// the line is in the one that is up after the draw, which is the one
+	// endConversation follows it out of.
+	was := g.balloonGen()
+	g.remember(recalled{text: text, gen: was})
+	g.recallMoved(was, g.balloonGen())
 	return true
 }
 
@@ -300,6 +345,8 @@ func (g *Ghost) conversationSaid() bool {
 	defer g.convMu.Unlock()
 	if g.conv.open {
 		g.conv.offset, g.conv.last = 0, time.Now()
+		// Something said answers whatever the status line was waiting on.
+		g.conv.status = ""
 	}
 	return g.conv.open
 }
@@ -342,14 +389,14 @@ func (g *Ghost) conversationView(rend *balloon.Renderer, line string, caret bool
 	g.recallMu.Unlock()
 
 	g.convMu.Lock()
-	streaming, offset := g.conv.streaming, g.conv.offset
+	streaming, status, offset := g.conv.streaming, g.conv.status, g.conv.offset
 	if g.conv.pics == nil {
 		g.conv.pics = map[string]image.Image{}
 	}
 	pics := g.conv.pics
 	g.convMu.Unlock()
 
-	entries := make([]balloon.Entry, 0, len(said)+1)
+	entries := make([]balloon.Entry, 0, len(said)+2)
 	for _, r := range said {
 		e := balloon.Entry{You: r.you, Text: r.text, At: r.at}
 		if r.picture != "" {
@@ -375,6 +422,9 @@ func (g *Ghost) conversationView(rend *balloon.Renderer, line string, caret bool
 	}
 	if streaming != "" {
 		entries = append(entries, balloon.Entry{Text: streaming, At: time.Now()})
+	}
+	if status != "" {
+		entries = append(entries, balloon.Entry{Text: status, At: time.Now()})
 	}
 	sp, lines := rend.RenderConversation(entries, offset, line, caret)
 

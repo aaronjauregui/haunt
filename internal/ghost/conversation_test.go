@@ -222,3 +222,133 @@ func TestEndConversationCloses(t *testing.T) {
 		t.Error("end_conversation worked with no conversation open")
 	}
 }
+
+func convState(g *Ghost) (said, streaming, status string) {
+	g.convMu.Lock()
+	defer g.convMu.Unlock()
+	return g.conv.said, g.conv.streaming, g.conv.status
+}
+
+func lastRecalled(g *Ghost) recalled {
+	g.recallMu.Lock()
+	defer g.recallMu.Unlock()
+	return g.recall.lines[len(g.recall.lines)-1]
+}
+
+// Words taken back are not the ghost's last words: an empty stream leaves
+// the last line said, and a conversation that ends with words still
+// arriving leaves up only what was finished.
+func TestConversationKeepsOnlyWhatWasSaid(t *testing.T) {
+	g := pagingGhost(t)
+	g.openInput()
+	g.streamInConversation("I was going to say")
+	g.streamInConversation("")
+	g.onKey(textinput.KeyEsc, true)
+	if g.blnShowing() {
+		t.Error("words taken back were put up when the conversation ended")
+	}
+
+	g.openInput()
+	g.showPaged("Said.")
+	g.streamInConversation("And then")
+	g.streamInConversation("")
+	if said, streaming, _ := convState(g); said != "Said." || streaming != "" {
+		t.Errorf("after a retraction: said %q, streaming %q; want the line said", said, streaming)
+	}
+	g.streamInConversation("unfinished")
+	g.endConversation("test")
+	if !g.blnShowing() {
+		t.Fatal("the last line said did not stay up")
+	}
+	if last := lastRecalled(g); last.text != "Said." || last.gen != g.balloonGen() {
+		t.Errorf("the balloon up is %d, last line %q in %d; want the line said in it", g.balloonGen(), last.text, last.gen)
+	}
+}
+
+// A line of the driver's own in a conversation is its status line: shown,
+// never remembered as the ghost's, gone when the ghost speaks, and not
+// what lingers when the conversation ends. Done looking takes only the
+// line down, not the conversation's panel.
+func TestConversationStatusLine(t *testing.T) {
+	g := pagingGhost(t)
+	g.openInput()
+	g.showBalloon(lookingLine)
+	if said, _, status := convState(g); status != lookingLine || said != "" {
+		t.Errorf("status %q and said %q, want the status line and nothing said", status, said)
+	}
+	g.recallMu.Lock()
+	n := len(g.recall.lines)
+	g.recallMu.Unlock()
+	if n != 0 {
+		t.Errorf("the status line went into the recall: %d lines", n)
+	}
+	g.doneLooking(g.balloonGen(), "", 0)
+	if _, _, status := convState(g); status != "" {
+		t.Errorf("done looking left the status line %q", status)
+	}
+	if !g.blnShowing() || !g.inConversation() {
+		t.Error("done looking took the conversation's panel down")
+	}
+	g.showBalloon("(a tool — done)")
+	g.showPaged("Here.")
+	if _, _, status := convState(g); status != "" {
+		t.Errorf("the ghost spoke and the status line %q stayed", status)
+	}
+	g.showBalloon("(a tool — done)")
+	g.endConversation("test")
+	if last := lastRecalled(g); last.text != "Here." || last.gen != g.balloonGen() {
+		t.Errorf("lingering %d, last line %q in %d; want the ghost's words, not the status line", g.balloonGen(), last.text, last.gen)
+	}
+}
+
+// After a conversation the first wheel step goes back to the line before
+// the one up, not to the one up: the line said is followed into the
+// balloon it ends in, even when drawing it made a new panel.
+func TestConversationLastLineFollowed(t *testing.T) {
+	g := pagingGhost(t)
+	g.showPaged("Before.")
+	g.openInput()
+	g.showPaged("Last.")
+	g.endConversation("test")
+	g.onScroll(-1)
+	g.recallMu.Lock()
+	text := g.recall.lines[g.recall.at].text
+	g.recallMu.Unlock()
+	if text != "Before." {
+		t.Errorf("the first wheel step showed %q, want the line before the one up", text)
+	}
+}
+
+// A line held while the line was open and shown as it closes is reported,
+// so ending a conversation does not put older words over it.
+func TestCloseReportsHeldLine(t *testing.T) {
+	g := pagingGhost(t)
+	g.openInputWithReply(make(chan string, 1))
+	if g.closeInputWith("") {
+		t.Error("a close with nothing held reported a line shown")
+	}
+	g.openInputWithReply(make(chan string, 1))
+	g.holdLine("newer", nil)
+	if !g.closeInputWith("") {
+		t.Error("a close that showed a held line did not say so")
+	}
+}
+
+// Closing the line waits for a draw already under way, so the panel that
+// draw makes does not outlive the line.
+func TestCloseAfterDrawLeavesNoPanel(t *testing.T) {
+	g := pagingGhost(t)
+	for range 200 {
+		g.openInputWithReply(make(chan string, 1))
+		drawn := make(chan struct{})
+		go func() {
+			defer close(drawn)
+			g.drawInput()
+		}()
+		g.closeInput()
+		<-drawn
+		if g.blnShowing() {
+			t.Fatal("a draw racing the close left the panel up")
+		}
+	}
+}

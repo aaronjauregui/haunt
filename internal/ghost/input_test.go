@@ -212,7 +212,7 @@ func TestLineHeldWhileTyping(t *testing.T) {
 	held := g.input.held
 	g.inputMu.Unlock()
 	g.convMu.Lock()
-	words := g.conv.words
+	words := g.conv.said
 	g.convMu.Unlock()
 	if held != "" || words != "first" {
 		t.Errorf("held %q and showing %q, want nothing held and the line shown", held, words)

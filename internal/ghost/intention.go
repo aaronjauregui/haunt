@@ -148,7 +148,14 @@ func (i Intention) Overdue(now time.Time) bool {
 // Replacing rather than duplicating is what lets a brain re-arm the same
 // purpose — "check again in ten minutes" — without the list filling with
 // copies of one errand.
-func (g *Ghost) execIntend(in proto.Intent) {
+//
+// A note's name is refused: replacing a note with an errand would leave
+// its paper up with no record behind it. A note is changed by resolving
+// it and leaving another.
+func (g *Ghost) execIntend(in proto.Intent) error {
+	if strings.HasPrefix(in.Name, noteNamePrefix) {
+		return refuse("%s is a note's name; resolve the note and leave another, or give the intention a different name", in.Name)
+	}
 	text := strings.TrimSpace(in.Text)
 	if len([]rune(text)) > maxIntentionChars {
 		text = string([]rune(text)[:maxIntentionChars])
@@ -156,6 +163,7 @@ func (g *Ghost) execIntend(in proto.Intent) {
 	now := time.Now()
 	made := now
 	var prior Intention
+	g.intentionsMu.Lock()
 	list := g.loadIntentions()
 	kept := make([]Intention, 0, len(list)+1)
 	for _, it := range list {
@@ -195,37 +203,43 @@ func (g *Ghost) execIntend(in proto.Intent) {
 	// remembered, it is owed, and the one that has been owed longest is the
 	// one that has most obviously not been discharged.
 	sort.SliceStable(kept, func(a, b int) bool { return kept[a].Made.Before(kept[b].Made) })
-	kept = g.capIntentions(kept)
+	kept, gone := g.capIntentions(kept)
 	g.saveIntentions(kept)
+	g.intentionsMu.Unlock()
+	g.takeDownNotes(gone)
 	g.log.Info(hlog.Memory, "intending: %s", text)
 	g.armIntention(next)
+	return nil
 }
 
 // capIntentions enforces both caps on a list already sorted oldest first:
 // the goal cap, which is small and has its own argument, and then the
 // overall one. Shared with the goal check, because a run of findings the
 // brain never resolves would otherwise be the one path that could grow the
-// list past the bound everything else respects.
-func (g *Ghost) capIntentions(kept []Intention) []Intention {
+// list past the bound everything else respects. gone is what was let go,
+// for the caller to take any paper of down once intentionsMu is released.
+func (g *Ghost) capIntentions(kept []Intention) (out []Intention, gone []string) {
 	kept = g.trimGoals(kept)
 	over := len(kept) - maxIntentions
 	if over <= 0 {
-		return kept
+		return kept, nil
 	}
-	// Notes give way last. A note is on the screen in front of the person,
-	// and there are at most maxDeskNotes of them; one vanishing because a
-	// reminder was set is a thing they would see and not understand.
-	// Errands and goals are only ever in the list.
+	// Notes up give way last. A note is on the screen in front of the
+	// person, and there are at most maxDeskNotes of them; one vanishing
+	// because a reminder was set is a thing they would see and not
+	// understand. Errands and goals are only ever in the list, and so is a
+	// note set aside, which is not up and does not count against
+	// maxDeskNotes.
 	drop := map[int]bool{}
-	for _, notes := range []bool{false, true} {
+	for _, up := range []bool{false, true} {
 		for i, it := range kept {
-			if over > 0 && (it.Note != nil) == notes && !drop[i] {
+			if over > 0 && (it.Note != nil && !it.Aside) == up && !drop[i] {
 				drop[i] = true
 				over--
 			}
 		}
 	}
-	out := make([]Intention, 0, maxIntentions)
+	out = make([]Intention, 0, maxIntentions)
 	for i, it := range kept {
 		if !drop[i] {
 			out = append(out, it)
@@ -233,15 +247,21 @@ func (g *Ghost) capIntentions(kept []Intention) []Intention {
 		}
 		g.log.Info(hlog.Memory, "letting go of an intention: %s", it.Text)
 		g.cancelIntention(it.Name)
-		g.takeDownNote(it.Name)
+		gone = append(gone, it.Name)
 	}
-	return out
+	return out, gone
 }
 
 // execResolve discharges an intention. Unknown names are ignored: a brain
 // resolving something twice, or something the driver dropped, is not an
 // error worth reporting to it.
 func (g *Ghost) execResolve(name string) {
+	// A note that is done comes off the desktop with it; and one whose
+	// record is already gone, a click on paper left up by a race, comes
+	// off too rather than ignoring the click.
+	defer g.takeDownNote(name)
+	g.intentionsMu.Lock()
+	defer g.intentionsMu.Unlock()
 	list := g.loadIntentions()
 	kept := make([]Intention, 0, len(list))
 	found := false
@@ -257,9 +277,14 @@ func (g *Ghost) execResolve(name string) {
 	}
 	g.cancelIntention(name)
 	g.saveIntentions(kept)
-	// A note that is done comes off the desktop with it.
-	g.takeDownNote(name)
 	g.log.Info(hlog.Memory, "intention discharged: %s", name)
+}
+
+// takeDownNotes is takeDownNote for each name.
+func (g *Ghost) takeDownNotes(names []string) {
+	for _, n := range names {
+		g.takeDownNote(n)
+	}
 }
 
 // execSetAside stops a goal being watched, without discharging it.
@@ -275,6 +300,7 @@ func (g *Ghost) execResolve(name string) {
 // into the record that never happened; it just stops being watched, stops
 // being checked and stops reaching a prompt.
 func (g *Ghost) execSetAside(name string) {
+	g.intentionsMu.Lock()
 	list := g.loadIntentions()
 	found := false
 	for i := range list {
@@ -290,10 +316,12 @@ func (g *Ghost) execSetAside(name string) {
 		found = true
 	}
 	if !found {
+		g.intentionsMu.Unlock()
 		return
 	}
 	g.cancelIntention(name)
 	g.saveIntentions(list)
+	g.intentionsMu.Unlock()
 	g.takeDownNote(name)
 	g.log.Info(hlog.Memory, "no longer watching: %s", name)
 }
@@ -374,6 +402,7 @@ func (g *Ghost) cancelIntention(name string) {
 // on the list: what the ghost *does* about it is the brain's business, and
 // discharging it is a separate decision (see execResolve).
 func (g *Ghost) fireIntention(name string) {
+	g.intentionsMu.Lock()
 	list := g.loadIntentions()
 	var raised Intention
 	found := false
@@ -386,9 +415,11 @@ func (g *Ghost) fireIntention(name string) {
 		found = true
 	}
 	if !found {
+		g.intentionsMu.Unlock()
 		return
 	}
 	g.saveIntentions(list)
+	g.intentionsMu.Unlock()
 	g.cancelIntention(name)
 	g.log.Info(hlog.Memory, "intention due: %s", raised.Text)
 	// An errand the person asked for is theirs, and raising it spends from

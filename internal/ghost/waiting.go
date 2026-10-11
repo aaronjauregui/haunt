@@ -62,6 +62,16 @@ func (g *Ghost) sessionContext() context.Context {
 // stoppingC is the teardown signal, nil-safe for tests.
 func (g *Ghost) stoppingC() <-chan struct{} { return g.stopping }
 
+// isStopping reports whether teardown has begun.
+func (g *Ghost) isStopping() bool {
+	select {
+	case <-g.stoppingC():
+		return true
+	default:
+		return false
+	}
+}
+
 // waiter is one in-flight "the ghost is thinking" indicator.
 type waiter struct {
 	stop chan struct{}
