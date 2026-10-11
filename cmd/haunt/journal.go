@@ -29,6 +29,7 @@ func cmdJournal(args []string) error {
 	fs := flag.NewFlagSet("journal", flag.ExitOnError)
 	state := fs.String("state", "", "override state directory")
 	intentions := fs.Bool("intentions", false, "print what it is still meaning to do")
+	onlyNotes := fs.Bool("notes", false, "print only the notes it has left on the desktop")
 	echoes := fs.Bool("echoes", false, "list what it saved to memory in the words of a page or a file it read")
 	listSkills := fs.Bool("skills", false, "list its skills: the ones it learned, the package's and haunt's")
 	style := fs.Bool("style", false, "the style it draws in, and where that came from")
@@ -65,7 +66,10 @@ func cmdJournal(args []string) error {
 		return styleCmd(s, name, *reset)
 	}
 	if *intentions {
-		return printIntentions(s)
+		return printIntentions(s, false)
+	}
+	if *onlyNotes {
+		return printIntentions(s, true)
 	}
 	raw, ok, err := s.Get(ghost.NotesStoreKey)
 	if err != nil {
@@ -232,25 +236,39 @@ func resolveStateDir(override string, args []string) (string, error) {
 // journal is what the ghost has done, and this is what it is still meaning
 // to do. Both are the same question — what is my ghost carrying — asked
 // about different tenses.
-func printIntentions(s *store.Store) error {
+//
+// A note left on the desktop is an intention too, printed as `note:` and
+// its words; notesOnly prints those and nothing else.
+func printIntentions(s *store.Store, notesOnly bool) error {
+	none := "(it is not meaning to do anything)"
+	if notesOnly {
+		none = "(it has left no notes)"
+	}
 	raw, ok, err := s.Get(ghost.IntentionsStoreKey)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		fmt.Println("(it is not meaning to do anything)")
+		fmt.Println(none)
 		return nil
 	}
 	list, err := ghost.DecodeIntentions(raw)
 	if err != nil {
 		return fmt.Errorf("the intentions are corrupt: %w", err)
 	}
+	if notesOnly {
+		list = slices.DeleteFunc(list, func(it ghost.Intention) bool { return it.Note == nil })
+	}
 	if len(list) == 0 {
-		fmt.Println("(it is not meaning to do anything)")
+		fmt.Println(none)
 		return nil
 	}
 	now := time.Now()
 	for _, it := range list {
+		if it.Note != nil {
+			printNote(it, now)
+			continue
+		}
 		mark := "  "
 		note := ""
 		switch {
@@ -272,6 +290,23 @@ func printIntentions(s *store.Store) error {
 		printGoalEvidence(it, now)
 	}
 	return nil
+}
+
+// printNote prints a note left on the desktop: its words, the picture
+// pinned to it, and where it is.
+func printNote(it ghost.Intention, now time.Time) {
+	where := "on the desktop"
+	switch n := it.Note; {
+	case it.Aside:
+		where = "set aside, taken off the desktop"
+	case n.Output != "":
+		where = fmt.Sprintf("on %s at (%d,%d)", n.Output, n.X, n.Y)
+	}
+	fmt.Printf("  note: %s  (%s)\n", it.Text, where)
+	fmt.Printf("    left %s, as %s\n", humanAge(it.Made, now), it.Name)
+	if it.Note.Picture != "" {
+		fmt.Printf("    with picture %s\n", it.Note.Picture)
+	}
 }
 
 // printGoalEvidence prints everything the ghost is keeping about a goal.

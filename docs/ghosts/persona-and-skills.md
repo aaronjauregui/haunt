@@ -103,8 +103,10 @@ or a persona may name them:
 | `kind=help` | the person picked "What can you do?" from the menu |
 
 The current focused window and the time of day ride on each turn
-separately, as context, along with the goals the ghost keeps an eye on
-and any errand that came due and was not yet dealt with.
+separately, as context, along with the goals the ghost keeps an eye on,
+any errand that came due and was not yet dealt with, and the notes it
+has left on the desktop. A note the person clicks away simply stops
+being listed; no event says so.
 
 ## The ghost's tools
 
@@ -131,6 +133,7 @@ ends when it calls `speak` or `stay_silent`.
 | `look` | a one-sentence description of the focused window (`screen`) |
 | `intend` | take something on: with `delay_ms` an errand that comes back, without it a goal kept an eye on |
 | `resolve`, `set_aside`, `intentions` | discharge one, stop watching one, list them |
+| `leave_note` | leave a note on the desktop: `text` (at most 160 characters) and an optional `picture` id from the gallery; at most three up, until the person clicks one away or the ghost resolves it |
 | `tell` | address another ghost by name (`tell`) |
 | `remember`, `forget` | keep a line under a topic, or take one back |
 | `recall` | search what it remembers and what was said before |

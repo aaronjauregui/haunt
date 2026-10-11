@@ -405,6 +405,7 @@ func (g *Ghost) turnContext(now time.Time) string {
 		line += "\nCame due and not yet dealt with: " + strings.Join(owed, "; ") +
 			". Raise it when it fits, then resolve it."
 	}
+	line += g.notesContext()
 	return line
 }
 

@@ -109,6 +109,10 @@ type Manifest struct {
 	// Masks maps a mask name to a PNG marking where art may go. Declaring
 	// any fixes the canvas to their size; "silhouette" is required.
 	Masks map[string]string `toml:"masks"`
+	// Note is the paper the ghost's desktop notes are written on, drawn
+	// at the shell's scale like the rest of the art. Empty means the
+	// driver's own plain sheet (balloon.RenderNote).
+	Note string `toml:"note"`
 }
 
 // Files lists every path the manifest names — the sprite, each layer's
@@ -129,6 +133,9 @@ func (m Manifest) Files() []string {
 	}
 	for _, name := range sortedKeys(m.Masks) {
 		out = append(out, m.Masks[name])
+	}
+	if m.Note != "" {
+		out = append(out, m.Note)
 	}
 	return out
 }
@@ -234,6 +241,9 @@ type Shell struct {
 	// shell without masks.
 	masks map[string]*image.Gray
 	base  *image.NRGBA
+	// note is the paper desktop notes are drawn on, at the shell's scale;
+	// nil when the shell ships none.
+	note *image.NRGBA
 }
 
 // Load is LoadWith with zero options.
@@ -280,13 +290,30 @@ func LoadWith(dir string, m Manifest, opts LoadOptions) (*Shell, error) {
 	}
 	scale := effectiveScale(m.Scale, opts.ScaleFactor)
 
+	var s *Shell
+	var err error
 	switch {
 	case m.Sprite == "" && len(m.Layers) == 0:
-		return placeholder(scale), nil
+		s = placeholder(scale)
 	case len(m.Layers) == 0:
-		return loadSingle(dir, m.Sprite, scale)
+		s, err = loadSingle(dir, m.Sprite, scale)
+	default:
+		s, err = load(dir, m, scale)
 	}
-	return load(dir, m, scale)
+	if err != nil {
+		return nil, err
+	}
+	// The note paper is art like the rest, so it is read and scaled here,
+	// and a missing file is a load error rather than a plain sheet
+	// appearing the first time the ghost leaves a note.
+	if m.Note != "" {
+		img, err := loadImage(dir, m.Note)
+		if err != nil {
+			return nil, fmt.Errorf("shell note: %w", err)
+		}
+		s.note, _ = resample(img, [2]int{}, scale)
+	}
+	return s, nil
 }
 
 // effectiveScale combines the shell's scale with the person's factor, zero
@@ -642,6 +669,15 @@ func (s *Shell) composeBase() *image.NRGBA {
 		draw.Draw(img, at, art, b.Min, draw.Over)
 	}
 	return img
+}
+
+// Note is the paper the shell ships for desktop notes, at the shell's
+// scale, or nil. It is shared, and callers must not modify it.
+func (s *Shell) Note() *sprite.Sprite {
+	if s.note == nil {
+		return nil
+	}
+	return &sprite.Sprite{Img: s.note}
 }
 
 // Masks lists the declared mask names, sorted.

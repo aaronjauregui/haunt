@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // EventType enumerates everything that can happen to a ghost.
@@ -121,6 +122,9 @@ const (
 	// about it, and the arguments are as private as the prompt behind a
 	// picture.
 	ActedUsedTool = "used_tool"
+	// ActedNoted: it left a note on the desktop. Text is the note's words,
+	// which are on the screen for anybody in the room to read.
+	ActedNoted = "noted"
 )
 
 // Event is one occurrence delivered to a brain.
@@ -221,7 +225,12 @@ const (
 	IntentIntend        IntentType = "intend"         // hold a purpose, across restarts
 	IntentResolve       IntentType = "resolve"        // that purpose is discharged
 	IntentSetAside      IntentType = "set_aside"      // stop watching a goal, without pretending it was done
+	IntentLeaveNote     IntentType = "leave_note"     // put a note on the desktop: Text, and Name a picture id or ""
 )
+
+// MaxNoteChars is the most a desktop note may say, in characters. A note
+// is a few words to be found later, and the paper it is drawn on is small.
+const MaxNoteChars = 160
 
 // Intent is one request emitted by a brain. The driver validates and
 // executes intents; brains have no other way to affect the world.
@@ -366,6 +375,17 @@ func (i *Intent) Validate() error {
 	case IntentSetAside:
 		if i.Name == "" {
 			return fmt.Errorf("set_aside intent with empty name")
+		}
+	// A note is refused rather than cut: words clipped mid-sentence on a
+	// paper left on somebody's desktop read as broken, and the brain can
+	// say it shorter.
+	case IntentLeaveNote:
+		n := utf8.RuneCountInString(strings.TrimSpace(i.Text))
+		if n == 0 {
+			return fmt.Errorf("leave_note intent with nothing written on it")
+		}
+		if n > MaxNoteChars {
+			return fmt.Errorf("leave_note intent with %d characters; a note holds at most %d", n, MaxNoteChars)
 		}
 	case IntentAct:
 		if err := ValidToolName(i.Name); err != nil {

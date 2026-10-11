@@ -148,6 +148,8 @@ func toolIntentions(g *Ghost, _ context.Context, _ json.RawMessage) (string, err
 			b.WriteString(" (set aside)")
 		case it.Fired:
 			b.WriteString(" (due, not yet dealt with)")
+		case it.Note != nil:
+			b.WriteString(" (a note on their desktop)")
 		case !it.Goal():
 			b.WriteString(" (due " + when(it.Due, now) + ")")
 		default:

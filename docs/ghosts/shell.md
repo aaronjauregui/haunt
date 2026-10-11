@@ -204,6 +204,23 @@ at scale 1, which follows `scale` too: it is drawn at its size rather
 than resampled, and never smaller than 16 pixels, so a manifest may say
 `[shell] scale` and nothing else.
 
+### Note paper
+
+```toml
+[shell]
+note = "shell/note.png"
+```
+
+`note` is the paper the ghost's desktop notes are written on: the words
+go over it in dark text, with a picture the ghost pinned drawn above them
+at the paper's width. It is art like the rest, in art pixels and drawn at
+`scale` and the person's `[appearance]` factor, so it sits beside the
+ghost at a matching size. The paper's width is the note's; a note with
+more words than the paper has room for stretches it downwards, so a
+plain middle stretches better than a decorated one. A file that is not
+there is an error when the shell loads. Omitted, notes are written on a
+plain light sheet.
+
 ### Poses
 
 `[shell.pose.<name>]` maps layer names to variants. Layers not mentioned

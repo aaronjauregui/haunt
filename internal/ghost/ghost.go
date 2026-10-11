@@ -367,6 +367,9 @@ type Ghost struct {
 	// a map of their own, because a brain naming a timer "check" must not
 	// silently cancel an intention of the same name.
 	intentTimers map[string]*time.Timer
+	// notes are the notes the ghost has left on the desktop, on screen
+	// (see desknote.go).
+	notes deskNotes
 
 	// bg counts the goroutines go_ starts, so teardown can let them finish
 	// before the store closes (see panic.go).
@@ -946,6 +949,8 @@ func (g *Ghost) boot() error {
 	// boot event, so the greeting is the first thing said and a reminder
 	// the ghost has been holding since yesterday does not land on top of it.
 	g.armIntentions()
+	// And the notes it had left on the desktop, back where they were.
+	g.showStoredNotes()
 
 	// Watching the focused window, if the ghost asked for that and the user
 	// agreed to it. Startable again later, because the user may say yes
@@ -965,6 +970,8 @@ func (g *Ghost) boot() error {
 // hear, will otherwise hold the whole teardown open.
 func (g *Ghost) shutdown(deliveryDone <-chan struct{}, runErr error) error {
 	close(g.stopping)
+	// The notes' paper goes with the ghost; the notes stay in the store.
+	g.destroyNotes()
 	// What the day looked like, while there is still a store to put it in:
 	// the watch loop's own exit runs after the store has been closed, so
 	// this is the only place the last minute of it can be saved.
@@ -1279,6 +1286,10 @@ func (g *Ghost) execIntent(in proto.Intent) {
 		g.execResolve(in.Name)
 	case proto.IntentSetAside:
 		g.execSetAside(in.Name)
+	case proto.IntentLeaveNote:
+		if _, err := g.execLeaveNote(in); err != nil {
+			g.log.Debug(hlog.Brain, "leave_note intent dropped: %v", err)
+		}
 	case proto.IntentNote:
 		g.execNote(in.Text)
 	case proto.IntentTell:
