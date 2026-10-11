@@ -263,17 +263,6 @@ func (r *Renderer) RenderInput(text string, caretOn bool) *sprite.Sprite {
 	metrics := r.face.Metrics()
 	lineHeight := (metrics.Ascent + metrics.Descent).Ceil() + 2
 
-	line := "> " + text
-	inner := t.MaxWidth - 2*t.Padding
-	// Drop leading runes until the tail fits, so the caret stays visible.
-	for font.MeasureString(r.face, line+"|").Ceil() > inner && len(line) > 3 {
-		_, size := utf8.DecodeRuneInString(line[2:])
-		line = "> " + line[2+size:]
-	}
-	if caretOn {
-		line += "|"
-	}
-
 	img := image.NewNRGBA(image.Rect(0, 0, t.MaxWidth, lineHeight+2*t.Padding))
 	paintPanel(img, t)
 	d := &font.Drawer{
@@ -282,7 +271,58 @@ func (r *Renderer) RenderInput(text string, caretOn bool) *sprite.Sprite {
 		Face: r.face,
 		Dot:  fixed.P(t.Padding, t.Padding+metrics.Ascent.Ceil()),
 	}
-	d.DrawString(line)
+	d.DrawString(r.inputLine(text, caretOn))
+	return &sprite.Sprite{Img: img}
+}
+
+// inputLine is the typed line as drawn: a prompt, the tail that fits, and
+// the caret when it is on.
+func (r *Renderer) inputLine(text string, caretOn bool) string {
+	line := "> " + text
+	inner := r.theme.MaxWidth - 2*r.theme.Padding
+	// Drop leading runes until the tail fits, so the caret stays visible.
+	for font.MeasureString(r.face, line+"|").Ceil() > inner && len(line) > 3 {
+		_, size := utf8.DecodeRuneInString(line[2:])
+		line = "> " + line[2+size:]
+	}
+	if caretOn {
+		line += "|"
+	}
+	return line
+}
+
+// RenderWithInput paints words above a line being typed, in one panel:
+// a conversation, where the ghost's reply streams in while the next line
+// is already open beneath it. The panel is the full width, like
+// RenderInput's, so it can be redrawn in place until the words grow a
+// line; the words keep their tail when they outgrow the height, as
+// Render's do. With no words it is RenderInput.
+func (r *Renderer) RenderWithInput(text, line string, caretOn bool) *sprite.Sprite {
+	if strings.TrimSpace(text) == "" {
+		return r.RenderInput(line, caretOn)
+	}
+	t := r.theme
+	lh := r.lineHeight()
+	gap := lh / 2
+	words := r.wrap(strings.TrimSpace(text), t.MaxWidth-2*t.Padding)
+	if t.MaxHeight > 0 {
+		room := max((t.MaxHeight-2*t.Padding-gap)/lh-1, 1)
+		if len(words) > room {
+			words = append([]string{"…"}, words[len(words)-room+1:]...)
+		}
+	}
+
+	img := image.NewNRGBA(image.Rect(0, 0, t.MaxWidth, lh*(len(words)+1)+gap+2*t.Padding))
+	paintPanel(img, t)
+	d := &font.Drawer{Dst: img, Src: image.NewUniform(t.Text), Face: r.face}
+	y := t.Padding + r.face.Metrics().Ascent.Ceil()
+	for _, l := range words {
+		d.Dot = fixed.P(t.Padding, y)
+		d.DrawString(l)
+		y += lh
+	}
+	d.Dot = fixed.P(t.Padding, y+gap)
+	d.DrawString(r.inputLine(line, caretOn))
 	return &sprite.Sprite{Img: img}
 }
 

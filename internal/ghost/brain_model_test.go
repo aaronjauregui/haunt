@@ -802,13 +802,14 @@ func TestModelIndicatorOutlastsATool(t *testing.T) {
 	}
 }
 
-// A reply that lands while the person is typing their next line waits
-// for the line to close, and a reminder it carries counts as raised only
-// then.
+// A reply that lands while the person is typing an answer to the
+// driver's own question waits for the line to close, and a reminder it
+// carries counts as raised only then. (In a conversation it is shown at
+// once: TestLineHeldWhileTyping.)
 func TestModelReplyWaitsForTheInputLine(t *testing.T) {
 	g, b, _ := modelGhost(t, 5, speaks("intention_due", "", "Oven. Now.")...)
 	shown := make(chan bool, 1)
-	g.openInput()
+	g.openInputWithReply(make(chan string, 1))
 	typing := g.balloonGen()
 	b.unprompted("intention", "intention:oven", Envelope("intention_due"), func(ok bool) { shown <- ok })
 	waitTurns(t, b, 1)

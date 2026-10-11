@@ -77,6 +77,11 @@ func register(d decision) {
 // is how a ghost with no web stops claiming it can look things up.
 type needsDeclared interface{ declared() string }
 
+// offeredWhen is implemented by a decision the person can switch off in
+// the config: it is hidden, as one whose capability was not declared is,
+// when offeredTo says no.
+type offeredWhen interface{ offeredTo(g *Ghost) bool }
+
 // taintGated is implemented by a decision that is put to the person once
 // the turn has read somebody else's words: which sources gate it, for
 // these arguments. 0 means none.
@@ -311,6 +316,9 @@ func (g *Ghost) offered(fold bool) map[string]decision {
 			d = foldedSpeak
 		}
 		if n, ok := d.(needsDeclared); ok && n.declared() != "" && !g.declares(n.declared()) {
+			continue
+		}
+		if o, ok := d.(offeredWhen); ok && !o.offeredTo(g) {
 			continue
 		}
 		out[name] = d

@@ -401,3 +401,22 @@ func TestABadModelSectionNamesItself(t *testing.T) {
 		}
 	}
 }
+
+// A ghost may end a conversation unless the person says it may not.
+func TestConversationGhostMayEnd(t *testing.T) {
+	write(t, "")
+	f, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !f.Conversation.MayEnd() {
+		t.Error("ghost_may_end is off by default")
+	}
+	write(t, "[conversation]\nghost_may_end = false\n")
+	if f, err = Load(); err != nil {
+		t.Fatal(err)
+	}
+	if f.Conversation.MayEnd() {
+		t.Error("ghost_may_end = false was not read")
+	}
+}

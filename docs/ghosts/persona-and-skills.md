@@ -75,7 +75,9 @@ from the manifest, the shell and the person's config:
    one the face is matched to the words. `face` changes it without
    words, and `clip` plays a clip.
 8. Words appear in a small balloon: under 25 words, no markdown, no
-   stage directions, no labels.
+   stage directions, no labels. In a conversation (the person typing at
+   it, the line kept open between messages) it reads instead: a few
+   sentences are fine, still no markdown, stage directions or labels.
 9. Its memory: `remember` a line of what the person says about
    themselves, `forget` one that is wrong, `recall` what it remembers and
    what was said, `rewrite_notes` for its notes. A goal the person drops
@@ -106,9 +108,10 @@ The current focused window and the time of day ride on each turn
 separately, as context, along with the goals the ghost keeps an eye on,
 any errand that came due and was not yet dealt with, the notes it has
 left on the desktop (a note the person clicks away simply stops being
-listed; no event says so), the mood it set today, and the lines from
+listed; no event says so), the mood it set today, the lines from
 its memory topics that match what the person just said (`You remember,
-relevant now: likes apples (food).`). A remembered line stays for three
+relevant now: likes apples (food).`), and `In conversation: yes.` while
+a conversation is open. A remembered line stays for three
 turns and then not again for ten, so a persona can rely on the ghost
 having in mind what it was told about the subject at hand without
 calling `recall`. An event's fields and a window's title never bring a
@@ -126,6 +129,7 @@ ends when it calls `speak` or `stay_silent`.
 | `say` | a line in the balloon now, before the turn is over; rarely needed |
 | `ask` | a question with 1 to 9 choices; waits for the pick, or `""` if dismissed |
 | `ask_text` | opens the input line and waits for typed text |
+| `end_conversation` | ends a conversation the person opened by typing, once this turn's words (its goodbye) are shown; not offered when the person set `[conversation] ghost_may_end = false` |
 | `face`, `clip` | wear a pose, play a clip |
 | `draw` | paint a picture in the balloon from a `prompt`, in the ghost's style unless `style: false`, with `like: <name>` to keep an earlier picture's composition, and with `see: true` describe what came out (`imagine` capability) |
 | `show` | put a picture painted earlier back in the balloon, by its name (`imagine`) |

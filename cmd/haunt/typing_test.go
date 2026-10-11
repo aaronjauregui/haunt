@@ -74,6 +74,7 @@ wasm = "brain.wasm"
 		t.Fatal(err)
 	}
 	defer ptr.Close()
+	opened := 0
 	rightClick := func() {
 		t.Helper()
 		if err := ptr.MoveTo(spriteX+80, spriteY+80); err != nil {
@@ -82,7 +83,8 @@ wasm = "brain.wasm"
 		if err := ptr.RightClick(); err != nil {
 			t.Fatal(err)
 		}
-		waitLog(t, stderr, "input line opened")
+		opened++
+		waitLogCount(t, stderr, "input line opened", opened)
 	}
 	typeLine := func(text string, key uint32) {
 		t.Helper()
@@ -101,9 +103,18 @@ wasm = "brain.wasm"
 	typeLine("hello ghost", keyEnter)
 	waitRecordContains(t, record, `"text":"hello ghost"`)
 
-	// Escape abandons what was typed: nothing is sent, and the line closes.
-	rightClick()
+	// The line stays open: it is a conversation, and the next line needs
+	// no right-click.
+	typeLine("and another", keyEnter)
+	waitRecordContains(t, record, `"text":"and another"`)
+	if strings.Contains(stderr.String(), "input line closed") {
+		t.Error("the conversation's line closed on Enter")
+	}
+
+	// Escape abandons what was typed and ends the conversation: nothing
+	// is sent, and the line closes.
 	typeLine("forget this", keyEsc)
+	waitLog(t, stderr, "conversation ended: escape")
 	waitLog(t, stderr, "input line closed")
 	if data, _ := os.ReadFile(record); strings.Contains(string(data), "forget this") {
 		t.Error("Escape sent the line anyway")
@@ -128,7 +139,7 @@ wasm = "brain.wasm"
 	// client, and a driver that never implemented it deleted one
 	// character however long the key was held. Held past the repeat delay
 	// for long enough to eat the whole line, so only what follows is sent.
-	rightClick()
+	// Still the same conversation, so no right-click.
 	if err := kb.Type("scratch that"); err != nil {
 		t.Fatal(err)
 	}
@@ -139,9 +150,12 @@ wasm = "brain.wasm"
 	waitRecordContains(t, record, `"text":"new thought"`)
 
 	// The wheel over the ghost goes back through what was said, once the
-	// reply has gone, and taking the pointer off it puts the past away
-	// again.
-	waitBalloon(t, c, dir, spriteX, spriteY, false)
+	// conversation is over, starting from its last words still on screen;
+	// and taking the pointer off it puts the past away again.
+	if err := kb.Key(keyEsc); err != nil {
+		t.Fatal(err)
+	}
+	waitLogCount(t, stderr, "conversation ended: escape", 2)
 	if err := ptr.MoveTo(spriteX+80, spriteY+80); err != nil {
 		t.Fatal(err)
 	}
@@ -155,6 +169,19 @@ wasm = "brain.wasm"
 	}
 	waitLog(t, stderr, "recall: put away")
 	waitBalloon(t, c, dir, spriteX, spriteY, false)
+}
+
+// waitLogCount waits for want to have been logged n times: a line the
+// log already holds from earlier says nothing about now.
+func waitLogCount(t *testing.T, buf *syncBuffer, want string, n int) {
+	t.Helper()
+	for range 100 {
+		if strings.Count(buf.String(), want) >= n {
+			return
+		}
+		wait100ms()
+	}
+	t.Fatalf("log never contained %q %d times; have:\n%s", want, n, buf.String())
 }
 
 // Scancodes the test drives directly rather than through a character.

@@ -145,7 +145,7 @@ var verbClasses = map[string]verbClass{
 	"tell":    classReach,
 	speakName: classShow, silentName: classShow, "face": classShow, "clip": classShow,
 	"draw": classShow, "show": classShow, "look": classShow,
-	"say": classShow, "ask": classShow, "ask_text": classShow,
+	"say": classShow, "ask": classShow, "ask_text": classShow, endConversationName: classShow,
 }
 
 // classOf is the class of a call to name on a turn the person did or did

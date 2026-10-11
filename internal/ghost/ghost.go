@@ -294,6 +294,11 @@ type Ghost struct {
 	// Typed input (see input.go).
 	inputMu sync.Mutex
 	input   inputState
+	// The conversation the line belongs to, if any (see conversation.go).
+	convMu sync.Mutex
+	conv   conversation
+	// drawMu is held while the input line's panel is drawn (drawInput).
+	drawMu sync.Mutex
 
 	// An open menu, if the brain asked a question (see choices.go).
 	choiceMu sync.Mutex
@@ -754,6 +759,7 @@ func (g *Ghost) applySettings(cfg *config.File) error {
 	// out when used). Conversation is the model's, [model].
 	g.backend = backend.NewServiceWith(cfg.Backend, g.log, g.opts.Budgets)
 	g.modelCfg = cfg.ModelFor(g.manifest.Ghost.Name)
+	g.applyConversation(cfg.Conversation)
 
 	// The folders the person shared. One that cannot be opened (a drive
 	// not mounted) is a warning, not a failure: it is listed as
@@ -1190,6 +1196,12 @@ func (g *Ghost) execIntent(in proto.Intent) {
 		}
 	case proto.IntentHideSay:
 		g.stopTalking()
+		// A conversation's balloon is up for as long as the conversation
+		// is: a brain's timer does not take it down (conversation.go).
+		if g.inConversation() {
+			g.log.Debug(hlog.Balloon, "hide_say ignored: a conversation is open")
+			return
+		}
 		g.clearPaging()
 		// Including a question: a brain putting the balloon away has
 		// withdrawn whatever was in it. (This is how a stale `hush` timer
@@ -1348,13 +1360,16 @@ func (g *Ghost) setTimer(name string, d time.Duration) {
 }
 
 // renderer returns the balloon renderer for the scale the ghost is
-// currently on. Read under the lock: the dispatch goroutine swaps it when
-// the compositor announces a different scale, and every other goroutine
-// that draws would otherwise be reading a field being written.
+// currently on, and the wider conversation one while a conversation is
+// open (conversation.go). Read under the lock: the dispatch goroutine
+// swaps it when the compositor announces a different scale, and every
+// other goroutine that draws would otherwise be reading a field being
+// written.
 func (g *Ghost) renderer() *balloon.Renderer {
 	g.blnMu.Lock()
-	defer g.blnMu.Unlock()
-	return g.blnRend
+	base := g.blnRend
+	g.blnMu.Unlock()
+	return g.conversationRenderer(base)
 }
 
 // showBalloon renders text and places it beside the sprite. During quiet
@@ -1368,8 +1383,12 @@ func (g *Ghost) showBalloon(text string) {
 	// one surface, and a menu whose panel has been painted over would still
 	// be holding the keyboard, waiting.
 	g.dismissChoices()
-	// Never paint over a line the user is in the middle of typing.
+	// Never paint over a line the user is in the middle of typing. In a
+	// conversation the words go above it instead.
 	if g.inputOpen() {
+		if g.streamInConversation(text) {
+			return
+		}
 		g.log.Debug(hlog.Balloon, "balloon suppressed (user is typing)")
 		return
 	}
@@ -1432,13 +1451,24 @@ func (g *Ghost) balloonGen() uint64 {
 // still the current balloon. A brain that scheduled its own hide would
 // otherwise erase whatever arrived in the meantime, which on a slow model
 // is exactly the reply the person was waiting for.
+//
+// Nothing lingers in a conversation: the balloon is up for as long as it
+// is, and its words linger from when it ends (endConversation).
 func (g *Ghost) lingerBalloon(gen uint64, d time.Duration) {
+	if g.inConversation() {
+		g.log.Debug(hlog.Balloon, "no linger: a conversation is open")
+		return
+	}
 	time.AfterFunc(d, func() {
 		g.guard(hlog.Balloon, "the balloon's linger", func() {
 			select {
 			case <-g.done:
 				return
 			default:
+			}
+			if g.inConversation() {
+				g.log.Debug(hlog.Balloon, "linger expired during a conversation; the balloon stays")
+				return
 			}
 			if g.balloonGen() != gen {
 				g.log.Debug(hlog.Balloon, "linger expired on a line that had already been replaced")

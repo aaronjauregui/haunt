@@ -69,14 +69,15 @@ wasm = "brain.wasm"
 		t.Fatal(err)
 	}
 
-	// Right-click opens the input line. Assert on the input panel's own
-	// fixed width rather than "a balloon appeared": whisper's boot greeting
-	// is a balloon too, and an earlier version of this test was satisfied
-	// by it while the input line never opened at all.
+	// Right-click opens the input line, in a conversation. Assert on the
+	// conversation panel's own fixed width rather than "a balloon
+	// appeared": whisper's boot greeting is a balloon too, and an earlier
+	// version of this test was satisfied by it while the input line never
+	// opened at all.
 	if err := ptr.RightClick(); err != nil {
 		t.Fatal(err)
 	}
-	waitLog(t, stderr, "surface create 320x")
+	waitLog(t, stderr, "surface create 480x")
 	if !balloonVisible(t, c, dir, spriteX, spriteY) {
 		t.Error("the input line was created but is not on screen")
 	}
