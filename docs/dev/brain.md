@@ -133,7 +133,20 @@ granted, the goals the ghost keeps an eye on with their names (so "I
 don't care about the marathon anymore" is a `set_aside` in one call), and
 the errands that came due and were not dealt with, so a reminder whose
 own turn was dropped, silent or held back by quiet is in front of the model on every turn until it resolves it, whatever the
-transcript has been summarised to. The reminder is the first sentence of
+transcript has been summarised to. Then the mood the ghost set with
+`mood` (`mood.go`, kept under `_haunt/mood` in the store with the time
+it was set), as `Your mood: …`, only while it was set today, so it
+clears with the day without a timer; it is not shown in the balloon or
+on the face. Then the lines memory brought in on the
+person's words, as `You remember, relevant now: likes apples (food).`
+(`keyed.go`): on a turn whose input is not an envelope, the words less
+stopwords go to `Recall` for three lines, and each scoring at least
+`keyedMinScore` (0.5 BM25) is held for `keyedSticky` (3) turns, then
+cannot fire again for `keyedCooldown` (10). Turns of every kind count;
+events and window titles never key. The table is in memory only, so a
+restart forgets it. `recall` is pull-only, and a small model does not
+reach for it when the person names something it was told a week ago.
+The reminder is the first sentence of
 `[persona] system` and "Stay in character.": it sits after the
 transcript, against the character thinning out over a long conversation,
 and since it is last only the suffix is recomputed on a cached prompt.
@@ -318,6 +331,7 @@ same way.
 | `intend` | `text`, `delay_ms?`, `name?` | taint on cloud |
 | `resolve`, `set_aside` | `name` | taint on cloud |
 | `intentions` | | none |
+| `mood` | `text` (one line, under 120 characters) | taint on cloud |
 | `tell` | `ghost`, `text` | `tell`, taint |
 | `remember`, `forget` | `topic`, `line` | the echo check on cloud; labelled |
 | `recall` | `query` | none |
@@ -496,7 +510,7 @@ Two flags on a decision say what is gated after which source
 (`gatedAfter` in `web.go`):
 
 - **`sideEffect`**, reaching past the person in front of the ghost, is
-  gated after either source: `tell`, `intend`, `resolve`, `set_aside`, a
+  gated after either source: `tell`, `intend`, `resolve`, `set_aside`, `mood`, a
   `style` set or reset, and every server tool.
 - **`leaves`**, sending words off the machine, is gated only after a
   file: `search`, whose query goes to the provider, and `read_page`,
@@ -505,7 +519,7 @@ Two flags on a decision say what is gated after which source
 The trust table then narrows that (`gateAfterReading` in `trust.go`): a
 decision whose class does not need the after-read question where the
 model runs is not gated at all. On a local model that leaves `tell` and
-the server tools; `intend`, `resolve`, `set_aside`, `style`, `search`
+the server tools; `intend`, `resolve`, `set_aside`, `mood`, `style`, `search`
 and `read_page` are free after a read there, since none of them takes
 the words anywhere the person does not own.
 
@@ -537,7 +551,7 @@ read it (`readGate`, `gateAfterReading`, `mayRemember`, `labelled`):
 | read, an event turn | the same | quiet hours and the ration | consent, the `unprompted` policy, quiet hours and the ration; the after-read question |
 | lookup | `recall`, `skill_view`, `intentions`, `pictures` | nothing | nothing |
 | write | `remember`, `forget`, `rewrite_notes`, `skill_write` | the label | the echo check and the label |
-| keep | `intend`, `resolve`, `set_aside`, `style` | nothing | the after-read question |
+| keep | `intend`, `resolve`, `set_aside`, `mood`, `style` | nothing | the after-read question |
 | reach | `tell`, every `<server>__<tool>`, and any decision not in the table | consent, the marks, the after-read question | the same |
 | show | `speak`, `stay_silent`, `say`, `ask`, `ask_text`, `face`, `clip`, `draw`, `show`, `look` | nothing | nothing |
 

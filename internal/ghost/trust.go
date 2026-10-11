@@ -83,7 +83,7 @@ const (
 	// classWrite is what the ghost keeps past the turn: remember,
 	// rewrite_notes, skill_write.
 	classWrite
-	// classKeep is the ghost's own bookkeeping: intend, resolve,
+	// classKeep is the ghost's own bookkeeping: intend, resolve, mood,
 	// set_aside, and style when it is set.
 	classKeep
 	// classReach is what reaches past the person: tell, and every
@@ -141,6 +141,7 @@ var verbClasses = map[string]verbClass{
 	"recall": classLookup, "skill_view": classLookup, "intentions": classLookup, "pictures": classLookup,
 	"remember": classWrite, "rewrite_notes": classWrite, "skill_write": classWrite, "forget": classWrite,
 	"intend": classKeep, "resolve": classKeep, "set_aside": classKeep, "style": classKeep,
+	"mood":    classKeep,
 	"tell":    classReach,
 	speakName: classShow, silentName: classShow, "face": classShow, "clip": classShow,
 	"draw": classShow, "show": classShow, "look": classShow,

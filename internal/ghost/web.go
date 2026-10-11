@@ -308,6 +308,8 @@ func actSummary(name string, args json.RawMessage) string {
 		return fmt.Sprintf("mark %s done", a.Name)
 	case "set_aside":
 		return fmt.Sprintf("stop watching %s", a.Name)
+	case "mood":
+		return fmt.Sprintf("set its mood to %q", clip(a.Text, 120))
 	case "style":
 		if a.Reset {
 			return "go back to its package's drawing style"

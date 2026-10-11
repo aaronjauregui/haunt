@@ -43,6 +43,7 @@ func (b *modelBrain) prompt(t *turn, now time.Time) ([]model.Message, error) {
 		return nil, fmt.Errorf("reading the transcript: %w", err)
 	}
 	msgs = append(msgs, replay(rows)...)
+	b.keyed(t)
 	msgs = append(msgs,
 		model.Message{Role: "user", Content: t.input},
 		model.Message{Role: "system", Content: g.turnContext(now) + "\n\n" + st.reminder()},
@@ -404,6 +405,12 @@ func (g *Ghost) turnContext(now time.Time) string {
 	if len(owed) > 0 {
 		line += "\nCame due and not yet dealt with: " + strings.Join(owed, "; ") +
 			". Raise it when it fits, then resolve it."
+	}
+	if mood := g.moodLine(now); mood != "" {
+		line += "\n" + mood
+	}
+	if keyed := g.keyedLine(); keyed != "" {
+		line += "\n" + keyed
 	}
 	return line
 }

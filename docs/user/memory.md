@@ -43,6 +43,15 @@ might be there. Tell it something and it is kept; tell it it has
 something wrong and it takes the line back. There is no separate belief
 store and no correction menu.
 
+It does not have to think of searching. When you mention something a
+topic has a line about ("I bought apples"), that line is put in front of
+the ghost with your words, unasked: up to three lines a turn, each kept
+in mind for three turns and then not brought up again for ten, so a
+subject you keep returning to does not pin the same fact into every
+reply. Only your words do this; a window's title or something another
+ghost said never does. While its memory holds only a line or two,
+nothing is brought in this way, since it sees every topic anyway.
+
     haunt memory ls              # topics, with their line counts
     haunt memory show food       # a topic's lines, numbered, with where each came from
     haunt memory rm food 2       # remove its second line
@@ -90,6 +99,20 @@ ghost's own searches.
 
 A scripted ghost remembers in its own key-value store, which its brain
 reads at boot and writes as it goes.
+
+A ghost may set a **mood**: one short line about how it is feeling,
+which colours what it says for the rest of the day. It is kept across a
+restart and clears overnight, since it counts only on the day it was
+set. It is not shown in the balloon and does not change its face; you
+see it here:
+
+    haunt journal -mood            # the line, and when it was set
+
+    a little wistful, it has been raining all day
+      set 2026-10-11 14:03
+
+It prints `(no mood set)` when there is none, and marks one from an
+earlier day as cleared.
 
 The pictures a ghost paints are kept as files beside that store, in
 `pictures/` under its state directory, with the prompt and the caption it
@@ -160,6 +183,7 @@ on a `weekly` occasion or on request.
     haunt journal -echoes          # memory writes that repeat a page or a file
     haunt journal                  # what it did: tools run, pictures drawn,
                                    #   searches made and pages read
+    haunt journal -mood            # how it said it is feeling today
     haunt journal -style           # the look it paints in, and when that changed
     haunt journal -style -reset    # back to the look its package came with
 

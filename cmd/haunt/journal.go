@@ -24,7 +24,8 @@ import (
 // lists what it saved there in the words of a page or a file it read, from
 // its transcript. -skills lists the routines it has, and which of them it
 // wrote itself. -style is the look its pictures have, and whether the
-// ghost was asked for one of its own.
+// ghost was asked for one of its own. -mood is the line it set about how
+// it is feeling.
 func cmdJournal(args []string) error {
 	fs := flag.NewFlagSet("journal", flag.ExitOnError)
 	state := fs.String("state", "", "override state directory")
@@ -33,6 +34,7 @@ func cmdJournal(args []string) error {
 	listSkills := fs.Bool("skills", false, "list its skills: the ones it learned, the package's and haunt's")
 	style := fs.Bool("style", false, "the style it draws in, and where that came from")
 	reset := fs.Bool("reset", false, "with -style: go back to the style its package ships")
+	mood := fs.Bool("mood", false, "the mood it set, and when")
 	fs.Parse(args)
 
 	stateDir, err := resolveStateDir(*state, fs.Args())
@@ -67,6 +69,9 @@ func cmdJournal(args []string) error {
 	if *intentions {
 		return printIntentions(s)
 	}
+	if *mood {
+		return printMood(os.Stdout, s, time.Now())
+	}
 	raw, ok, err := s.Get(ghost.NotesStoreKey)
 	if err != nil {
 		return err
@@ -81,6 +86,33 @@ func cmdJournal(args []string) error {
 	}
 	for _, n := range notes {
 		fmt.Printf("%s  %s\n", n.Time.Format("2006-01-02 15:04"), n.Text)
+	}
+	return nil
+}
+
+// printMood prints the ghost's mood and when it set it. A mood from an
+// earlier day is printed too, marked as cleared: the ghost no longer has
+// it in mind, but it is still the last one it set.
+func printMood(w io.Writer, s *store.Store, now time.Time) error {
+	raw, ok, err := s.Get(ghost.MoodStoreKey)
+	if err != nil {
+		return err
+	}
+	m := ghost.Mood{}
+	if ok {
+		if m, err = ghost.DecodeMood(raw); err != nil {
+			return fmt.Errorf("the mood is corrupt: %w", err)
+		}
+	}
+	if m.Text == "" {
+		fmt.Fprintln(w, "(no mood set)")
+		return nil
+	}
+	fmt.Fprintln(w, m.Text)
+	if m.Today(now) {
+		fmt.Fprintf(w, "  set %s\n", m.At.Format("2006-01-02 15:04"))
+	} else {
+		fmt.Fprintf(w, "  set %s, an earlier day; it has cleared\n", m.At.Format("2006-01-02 15:04"))
 	}
 	return nil
 }
