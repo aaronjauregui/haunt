@@ -109,13 +109,21 @@ type Intention struct {
 	// the brain says, because a brain that could set this could mint itself
 	// an allowance out of the user's reminders.
 	Asked bool `json:"a,omitempty"`
+	// Note makes this a note left on the desktop: the words are Text, and
+	// this is where the paper is and what is pinned to it (desknote.go).
+	// Nil on everything else.
+	Note *DeskNote `json:"note,omitempty"`
 }
 
 // Goal reports whether this is a goal rather than an errand: something
 // taken on with no particular moment, which is what a person means when
 // they say the thesis matters. The distinction is one field and no second
 // lifecycle — see the top of goal.go for why that is the whole of it.
-func (i Intention) Goal() bool { return i.Due.IsZero() }
+//
+// A desk note has no moment either and is not a goal: nothing is watched
+// for it, it is not one of the person's aims, and it must not count
+// against the goal cap.
+func (i Intention) Goal() bool { return i.Due.IsZero() && i.Note == nil }
 
 // Watched reports whether the ghost is still recording sightings of this
 // goal: it has to be a goal, it has to have something to look for, and the
@@ -200,14 +208,34 @@ func (g *Ghost) execIntend(in proto.Intent) {
 // list past the bound everything else respects.
 func (g *Ghost) capIntentions(kept []Intention) []Intention {
 	kept = g.trimGoals(kept)
-	if len(kept) <= maxIntentions {
+	over := len(kept) - maxIntentions
+	if over <= 0 {
 		return kept
 	}
-	for _, dropped := range kept[:len(kept)-maxIntentions] {
-		g.log.Info(hlog.Memory, "letting go of an intention: %s", dropped.Text)
-		g.cancelIntention(dropped.Name)
+	// Notes give way last. A note is on the screen in front of the person,
+	// and there are at most maxDeskNotes of them; one vanishing because a
+	// reminder was set is a thing they would see and not understand.
+	// Errands and goals are only ever in the list.
+	drop := map[int]bool{}
+	for _, notes := range []bool{false, true} {
+		for i, it := range kept {
+			if over > 0 && (it.Note != nil) == notes && !drop[i] {
+				drop[i] = true
+				over--
+			}
+		}
 	}
-	return kept[len(kept)-maxIntentions:]
+	out := make([]Intention, 0, maxIntentions)
+	for i, it := range kept {
+		if !drop[i] {
+			out = append(out, it)
+			continue
+		}
+		g.log.Info(hlog.Memory, "letting go of an intention: %s", it.Text)
+		g.cancelIntention(it.Name)
+		g.takeDownNote(it.Name)
+	}
+	return out
 }
 
 // execResolve discharges an intention. Unknown names are ignored: a brain
@@ -229,6 +257,8 @@ func (g *Ghost) execResolve(name string) {
 	}
 	g.cancelIntention(name)
 	g.saveIntentions(kept)
+	// A note that is done comes off the desktop with it.
+	g.takeDownNote(name)
 	g.log.Info(hlog.Memory, "intention discharged: %s", name)
 }
 
@@ -264,6 +294,7 @@ func (g *Ghost) execSetAside(name string) {
 	}
 	g.cancelIntention(name)
 	g.saveIntentions(list)
+	g.takeDownNote(name)
 	g.log.Info(hlog.Memory, "no longer watching: %s", name)
 }
 

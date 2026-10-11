@@ -152,6 +152,25 @@ it is looking for and the times it saw them, which `haunt journal
 -intentions` prints. Tell it you have stopped caring and it sets the goal
 aside: still on the books, unwatched.
 
+## Notes on the desktop
+
+    leave me a note to water the plants
+
+A ghost can leave a **note**: a slip of paper beside it with a few words
+(at most 160 characters), and sometimes a picture it painted pinned
+above them. It may also leave one of its own accord. A note stays on the
+desktop until you click it, which takes it down, or the ghost decides it
+has served and takes it down itself. Drag it wherever you like; it comes
+back there after a restart, or beside the ghost again if that screen is
+no longer connected.
+
+A note is an intention with paper, so it is held with the reminders and
+goals and listed with them. A ghost has at most three notes up at once,
+and reminders filling the list never push a note out.
+
+    haunt journal -intentions      # notes among the rest, as note: lines
+    haunt journal -notes           # only the notes
+
 ## Routines
 
 A ghost carries a few routines as **skills**, short procedures the model

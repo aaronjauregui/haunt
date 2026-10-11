@@ -136,7 +136,7 @@ func TestNoSearchBackendRefuses(t *testing.T) {
 // something that outlives the turn, is.
 func TestTaintGatesOnlyWhatReachesPastThePerson(t *testing.T) {
 	gated := map[string]bool{
-		"tell": true, "intend": true, "resolve": true, "set_aside": true, "mood": true,
+		"tell": true, "intend": true, "resolve": true, "set_aside": true, "leave_note": true, "mood": true,
 	}
 	for name, d := range decisions {
 		v, ok := d.(verb)

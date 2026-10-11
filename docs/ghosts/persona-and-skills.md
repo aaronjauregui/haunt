@@ -104,13 +104,15 @@ or a persona may name them:
 
 The current focused window and the time of day ride on each turn
 separately, as context, along with the goals the ghost keeps an eye on,
-any errand that came due and was not yet dealt with, the mood it set
-today, and the lines from its memory topics that match what the person
-just said (`You remember, relevant now: likes apples (food).`). A
-remembered line stays for three turns and then not again for ten, so a
-persona can rely on the ghost having in mind what it was told about the
-subject at hand without calling `recall`. An event's fields and a
-window's title never bring a line in.
+any errand that came due and was not yet dealt with, the notes it has
+left on the desktop (a note the person clicks away simply stops being
+listed; no event says so), the mood it set today, and the lines from
+its memory topics that match what the person just said (`You remember,
+relevant now: likes apples (food).`). A remembered line stays for three
+turns and then not again for ten, so a persona can rely on the ghost
+having in mind what it was told about the subject at hand without
+calling `recall`. An event's fields and a window's title never bring a
+line in.
 
 ## The ghost's tools
 
@@ -137,6 +139,7 @@ ends when it calls `speak` or `stay_silent`.
 | `look` | a one-sentence description of the focused window (`screen`) |
 | `intend` | take something on: with `delay_ms` an errand that comes back, without it a goal kept an eye on |
 | `resolve`, `set_aside`, `intentions` | discharge one, stop watching one, list them |
+| `leave_note` | leave a note on the desktop: `text` (at most 160 characters) and an optional `picture` id from the gallery; at most three up, until the person clicks one away or the ghost resolves it |
 | `mood` | set how it is feeling, in one short line; it rides in later turns and clears overnight |
 | `tell` | address another ghost by name (`tell`) |
 | `remember`, `forget` | keep a line under a topic, or take one back |

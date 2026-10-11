@@ -41,7 +41,7 @@ the model decides what to make of an event and whether to say anything.
 | Runner | `brain_model.go` | which events become turns, the queue, deferral, refunds, the waking and thinking indicators, the balloon, the why-trace, errand discharge |
 | Prompt | `prompt.go` | the messages of a turn, the standing rules |
 | Decide | `decide.go` | the loop, the registry, the gates every decision shares |
-| Decisions | `decisions_*.go` | one file per group: speech, face, pictures, web, files, intentions, memory, skills, servers |
+| Decisions | `decisions_*.go` | one file per group: speech, face, pictures, web, files, intentions, notes, memory, skills, servers |
 | Transcript | `transcript.go` | `transcript.db`, replay, compaction, recall over the conversation |
 | Envelope | `envelope.go` | the one-line event a turn nobody started is sent as |
 | Client | `internal/model` | the HTTP call, streaming, tool calls, prefill, sampling, thinking, retries, deadlines, trust |
@@ -133,7 +133,9 @@ granted, the goals the ghost keeps an eye on with their names (so "I
 don't care about the marathon anymore" is a `set_aside` in one call), and
 the errands that came due and were not dealt with, so a reminder whose
 own turn was dropped, silent or held back by quiet is in front of the model on every turn until it resolves it, whatever the
-transcript has been summarised to. Then the mood the ghost set with
+transcript has been summarised to; then the notes it has left on the
+desktop, with their names (`notesContext` in `desknote.go`). Then the
+mood the ghost set with
 `mood` (`mood.go`, kept under `_haunt/mood` in the store with the time
 it was set), as `Your mood: …`, only while it was set today, so it
 clears with the day without a timer; it is not shown in the balloon or
@@ -331,6 +333,7 @@ same way.
 | `intend` | `text`, `delay_ms?`, `name?` | taint on cloud |
 | `resolve`, `set_aside` | `name` | taint on cloud |
 | `intentions` | | none |
+| `leave_note` | `text`, `picture?` | taint on cloud; three up at most; a known picture |
 | `mood` | `text` (one line, under 120 characters) | taint on cloud |
 | `tell` | `ghost`, `text` | `tell`, taint |
 | `remember`, `forget` | `topic`, `line` | the echo check on cloud; labelled |
@@ -347,6 +350,9 @@ answer). `resolve` and `set_aside` take the full name, the name without
 model's own still held has it; not found, the answer lists what is
 held. An errand that comes due is discharged by the driver once the
 words raising it have reached the screen; a goal only by `resolve`. A
+note left with `leave_note` is an intention too, `model/note-<n>`, with
+a surface the driver owns (`desknote.go`): `resolve` or `set_aside`
+takes it down, and so does the person clicking it, silently. A
 server tool's name is `<server>__<tool>` with anything outside
 `[A-Za-z0-9_-]` made `_`.
 
