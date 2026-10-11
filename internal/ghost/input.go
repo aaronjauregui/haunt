@@ -304,8 +304,11 @@ func (g *Ghost) submitInConversation(text string, empty bool) {
 	case reply != nil:
 		reply <- text
 	case !empty:
+		// Into the view at once, before the ghost has answered: remember
+		// draws it.
 		g.remember(recalled{you: true, text: text})
 		g.publish(proto.Event{Type: proto.EventMessage, Text: text})
+		return
 	}
 	g.drawInput()
 }
@@ -335,8 +338,8 @@ func (g *Ghost) drawInput() {
 		return
 	}
 	var sp *sprite.Sprite
-	if words, conv := g.conversationWords(); conv {
-		sp = rend.RenderWithInput(words, text, caret)
+	if g.inConversation() {
+		sp = g.conversationView(rend, text, caret)
 	} else {
 		sp = rend.RenderInput(text, caret)
 	}
@@ -345,8 +348,8 @@ func (g *Ghost) drawInput() {
 	// line redraws on every keystroke and twice a second for the caret, and
 	// destroying the surface each time makes it flicker. RenderInput keeps
 	// a fixed width precisely so this stays possible, and so does
-	// RenderWithInput, so streaming words only make a new surface when they
-	// grow the panel by a line.
+	// RenderConversation, which only grows taller until it reaches its cap:
+	// past that, streaming words and the wheel redraw in place too.
 	g.blnMu.Lock()
 	bln := g.bln
 	g.blnMu.Unlock()

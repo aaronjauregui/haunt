@@ -32,6 +32,9 @@ type Theme struct {
 	FontSize  float64
 	Padding   int
 	Radius    int
+	// Speaker is the ghost's name, which marks its lines in a
+	// conversation (RenderConversation); empty reads as "ghost".
+	Speaker string
 }
 
 // DefaultTheme is a soft dark panel with light text.
@@ -57,6 +60,8 @@ type Renderer struct {
 	// the whole panel is rendered at the screen's real resolution and the
 	// surface's viewport declares the logical size it stands for.
 	scale float64
+	// thumbs are pictures scaled for the conversation view, by picture.
+	thumbs map[image.Image]*image.NRGBA
 }
 
 // NewRenderer prepares a renderer for the theme (parsing the embedded font).
@@ -289,41 +294,6 @@ func (r *Renderer) inputLine(text string, caretOn bool) string {
 		line += "|"
 	}
 	return line
-}
-
-// RenderWithInput paints words above a line being typed, in one panel:
-// a conversation, where the ghost's reply streams in while the next line
-// is already open beneath it. The panel is the full width, like
-// RenderInput's, so it can be redrawn in place until the words grow a
-// line; the words keep their tail when they outgrow the height, as
-// Render's do. With no words it is RenderInput.
-func (r *Renderer) RenderWithInput(text, line string, caretOn bool) *sprite.Sprite {
-	if strings.TrimSpace(text) == "" {
-		return r.RenderInput(line, caretOn)
-	}
-	t := r.theme
-	lh := r.lineHeight()
-	gap := lh / 2
-	words := r.wrap(strings.TrimSpace(text), t.MaxWidth-2*t.Padding)
-	if t.MaxHeight > 0 {
-		room := max((t.MaxHeight-2*t.Padding-gap)/lh-1, 1)
-		if len(words) > room {
-			words = append([]string{"…"}, words[len(words)-room+1:]...)
-		}
-	}
-
-	img := image.NewNRGBA(image.Rect(0, 0, t.MaxWidth, lh*(len(words)+1)+gap+2*t.Padding))
-	paintPanel(img, t)
-	d := &font.Drawer{Dst: img, Src: image.NewUniform(t.Text), Face: r.face}
-	y := t.Padding + r.face.Metrics().Ascent.Ceil()
-	for _, l := range words {
-		d.Dot = fixed.P(t.Padding, y)
-		d.DrawString(l)
-		y += lh
-	}
-	d.Dot = fixed.P(t.Padding, y+gap)
-	d.DrawString(r.inputLine(line, caretOn))
-	return &sprite.Sprite{Img: img}
 }
 
 // WaitFrames is how many distinct frames RenderWaiting cycles through.

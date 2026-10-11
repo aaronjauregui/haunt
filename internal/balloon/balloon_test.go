@@ -111,33 +111,6 @@ func TestRenderInputFixedSize(t *testing.T) {
 	}
 }
 
-// TestRenderWithInput: words stack above the line in one full-width
-// panel, which grows with the words up to the height cap; with no words
-// it is the input panel alone.
-func TestRenderWithInput(t *testing.T) {
-	theme := DefaultTheme()
-	theme.MaxWidth, theme.MaxHeight = 480, 300
-	r, err := NewRenderer(theme)
-	if err != nil {
-		t.Fatal(err)
-	}
-	alone := r.RenderInput("hi", true).Img.Bounds()
-	if got := r.RenderWithInput("", "hi", true).Img.Bounds(); got != alone {
-		t.Errorf("no words: %v, want the input panel %v", got, alone)
-	}
-	short := r.RenderWithInput("Hello there.", "hi", true).Img.Bounds()
-	if short.Dx() != 480 || short.Dy() <= alone.Dy() {
-		t.Errorf("words above the line: %v, want 480 wide and taller than %v", short, alone)
-	}
-	long := r.RenderWithInput(strings.Repeat("The ghost went on at length. ", 60), "hi", false).Img.Bounds()
-	if long.Dx() != 480 || long.Dy() > 300 || long.Dy() <= short.Dy() {
-		t.Errorf("long words: %v, want 480 wide, taller than %v and capped at 300", long, short)
-	}
-	if got := r.RenderWithInput("Hello there.", strings.Repeat("typing ", 30), false).Img.Bounds(); got != short {
-		t.Errorf("a long typed line changed the panel: %v, want %v", got, short)
-	}
-}
-
 // TestBalloonHeightIsCapped: three paragraphs of generated dialogue must
 // not produce a panel taller than the screen. A balloon that outgrows the
 // display stops being a balloon and becomes a wall.

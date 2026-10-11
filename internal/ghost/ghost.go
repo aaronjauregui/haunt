@@ -814,31 +814,7 @@ func (g *Ghost) startBrain(ctx context.Context) error {
 // wireInput connects the renderer's pointer and keyboard callbacks to the
 // event bus. Everything here runs on the dispatch goroutine.
 func (g *Ghost) wireInput() {
-	g.surface.OnClick = func(x, y int) {
-		// Poking the ghost puts away whatever was half-typed, the way
-		// clicking off an input box does anywhere else — and does it first,
-		// so the brain's reaction is not suppressed as "user is typing".
-		g.closeInput()
-		// Turning away from a question is an answer of its own, and the
-		// brain has to hear it or it waits forever.
-		if g.choiceOpen() {
-			g.dismissChoices()
-			return
-		}
-		// A line scrolled back to is put away by a click, like a page
-		// that has been read.
-		if g.endRecall() {
-			return
-		}
-		// A balloon with more to read has first claim on the click.
-		if g.turnPage() {
-			return
-		}
-		g.publish(proto.Event{Type: proto.EventClick, X: x, Y: y, Region: g.shell.RegionAt(x, y)})
-		// Somebody chose this ghost out of the several on screen, which is
-		// the most interesting thing the others can see happening.
-		g.announce(proto.ActedPoked, "")
-	}
+	g.surface.OnClick = g.onClick
 	// Right-click opens a line to type at the ghost. A separate gesture
 	// from the left click, which belongs to the brain: a scripted ghost's
 	// quip on being poked must not be traded away for an input box.
@@ -867,6 +843,41 @@ func (g *Ghost) wireInput() {
 	g.surface.OnMove = func(x, y int) {
 		g.placeBalloon()
 	}
+}
+
+// onClick is a left click on the ghost. Runs on the dispatch goroutine.
+func (g *Ghost) onClick(x, y int) {
+	// In a conversation a poke is only a poke: the line, the view and
+	// what is being typed stay as they are, and there are no pages to
+	// turn (conversation.go).
+	if g.clickInConversation() {
+		g.publish(proto.Event{Type: proto.EventClick, X: x, Y: y, Region: g.shell.RegionAt(x, y)})
+		g.announce(proto.ActedPoked, "")
+		return
+	}
+	// Poking the ghost puts away whatever was half-typed, the way
+	// clicking off an input box does anywhere else — and does it first,
+	// so the brain's reaction is not suppressed as "user is typing".
+	g.closeInput()
+	// Turning away from a question is an answer of its own, and the
+	// brain has to hear it or it waits forever.
+	if g.choiceOpen() {
+		g.dismissChoices()
+		return
+	}
+	// A line scrolled back to is put away by a click, like a page
+	// that has been read.
+	if g.endRecall() {
+		return
+	}
+	// A balloon with more to read has first claim on the click.
+	if g.turnPage() {
+		return
+	}
+	g.publish(proto.Event{Type: proto.EventClick, X: x, Y: y, Region: g.shell.RegionAt(x, y)})
+	// Somebody chose this ghost out of the several on screen, which is
+	// the most interesting thing the others can see happening.
+	g.announce(proto.ActedPoked, "")
 }
 
 // startTriggers arms the two clocks that speak to the ghost without anybody
@@ -1490,6 +1501,11 @@ func (g *Ghost) showImageBalloon(img image.Image) bool {
 	if muted, why := g.quiet.Active(); muted {
 		g.log.Debug(hlog.Balloon, "image balloon suppressed (%s)", why)
 		return false
+	}
+	// In a conversation a picture goes in the view, as a thumbnail, once
+	// it is remembered; there is nothing to paint here.
+	if g.clickInConversation() {
+		return true
 	}
 	if g.inputOpen() {
 		g.log.Debug(hlog.Balloon, "image balloon suppressed (user is typing)")
