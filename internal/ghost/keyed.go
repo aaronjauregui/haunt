@@ -39,7 +39,10 @@ const (
 	// lines or more, so the cutoff drops matches on words every topic has
 	// and every match while the memory holds only a line or two (when the
 	// topic index already shows it all). A single content word against a
-	// dozen lines scores about 2, against three lines about 0.6.
+	// dozen lines scores about 2, against three lines about 0.6. A word
+	// that names a topic weighs 0.4 of one in the line (memory's
+	// topicWeight), so it fires the topic's lines only where the topic is
+	// a small part of a dozen lines or more.
 	keyedMinScore = 0.5
 	// keyedSticky is how many turns a fired line stays, the turn it fired
 	// on included.

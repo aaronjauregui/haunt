@@ -65,7 +65,11 @@ type Store interface {
 	Core() (self, you string, err error)
 	// Index returns one line per topic, under IndexLimit bytes.
 	Index() (string, error)
-	// Recall returns the n facts that best match q, by BM25 over the line.
+	// Recall returns the n facts that best match q, any word of it, by
+	// BM25 over the line and its topic's name. A word in the topic's name
+	// counts for less than one in the line (topicWeight, lineWeight), so
+	// "food" finds every line under food, and ranks a line that says
+	// "food" above them.
 	Recall(ctx context.Context, q string, n int) ([]Hit, error)
 	// Remember appends a fact to a topic, creating the topic if needed.
 	Remember(topic, line string, p Provenance) error

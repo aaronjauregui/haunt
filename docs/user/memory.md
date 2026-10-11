@@ -43,14 +43,22 @@ might be there. Tell it something and it is kept; tell it it has
 something wrong and it takes the line back. There is no separate belief
 store and no correction menu.
 
+A search matches a fact's own words and the name of its topic, so
+asking about "food" finds "likes apples" filed under food. A topic's name
+counts for less than the fact's words: a fact that says "food" itself
+comes first.
+
 It does not have to think of searching. When you mention something a
 topic has a line about ("I bought apples"), that line is put in front of
 the ghost with your words, unasked: up to three lines a turn, each kept
 in mind for three turns and then not brought up again for ten, so a
 subject you keep returning to does not pin the same fact into every
 reply. Only your words do this; a window's title or something another
-ghost said never does. While its memory holds only a line or two,
-nothing is brought in this way, since it sees every topic anyway.
+ghost said never does. Naming a topic ("what food should we cook")
+brings in its lines only once the topic is a small part of a memory of a
+dozen lines or so; a topic's name weighs less than a fact's words. While
+its memory holds only a line or two, nothing is brought in this way,
+since it sees every topic anyway.
 
     haunt memory ls              # topics, with their line counts
     haunt memory show food       # a topic's lines, numbered, with where each came from
