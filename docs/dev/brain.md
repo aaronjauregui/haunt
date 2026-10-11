@@ -187,8 +187,9 @@ the model is better off knowing why it will be asked or refused.
    `ask` (with fold on, `speak` in the same reply as the words); the shell's
    poses and clips by name, and `face` and `clip`.
 8. Words go in a small balloon: under 25 words, no markdown, no stage
-   directions, no labels. While a conversation is open: a few sentences
-   are fine, still no markdown, stage directions or labels. This is the
+   directions, no labels. While a conversation is open: the persona's
+   length applies, and up to a short paragraph when asked something
+   that needs it; still no markdown, stage directions or labels. This is the
    one rule the mode changes (`standing.Conversation`, set by `prompt`),
    so part 1 differs between the two modes and the cached prefix
    changes once when a conversation opens and once when it ends.

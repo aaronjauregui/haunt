@@ -29,7 +29,8 @@ import (
 // question) is not a conversation: it closes on Enter, as it always has.
 //
 // The model is told twice, both in the prompt: rule 8 is rendered for the
-// mode (a few sentences instead of under 25 words) and the turn context
+// mode (the persona's length, up to a short paragraph when something
+// needs it, instead of under 25 words) and the turn context
 // says "In conversation: yes." Rule 8 sits in part 1, so the cached
 // prefix changes once when a conversation opens and once when it ends.
 

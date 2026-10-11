@@ -251,7 +251,7 @@ func standingRules(s standing) string {
 		"they ask for.")
 	rule(speakRule(s))
 	if s.Conversation {
-		rule("You are in conversation: a few sentences are fine, still no markdown, no stage directions, no labels.")
+		rule("You are in conversation: your persona's length applies, and up to a short paragraph when asked something that needs it; still no markdown, no stage directions, no labels.")
 	} else {
 		rule("Your words go in a small balloon: under 25 words, no markdown, no stage directions, no labels.")
 	}

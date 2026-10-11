@@ -135,7 +135,7 @@ func TestConversationRule(t *testing.T) {
 	if !strings.Contains(off, "under 25 words") || strings.Contains(off, "in conversation") {
 		t.Errorf("rule 8 out of a conversation:\n%s", off)
 	}
-	if !strings.Contains(on, "8. You are in conversation: a few sentences are fine, still no markdown") ||
+	if !strings.Contains(on, "8. You are in conversation: your persona's length applies, and up to a short paragraph") ||
 		strings.Contains(on, "under 25 words") {
 		t.Errorf("rule 8 in a conversation:\n%s", on)
 	}

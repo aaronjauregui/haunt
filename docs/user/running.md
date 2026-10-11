@@ -86,8 +86,9 @@ intention ([Memory, reminders and goals](memory.md)).
 Typing at a ghost opens a conversation. Enter sends the line and the line
 opens again, empty, with the keyboard still held, so the next thing can
 be typed straight away; a line sent while the ghost is still answering
-waits its turn. A persona ghost is told it may write a few sentences
-rather than a remark.
+waits its turn. A persona ghost is told its persona's length applies, and up to a
+short paragraph when asked something that needs it, rather than a
+remark; a persona written for one or two sentences stays terse.
 
 The balloon widens to 480 pixels and shows the conversation: what you
 typed and what the ghost said, each marked `you` or with the ghost's
