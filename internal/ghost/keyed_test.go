@@ -120,3 +120,33 @@ func TestKeyedQuery(t *testing.T) {
 		t.Errorf("keyedQuery = %q", got)
 	}
 }
+
+// A word that names a topic but is in none of its lines keys those lines
+// once the topic is a small part of the memory. Recall weights a topic
+// word at 0.4 of a line word, so against the six lines of keyedMemory,
+// where food holds a third, "food" scores 0.33 and 0.45 on the food lines
+// and fails keyedMinScore; against a dozen, 0.76 and 1.07, and passes.
+func TestKeyedTopicWord(t *testing.T) {
+	_, b, _ := modelGhost(t, 0)
+	keyedMemory(t, b)
+	if ctx := contextOf(t, b, "what food should we cook"); strings.Contains(ctx, "You remember") {
+		t.Errorf("a topic word keyed against six lines: %q", ctx)
+	}
+	p := memory.Provenance{Source: "person", At: time.Now()}
+	for _, l := range [][2]string{
+		{"music", "plays the cello badly"},
+		{"music", "loves Bach"},
+		{"health", "gets migraines in spring"},
+		{"books", "rereads Le Guin every winter"},
+		{"family", "their dad fixes clocks"},
+		{"habits", "makes fish curry on fridays"},
+	} {
+		if err := b.mem.Remember(l[0], l[1], p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx := contextOf(t, b, "what food should we cook")
+	if !strings.Contains(ctx, "likes apples (food)") || !strings.Contains(ctx, "hates the taste of coriander (food)") {
+		t.Errorf("a topic word did not key against a dozen lines: %q", ctx)
+	}
+}

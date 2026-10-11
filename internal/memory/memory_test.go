@@ -341,3 +341,105 @@ func TestFilesWithoutDB(t *testing.T) {
 		t.Errorf("topic not removed: %+v", topics)
 	}
 }
+
+// dozen is a memory of a dozen lines, where one word scores as it would
+// in a person's memory a few days old.
+var dozen = [][2]string{
+	{"food", "likes apples"},
+	{"food", "hates the taste of coriander"},
+	{"pets", "has a cat called Miso"},
+	{"work", "is writing a thesis on the history of sound"},
+	{"places", "grew up by the sea"},
+	{"family", "their sister lives in Lisbon"},
+	{"music", "plays the cello badly"},
+	{"music", "loves Bach"},
+	{"health", "gets migraines in spring"},
+	{"books", "rereads Le Guin every winter"},
+	{"family", "their dad fixes clocks"},
+	{"habits", "makes fish curry on fridays as their favourite food"},
+}
+
+// A word in a topic's name finds the topic's lines, below a line that has
+// the word itself.
+func TestRecallTopic(t *testing.T) {
+	s, _ := openTest(t)
+	for _, l := range dozen {
+		if err := s.Remember(l[0], l[1], Provenance{Source: "person"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hits, err := s.Recall(context.Background(), "food", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 3 {
+		t.Fatalf("recall food: %d hits, want 3: %+v", len(hits), hits)
+	}
+	for _, h := range hits {
+		t.Logf("food: %.3f %s/%s", h.Score, h.Topic, h.Line)
+	}
+	if hits[0].Topic != "habits" {
+		t.Errorf("the line that says food is not first: %+v", hits)
+	}
+	for _, h := range hits[1:] {
+		if h.Topic != "food" || h.Score <= 0 || h.Score >= hits[0].Score {
+			t.Errorf("topic hit %+v against line hit %.3f", h, hits[0].Score)
+		}
+	}
+	// A word in the line still outscores any topic hit.
+	hits, err = s.Recall(context.Background(), "apples", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].Score < 2 {
+		t.Errorf("recall apples: %+v", hits)
+	}
+}
+
+// A state.db indexed under the layout where the topic was not searched is
+// rebuilt on open, and its stale rows go.
+func TestOpenReindexesOldLayout(t *testing.T) {
+	root := t.TempDir()
+	db, err := sql.Open("sqlite", filepath.Join(root, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { db.Close() })
+	if _, err := db.Exec(`CREATE VIRTUAL TABLE memory_fts USING fts5(
+		topic UNINDEXED, line, source UNINDEXED, turn UNINDEXED, at UNINDEXED,
+		tokenize = 'porter unicode61')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO memory_fts VALUES ('food', 'likes apples', 'person', 0, ''),
+		('food', 'a line no file holds', 'person', 0, '')`); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM memory_fts WHERE memory_fts MATCH 'food'`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("the old layout matched the topic: %d, %v", n, err)
+	}
+	dir := filepath.Join(root, "memory")
+	if err := os.MkdirAll(filepath.Join(dir, "topics"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "topics", "food.md"),
+		[]byte("---\ntopic: food\n---\n- likes apples\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(dir, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	hits, err := s.Recall(context.Background(), "food", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].Line != "likes apples" {
+		t.Errorf("recall food after open: %+v", hits)
+	}
+	if hits, _ := s.Recall(context.Background(), "file", 5); len(hits) != 0 {
+		t.Errorf("a stale row survived the open: %+v", hits)
+	}
+}

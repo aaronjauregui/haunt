@@ -267,9 +267,9 @@ func (s *fileStore) Recall(ctx context.Context, q string, n int) ([]Hit, error) 
 		n = 50
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT topic, line, source, turn, at, bm25(memory_fts)
+		SELECT topic, line, source, turn, at, bm25(memory_fts, ?, ?) AS bm
 		FROM memory_fts WHERE memory_fts MATCH ?
-		ORDER BY bm25(memory_fts) LIMIT ?`, match, n)
+		ORDER BY bm LIMIT ?`, topicWeight, lineWeight, match, n)
 	if err != nil {
 		return nil, fmt.Errorf("memory: recall: %w", err)
 	}
@@ -289,6 +289,21 @@ func (s *fileStore) Recall(ctx context.Context, q string, n int) ([]Hit, error) 
 	}
 	return hits, rows.Err()
 }
+
+// The BM25 weights of the two searched columns. The line keeps weight 1,
+// so a match on the line's own words scores as it would with the line
+// alone and keyed context's cutoff (in package ghost) reads the same. A
+// topic word counts for less: the topic is one or two words on every line
+// it holds, and a match there says the line is about the subject, not
+// what it says about it. At 0.4 a topic-only hit ranks below a hit on the
+// same word in a line up to about four times the average line's length,
+// and against a dozen lines, a two-line topic's words score 0.55 to 0.76
+// where the same word in a line scores about 0.8 and a content word 2 to
+// 2.5.
+const (
+	topicWeight = 0.4
+	lineWeight  = 1.0
+)
 
 // ftsQuery turns free text into an FTS5 query: each word quoted, any of
 // them matching. Free text is not FTS syntax, and a stray quote or
@@ -311,7 +326,9 @@ func (s *fileStore) Close() error {
 // Reindex drops and rebuilds the FTS table in db from the topic files
 // under dir, and says how many topics and lines it indexed. The table is
 // derived and can always be rebuilt; dropping it rather than emptying it
-// means a change to its columns needs no migration.
+// means a change to its columns needs no migration: Open calls Reindex,
+// so a store indexed under an older layout is rebuilt in the current one
+// the first time it is opened.
 func Reindex(dir string, db *sql.DB) (topics, lines int, err error) {
 	names, err := topicNames(dir)
 	if err != nil {
@@ -325,9 +342,10 @@ func Reindex(dir string, db *sql.DB) (topics, lines int, err error) {
 	if _, err := tx.Exec(`DROP TABLE IF EXISTS memory_fts`); err != nil {
 		return 0, 0, err
 	}
-	// Only line is searched; the rest rides along for the hit.
+	// The topic and the line are searched, weighted by topicWeight and
+	// lineWeight; the rest rides along for the hit.
 	if _, err := tx.Exec(`CREATE VIRTUAL TABLE memory_fts USING fts5(
-		topic UNINDEXED, line, source UNINDEXED, turn UNINDEXED, at UNINDEXED,
+		topic, line, source UNINDEXED, turn UNINDEXED, at UNINDEXED,
 		tokenize = 'porter unicode61')`); err != nil {
 		return 0, 0, fmt.Errorf("memory: creating the index: %w", err)
 	}

@@ -148,8 +148,10 @@ person's words, as `You remember, relevant now: likes apples (food).`
 (`keyed.go`): on a turn whose input is not an envelope, the words less
 stopwords go to `Recall` for three lines, and each scoring at least
 `keyedMinScore` (0.5 BM25) is held for `keyedSticky` (3) turns, then
-cannot fire again for `keyedCooldown` (10). Turns of every kind count;
-events and window titles never key. The table is in memory only, so a
+cannot fire again for `keyedCooldown` (10). A word that names a topic
+matches its lines at 0.4 of a line word's weight, so it clears the
+cutoff only when the topic is a small part of a dozen lines or more.
+Turns of every kind count; events and window titles never key. The table is in memory only, so a
 restart forgets it. `recall` is pull-only, and a small model does not
 reach for it when the person names something it was told a week ago.
 Last, `In conversation: yes.` while a conversation is open
@@ -619,16 +621,22 @@ driver's.
 Facts are lines in topics, never a file per fact, so the topic index in
 part 3 of the prompt stays under 1500 bytes. `self.md` and `you.md` are
 in every prompt (part 2), so `rewrite_notes` refuses anything longer.
-`recall` is BM25 over the facts and, through a second FTS5 table in
-`transcript.db`, over what the person and the ghost said and the
-summaries, five hits from each, each labelled with topic, source and
-date. Tool results are not searchable: a page found again through
-recall would be somebody else's words arriving with nothing to say so.
+`recall` is BM25 over the facts, the line and its topic's name both
+searched, `bm25(memory_fts, 0.4, 1.0)`: the line keeps weight 1, so its
+scores and keyed context's cutoff read as with the line alone, and a
+topic word ranks a line below one that has the word itself but above
+nothing (`topicWeight`, `lineWeight` in `store.go`). It also searches,
+through a second FTS5 table in `transcript.db`, what the person and the
+ghost said and the summaries, five hits from each, each labelled with
+topic, source and date. Tool results are not searchable: a page found
+again through recall would be somebody else's words arriving with
+nothing to say so.
 
 The FTS table lives in the ghost's `state.db` and is dropped and rebuilt
 from the files on open and whenever they change, so it never holds
-anything the files do not. The person may edit the files while the
-ghost runs: the store polls the directory every 500 ms, as the grants
+anything the files do not; a change to its columns needs no migration,
+since the first open rebuilds an older layout. The person may edit the
+files while the ghost runs: the store polls the directory every 500 ms, as the grants
 file is watched, with one poll of debounce for editors that write a
 temporary file and rename it. `haunt memory reindex` asks a running
 ghost over its control socket, since `state.db` has one writer. Nothing
