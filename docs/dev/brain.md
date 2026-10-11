@@ -277,9 +277,14 @@ the call row beside them carries no text, so the history reads as it
 does unfolded. As the words stream before the call that ends them, the
 pose goes on when the call arrives rather than with the first word. One
 round trip instead of two, at the cost of the prefill and of thinking
-being off for the words. A local server holds the prompt in its cache
-between the two calls, so the second costs it little, and fold is off
-there.
+being off for the words. Fold is off for a local server, where the
+second call costs a round trip but no words of thought. The two calls
+share only part 1 in a server's prompt cache: a chat template that
+renders the tool declarations into the first system message (Gemma's
+does) makes the decide prompt and the speak prompt diverge there, and
+declaring the tools on the speak call too, declined with `tool_choice`,
+makes Gemma open a malformed thought channel after a tool result when
+thinking is off, so the split is accepted.
 
 ## The registry
 
