@@ -32,7 +32,7 @@ import (
 // the text and applied as if it had been made (textCalls), in a decide
 // round or in the speak call, where it means the deciding was not over
 // (speakCalls). A call ending the turn in the round that opens a skill
-// waits until the skill has been read.
+// or puts a question waits until the model has read what came back.
 //
 // The registry is how the ghost grows new behaviour without a new call
 // shape. A decision is a name, a description, a JSON schema and an apply
@@ -580,16 +580,18 @@ func (b *modelBrain) decide(ctx context.Context, t *turn, msgs []model.Message, 
 		b.record(t, row)
 		msgs = append(msgs, assistant)
 		var end *ending
-		// A skill opened in the same round as the call that ends the turn
-		// has not been read: the ending waits for its steps.
-		opened := slices.ContainsFunc(r.calls, func(c model.ToolCall) bool { return c.Name == skillViewName })
+		// A skill opened, or a question put, in the same round as the call
+		// that ends the turn has not been read: the ending waits for it.
+		unread := slices.ContainsFunc(r.calls, func(c model.ToolCall) bool {
+			return c.Name == skillViewName || c.Name == askName || c.Name == askTextName
+		})
 		for _, c := range r.calls {
 			d, known := ds[c.Name]
 			var res toolResult
 			switch {
 			case end != nil:
 				res = toolResult{Text: "Not done: you had already decided."}
-			case known && d.terminal() && opened:
+			case known && d.terminal() && unread:
 				res = toolResult{Text: unreadCue}
 			case known && d.terminal():
 				e := ending{silent: c.Name != speakName}

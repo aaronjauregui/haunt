@@ -184,11 +184,12 @@ result, a terminal one included, since a provider expects an answer to
 each. The loop ends on a terminal decision: `speak{pose}` or
 `stay_silent{}`. A call after the terminal one in the same round is
 answered "Not done: you had already decided." A terminal call in the
-same round as `skill_view` does not end the loop: the model wrote it
-before it could read the skill, so it is answered "Not done: do the
-skill's steps first", and `skill_view`'s own result ends by saying the
-steps are calls, made in order, with the turn ending after the last.
-Without thinking, a small model opens a skill and speaks in one breath;
+same round as `skill_view`, `ask` or `ask_text` does not end the loop:
+the model wrote it before it could read the skill or the answer, so it
+is answered "Not done: read what came back first", and `skill_view`'s
+own result ends by saying the steps are calls, made in order, with the
+turn ending after the last. Without thinking, a small model opens a
+skill and speaks in one breath, or asks and speaks before the pick;
 this is what turns that into reading it. At most eight rounds; a
 model still calling tools after that is ended in silence and refunded,
 since `recall` and `skill_view` are cheap enough to run away on.

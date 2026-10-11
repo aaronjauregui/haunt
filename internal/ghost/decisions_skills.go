@@ -17,8 +17,8 @@ import (
 const skillViewName = "skill_view"
 
 // unreadCue answers a call ending the turn in the round that opened a
-// skill, which the model wrote before it could read the skill.
-const unreadCue = "Not done: do the skill's steps first, then end the turn."
+// skill or put a question, written before the model could read the answer.
+const unreadCue = "Not done: read what came back first, then end the turn."
 
 // nextCue closes skill_view's result, so the last thing the model reads
 // before deciding is the next step: the skill's first, not the turn's end.

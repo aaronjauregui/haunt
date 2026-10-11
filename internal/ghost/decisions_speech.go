@@ -15,8 +15,10 @@ import (
 // the person and to the other ghosts before it ends.
 
 const (
-	speakName  = "speak"
-	silentName = "stay_silent"
+	speakName   = "speak"
+	silentName  = "stay_silent"
+	askName     = "ask"
+	askTextName = "ask_text"
 )
 
 // speakCue is speak's result: what the model reads just before it writes
@@ -64,7 +66,7 @@ func init() {
 		run:    tool(toolSay),
 	})
 	register(verb{
-		id: "ask",
+		id: askName,
 		desc: "Put a question to the person with 2 to 4 short choices they click, and wait for the pick. " +
 			"Use it whenever you want their choice rather than asking in words; put what you would say in text. " +
 			"Returns the choice, or empty if dismissed.",
@@ -72,7 +74,7 @@ func init() {
 		run:    tool(toolAsk),
 	})
 	register(verb{
-		id:     "ask_text",
+		id:     askTextName,
 		desc:   "Ask the person to type an answer and wait for it. Returns what they typed, or empty if they did not.",
 		params: []string{"prompt:string"},
 		run:    tool(toolAskText),
