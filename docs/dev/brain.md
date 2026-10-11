@@ -121,7 +121,7 @@ same from turn to turn so a provider's prompt cache holds:
 
 | # | Role | Content | Changes when |
 |---|---|---|---|
-| 1 | system | `[persona] system`, the standing rules, the `[[persona.example]]` exchanges | the manifest or the shell changes |
+| 1 | system | `[persona] system`, the standing rules, the `[[persona.example]]` exchanges | the manifest or the shell changes, or a conversation opens or ends |
 | 2 | system | `self.md` and `you.md`, the ghost's notes on itself and on the person | either is rewritten |
 | 3 | system | the skills index, then the memory topic index | a skill or a topic changes |
 | 4 | the transcript | the summary row if there is one, then every finished turn since | every turn |
@@ -133,13 +133,14 @@ granted, the goals the ghost keeps an eye on with their names (so "I
 don't care about the marathon anymore" is a `set_aside` in one call), and
 the errands that came due and were not dealt with, so a reminder whose
 own turn was dropped, silent or held back by quiet is in front of the model on every turn until it resolves it, whatever the
-transcript has been summarised to. The reminder is the first sentence of
+transcript has been summarised to, and last `In conversation: yes.`
+while a conversation is open (`internal/ghost/conversation.go`). The reminder is the first sentence of
 `[persona] system` and "Stay in character.": it sits after the
 transcript, against the character thinning out over a long conversation,
 and since it is last only the suffix is recomputed on a cached prompt.
 
 The standing rules (`standingRules`) are regenerated from the manifest,
-the shell and the config, so a persona author never writes about
+the shell, the config and the conversation mode, so a persona author never writes about
 envelopes or decisions. There are ten, each a sentence or two in the
 imperative naming the decision it is about, since a 30B-class model
 follows a few short rules better than many long ones and holds the
@@ -167,7 +168,11 @@ the model is better off knowing why it will be asked or refused.
    `ask` (with fold on, `speak` in the same reply as the words); the shell's
    poses and clips by name, and `face` and `clip`.
 8. Words go in a small balloon: under 25 words, no markdown, no stage
-   directions, no labels.
+   directions, no labels. While a conversation is open: a few sentences
+   are fine, still no markdown, stage directions or labels. This is the
+   one rule the mode changes (`standing.Conversation`, set by `prompt`),
+   so part 1 differs between the two modes and the cached prefix
+   changes once when a conversation opens and once when it ends.
 9. Memory: `remember`, `forget`, `recall`, `rewrite_notes`; a dropped
    goal is `set_aside` and a finished one `resolve`, not a memory.
 10. Other ghosts are not you and not the person; with `tell`, answer one
@@ -286,6 +291,8 @@ that line. A name registered twice panics at start.
 
 `offered` is the registry for one ghost on one turn: `speak` described
 for the words in the same reply when folded, less any decision whose `needs` the package did not declare,
+less any the person switched off in the config (`offeredWhen`:
+`end_conversation` with `[conversation] ghost_may_end = false`),
 plus the server tools when `tools` is active. `toolsOf` sorts it by name
 so the request is the same every turn. A decision with `needs` is hidden
 rather than refused because a skill that names it is hidden with it
@@ -304,6 +311,7 @@ same way.
 | `say` | `text`, `linger_ms?` | none |
 | `ask` | `text`, `choices[1..9]` | none; blocks until picked or dismissed |
 | `ask_text` | `prompt` | none; blocks |
+| `end_conversation` | | `[conversation] ghost_may_end`; refused outside a conversation; the conversation closes when the turn is over |
 | `face`, `clip` | `pose` / `name` | reduced motion, fullscreen |
 | `look` | `question?` | `screen`, vision backend, ignore list, fullscreen |
 | `draw` | `prompt`, `style?`, `see?`, `like?` | `imagine`, image budget, fullscreen |
@@ -539,7 +547,7 @@ read it (`readGate`, `gateAfterReading`, `mayRemember`, `labelled`):
 | write | `remember`, `forget`, `rewrite_notes`, `skill_write` | the label | the echo check and the label |
 | keep | `intend`, `resolve`, `set_aside`, `style` | nothing | the after-read question |
 | reach | `tell`, every `<server>__<tool>`, and any decision not in the table | consent, the marks, the after-read question | the same |
-| show | `speak`, `stay_silent`, `say`, `ask`, `ask_text`, `face`, `clip`, `draw`, `show`, `look` | nothing | nothing |
+| show | `speak`, `stay_silent`, `say`, `ask`, `ask_text`, `end_conversation`, `face`, `clip`, `draw`, `show`, `look` | nothing | nothing |
 
 "Nothing" is nothing from trust; a decision's own gates (its capability
 declared, its budget, quiet hours at the screen, the fullscreen rule)

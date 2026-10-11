@@ -6,6 +6,7 @@ import (
 
 	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/proto"
+	"github.com/aaronjauregui/haunt/internal/sprite"
 	"github.com/aaronjauregui/haunt/internal/textinput"
 	"github.com/aaronjauregui/haunt/internal/wlclient"
 )
@@ -13,7 +14,10 @@ import (
 // Talking to your ghost without a terminal. Right-clicking the sprite opens
 // a line in its balloon; Enter sends it as a message event — the same event
 // `haunt say` produces, so brains need no new handling — and Escape, or
-// losing keyboard focus, abandons it.
+// losing keyboard focus, abandons it. A line opened this way is a
+// conversation (conversation.go): Enter sends and the line opens again,
+// until the person or the ghost ends it. A line the driver opens for an
+// answer of its own closes on Enter.
 //
 // The ghost holds keyboard focus only while the line is open (layer-shell
 // on-demand interactivity). A desktop companion that grabbed the keyboard
@@ -47,16 +51,27 @@ type inputState struct {
 	heldShown func()
 }
 
-// openInput starts a line of input, unless one is already open.
+// openInput starts a conversation, unless a line is already open.
 func (g *Ghost) openInput() { g.openInputWithReply(nil) }
 
 // openInputWithReply is openInput with somewhere for the answer to go,
-// reporting whether the line was opened at all.
+// reporting whether the line was opened at all. With nowhere, the line is
+// the person's and opens a conversation. A question put while a
+// conversation holds the line takes the line's next Enter instead of
+// opening one of its own: the person is already typing there.
 func (g *Ghost) openInputWithReply(reply chan string) bool {
+	conv := g.inConversation()
 	g.inputMu.Lock()
 	if g.input.open {
+		adopted := conv && reply != nil && g.input.reply == nil
+		if adopted {
+			g.input.reply = reply
+		}
 		g.inputMu.Unlock()
-		return false
+		return adopted
+	}
+	if reply == nil {
+		g.startConversation()
 	}
 	g.input.reply = reply
 	g.input.open = true
@@ -103,8 +118,13 @@ func (g *Ghost) closeInput() { g.closeInputWith("") }
 
 // closeInputWith closes the line, handing answer to whoever is waiting for
 // it. Abandoning a line closes it with nothing, which is how a person who
-// turned away says no.
+// turned away says no. Closing a conversation's line ends the
+// conversation, whoever closes it: a click on the ghost, a menu.
 func (g *Ghost) closeInputWith(answer string) {
+	if g.inConversation() {
+		g.endConversation("the line was closed")
+		return
+	}
 	g.inputMu.Lock()
 	if !g.input.open {
 		g.inputMu.Unlock()
@@ -144,7 +164,16 @@ const heldLinger = 12 * time.Second
 // holdLine keeps text for when the open line closes, reporting whether
 // there was a line to wait for. A newer line replaces an older one, whose
 // shown is never called: only the latest word is worth the wait.
+//
+// In a conversation nothing is held: the line is shown at once above the
+// open line, and shown is told so now.
 func (g *Ghost) holdLine(text string, shown func()) bool {
+	if g.sayInConversation(text) {
+		if shown != nil {
+			shown()
+		}
+		return true
+	}
 	g.inputMu.Lock()
 	defer g.inputMu.Unlock()
 	if !g.input.open {
@@ -193,7 +222,7 @@ func (g *Ghost) onKeyboardFocus(focused bool) {
 		g.log.Debug(hlog.Input, "ignoring a keyboard leave for the previous line")
 		return
 	}
-	g.closeInput()
+	g.abandonLine("the keyboard went elsewhere")
 }
 
 // takeKeyboard asks the compositor for (or gives up) keyboard focus. The
@@ -210,7 +239,10 @@ func (g *Ghost) takeKeyboard(want bool) {
 
 // onKey feeds a scancode to the open line. Enter publishes what was typed
 // as a message — indistinguishable from `haunt say`, and prompted, so the
-// reply is never billed to the ghost's curiosity budget.
+// reply is never billed to the ghost's curiosity budget. In a
+// conversation the line then opens again empty; a message sent while the
+// ghost is still answering the last queues behind it, as `haunt say`
+// does.
 func (g *Ghost) onKey(code uint32, down bool) {
 	// A menu holds the keyboard while it is up: digits pick a row, arrows
 	// move, Enter takes it, Escape dismisses.
@@ -226,12 +258,19 @@ func (g *Ghost) onKey(code uint32, down bool) {
 	text := g.input.editor.Text()
 	empty := g.input.editor.Empty()
 	g.inputMu.Unlock()
+	if action == textinput.ActionNone {
+		g.touchConversation()
+	}
 
 	switch action {
 	case textinput.ActionCancel:
-		g.closeInput()
+		g.abandonLine("escape")
 		return
 	case textinput.ActionSubmit:
+		if g.inConversation() {
+			g.submitInConversation(text, empty)
+			return
+		}
 		g.inputMu.Lock()
 		driverOwned := g.input.reply != nil
 		g.inputMu.Unlock()
@@ -249,6 +288,28 @@ func (g *Ghost) onKey(code uint32, down bool) {
 	g.drawInput()
 }
 
+// submitInConversation is Enter in a conversation: what was typed goes
+// where it is waited for, and the line opens again empty with the
+// keyboard still held. A question of the driver's that took the line has
+// its answer, as it would from a line of its own; anything else is a
+// message. Enter on an empty line does nothing.
+func (g *Ghost) submitInConversation(text string, empty bool) {
+	g.inputMu.Lock()
+	reply := g.input.reply
+	g.input.reply = nil
+	g.input.editor.Reset()
+	g.inputMu.Unlock()
+	g.touchConversation()
+	switch {
+	case reply != nil:
+		reply <- text
+	case !empty:
+		g.remember(recalled{you: true, text: text})
+		g.publish(proto.Event{Type: proto.EventMessage, Text: text})
+	}
+	g.drawInput()
+}
+
 // keyRepeats says which held keys repeat. In a menu only the arrows do: a
 // held digit picks its row once, and must not go on to type into whatever
 // the answer opens next. In a line, Backspace and anything that types.
@@ -261,6 +322,11 @@ func (g *Ghost) keyRepeats(code uint32) bool {
 
 // drawInput repaints the input balloon from current state.
 func (g *Ghost) drawInput() {
+	// One at a time: the keys, the caret and the ghost's words all draw
+	// this panel from goroutines of their own, and a font face is not
+	// safe for two at once.
+	g.drawMu.Lock()
+	defer g.drawMu.Unlock()
 	g.inputMu.Lock()
 	open, text, caret := g.input.open, g.input.editor.Text(), g.input.caret
 	g.inputMu.Unlock()
@@ -268,12 +334,19 @@ func (g *Ghost) drawInput() {
 	if !open || rend == nil {
 		return
 	}
-	sp := rend.RenderInput(text, caret)
+	var sp *sprite.Sprite
+	if words, conv := g.conversationWords(); conv {
+		sp = rend.RenderWithInput(words, text, caret)
+	} else {
+		sp = rend.RenderInput(text, caret)
+	}
 
 	// Repaint the existing panel rather than swapping surfaces: an input
 	// line redraws on every keystroke and twice a second for the caret, and
 	// destroying the surface each time makes it flicker. RenderInput keeps
-	// a fixed width precisely so this stays possible.
+	// a fixed width precisely so this stays possible, and so does
+	// RenderWithInput, so streaming words only make a new surface when they
+	// grow the panel by a line.
 	g.blnMu.Lock()
 	bln := g.bln
 	g.blnMu.Unlock()

@@ -55,11 +55,13 @@ resident set is who `haunt run` and the service start.
   do?", an offer to keep an eye on what you are working on, and nothing.
   A menu is answered with the mouse or with the digits, arrows, Enter and
   Escape.
-- **Right-click** to type at it. An input line opens in its balloon; the
+- **Right-click** to type at it. An input line opens in its balloon and
+  a conversation begins ([Talking at length](#talking-at-length)); the
   keyboard is taken only while the line is open, and held keys repeat at
   the compositor's rate (sway's `repeat_rate` and `repeat_delay`).
-  Anything the ghost finishes saying while you type is shown when the
-  line closes.
+  A line the ghost opens to ask you something (`ask_text`) closes on
+  Enter, and anything it finishes saying meanwhile is shown when the line
+  closes.
 - **Scroll** over it to go back through what was said this session: its
   lines, the pictures it showed and what you typed, a page at a time,
   each marked with who said it, how long ago and where it sits. Scrolling
@@ -75,6 +77,27 @@ A persona ghost is talked to in plain language. Telling it something
 about yourself is remembered; telling it it has something wrong corrects
 that memory; asking it to remind you of something is taken on as an
 intention ([Memory, reminders and goals](memory.md)).
+
+## Talking at length
+
+Typing at a ghost opens a conversation. Enter sends the line and the line
+opens again, empty, with the keyboard still held, so the next thing can
+be typed straight away; a line sent while the ghost is still answering
+waits its turn. The balloon widens to 480 pixels, the ghost's words
+stream in above the line, and a persona ghost is told it may write a few
+sentences rather than a remark. Nothing in the balloon goes away while
+the conversation lasts. Pictures the ghost paints meanwhile are not
+shown, and the wheel does not go back through what was said until it
+ends.
+
+It ends when you press Escape, click away (the keyboard goes elsewhere)
+or click the ghost, after three minutes with nothing typed and nothing
+said, or when the ghost says goodbye. A ghost ends one with
+`end_conversation`, and its goodbye is the last thing shown;
+`[conversation] ghost_may_end = false` takes that away from it
+([Configuration](config.md)). A question with choices, the ghost's or a
+consent question, ends it too. Once it has ended, the last words stay up
+for twelve seconds, as a reply does.
 
 ## Quiet hours
 

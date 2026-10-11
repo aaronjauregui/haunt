@@ -52,20 +52,22 @@ type File struct {
 	Appearance AppearanceConfig
 	// Model is the model persona ghosts think with; ModelFor is one
 	// ghost's.
-	Model ModelConfig
+	Model        ModelConfig
+	Conversation ConversationConfig
 }
 
 // root is the on-disk shape. Separate from File so that File can carry
 // derived fields without them looking like things a user may set.
 type root struct {
-	Quiet      quiet.Config     `toml:"quiet"`
-	Backend    backend.Config   `toml:"backend"`
-	Animation  AnimationConfig  `toml:"animation"`
-	Awareness  AwarenessConfig  `toml:"awareness"`
-	Curiosity  CuriosityConfig  `toml:"curiosity"`
-	Files      FilesConfig      `toml:"files"`
-	Appearance AppearanceConfig `toml:"appearance"`
-	Model      ModelConfig      `toml:"model"`
+	Quiet        quiet.Config       `toml:"quiet"`
+	Backend      backend.Config     `toml:"backend"`
+	Animation    AnimationConfig    `toml:"animation"`
+	Awareness    AwarenessConfig    `toml:"awareness"`
+	Curiosity    CuriosityConfig    `toml:"curiosity"`
+	Files        FilesConfig        `toml:"files"`
+	Appearance   AppearanceConfig   `toml:"appearance"`
+	Model        ModelConfig        `toml:"model"`
+	Conversation ConversationConfig `toml:"conversation"`
 }
 
 // Path returns the user config file location. HAUNT_CONFIG_DIR overrides
@@ -104,15 +106,16 @@ func Load() (*File, error) {
 		}
 	}
 	f := &File{
-		Path:       path,
-		Quiet:      r.Quiet,
-		Backend:    backend.WithDefaults(r.Backend),
-		Animation:  r.Animation,
-		Awareness:  r.Awareness,
-		Curiosity:  r.Curiosity,
-		Files:      r.Files,
-		Appearance: r.Appearance,
-		Model:      r.Model,
+		Path:         path,
+		Quiet:        r.Quiet,
+		Backend:      backend.WithDefaults(r.Backend),
+		Animation:    r.Animation,
+		Awareness:    r.Awareness,
+		Curiosity:    r.Curiosity,
+		Files:        r.Files,
+		Appearance:   r.Appearance,
+		Model:        r.Model,
+		Conversation: r.Conversation,
 	}
 	if err := f.Awareness.derive(path); err != nil {
 		return nil, err
@@ -133,6 +136,22 @@ func Load() (*File, error) {
 		return nil, fmt.Errorf("in %s: %w", path, err)
 	}
 	return f, nil
+}
+
+// ConversationConfig is the [conversation] section: how a conversation
+// with a ghost (the input line kept open between messages) may end.
+type ConversationConfig struct {
+	// GhostMayEnd lets a ghost end a conversation itself, saying goodbye
+	// as it does (the end_conversation decision). Absent means true. It is
+	// a switch because ending one is the one place the ghost decides how
+	// long something on screen lasts, and a person whose ghost uses it
+	// badly should be able to take it away.
+	GhostMayEnd *bool `toml:"ghost_may_end"`
+}
+
+// MayEnd is GhostMayEnd with its default: yes.
+func (c ConversationConfig) MayEnd() bool {
+	return c.GhostMayEnd == nil || *c.GhostMayEnd
 }
 
 // AnimationConfig is the [animation] portion of the user config.

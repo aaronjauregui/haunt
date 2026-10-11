@@ -11,14 +11,15 @@ import (
 	"github.com/aaronjauregui/haunt/internal/proto"
 )
 
-// Speech: the two decisions that end a turn, and the ways of talking to
-// the person and to the other ghosts before it ends.
+// Speech: the two decisions that end a turn, the ways of talking to the
+// person and to the other ghosts before it ends, and ending a conversation.
 
 const (
-	speakName   = "speak"
-	silentName  = "stay_silent"
-	askName     = "ask"
-	askTextName = "ask_text"
+	speakName           = "speak"
+	silentName          = "stay_silent"
+	askName             = "ask"
+	askTextName         = "ask_text"
+	endConversationName = "end_conversation"
 )
 
 // speakCue is speak's result: what the model reads just before it writes
@@ -79,6 +80,14 @@ func init() {
 		params: []string{"prompt:string"},
 		run:    tool(toolAskText),
 	})
+	register(conversationEnder{verb{
+		id:         endConversationName,
+		desc:       "End the conversation politely when it has run its course; say goodbye in your words this turn.",
+		sideEffect: true,
+		run: func(_ context.Context, g *Ghost, _ *turn, _ json.RawMessage) (string, error) {
+			return g.askToEnd()
+		},
+	}})
 	register(verb{
 		id:         "tell",
 		desc:       "Say something to another ghost in the room, by name.",
@@ -87,6 +96,14 @@ func init() {
 		sideEffect: true,
 	})
 }
+
+// conversationEnder is end_conversation: offered only while the person
+// lets a ghost end a conversation ([conversation] ghost_may_end), since
+// it is the one place a ghost decides how long something of the driver's
+// stays on screen.
+type conversationEnder struct{ verb }
+
+func (conversationEnder) offeredTo(g *Ghost) bool { return g.ghostMayEnd() }
 
 func toolSay(g *Ghost, _ context.Context, args json.RawMessage) (string, error) {
 	var a struct {

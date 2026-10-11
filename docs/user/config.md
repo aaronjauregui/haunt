@@ -102,6 +102,9 @@ stall_timeout = 120             # seconds a call under way may then go quiet
 # [model.ghost.wisp.sampling]   # replaces the troupe's sampling key by key
 # temperature = 1.1
 
+[conversation]                  # talking at length; see running.md
+ghost_may_end = true            # a ghost may end a conversation itself, saying goodbye
+
 [log]
 level = "info"                  # "error", "warn", "info" or "debug" (every topic)
 debug = []                      # topics whose debug output is wanted, e.g. ["backend", "wayland"]; "all"

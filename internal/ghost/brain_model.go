@@ -612,6 +612,9 @@ func (b *modelBrain) run(t *turn) (out turnOutcome) {
 	defer func() { out.took = time.Since(began) }()
 	userDriven := g.respondingToUser()
 	g.forgetTurnPictures()
+	// A goodbye (end_conversation) closes the conversation once the turn
+	// is over, which is after its words have been shown, however it ends.
+	defer g.endConversationIfAsked()
 	// What the reading tools are allowed to do, and what the rest of the
 	// turn may do once they have brought somebody else's words in, both
 	// turn on what this turn is (web.go).
@@ -718,7 +721,9 @@ func (b *modelBrain) run(t *turn) (out turnOutcome) {
 		b.record(t, TranscriptRow{Kind: rowSilent})
 		// Nothing was said, so nobody was interrupted, so nothing is owed.
 		t.refund()
-		if p.wasShown() {
+		// Words of it already shown come down; in a conversation, from
+		// above the line, which stays.
+		if p.wasShown() && !g.streamInConversation("") {
 			g.hideBalloon()
 		}
 		g.log.Debug(hlog.Brain, "the ghost chose to say nothing")
@@ -750,7 +755,9 @@ func (b *modelBrain) run(t *turn) (out turnOutcome) {
 	// Whether it reaches the screen is decided at the screen, as for every
 	// line: a quiet hour holds it back, and a reminder held back is still
 	// owed. A half-typed line holds it until the line closes, and it has
-	// reached the screen when it is shown then.
+	// reached the screen when it is shown then. In a conversation it is
+	// shown at once above the line, and lingers from when the
+	// conversation ends rather than from now.
 	if !muted && g.holdLine(text, func() { after(true) }) {
 		if userDriven {
 			g.markPrompted()
@@ -899,7 +906,9 @@ func (p *parts) retract(rest string) {
 	defer p.mu.Unlock()
 	p.acc = rest
 	if strings.TrimSpace(rest) == "" && p.shown {
-		p.g.hideBalloon()
+		if !p.g.streamInConversation("") {
+			p.g.hideBalloon()
+		}
 		p.shown = false
 	}
 }

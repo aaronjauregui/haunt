@@ -59,7 +59,8 @@ func drain(b *bus.Bus) []proto.Event {
 }
 
 // TestTypedLineBecomesAMessage: what you type reaches the brain as the same
-// message event `haunt say` produces, so brains need no new handling.
+// message event `haunt say` produces, so brains need no new handling. The
+// line stays open for the next one: it is a conversation.
 func TestTypedLineBecomesAMessage(t *testing.T) {
 	g, b := typingGhost(t)
 	g.openInput()
@@ -69,8 +70,8 @@ func TestTypedLineBecomesAMessage(t *testing.T) {
 	typeString(g, "hello ghost")
 	g.onKey(textinput.KeyEnter, true)
 
-	if g.inputOpen() {
-		t.Error("input stayed open after submitting")
+	if !g.inputOpen() {
+		t.Error("the conversation's line closed after submitting")
 	}
 	events := drain(b)
 	if len(events) != 1 {
@@ -112,8 +113,8 @@ func TestEscapeAbandonsTheLine(t *testing.T) {
 	}
 }
 
-// TestEmptyLineSendsNothing: pressing enter at an empty prompt closes it
-// without waking the brain.
+// TestEmptyLineSendsNothing: pressing enter at an empty prompt does not
+// wake the brain, and leaves the line as it was.
 func TestEmptyLineSendsNothing(t *testing.T) {
 	g, b := typingGhost(t)
 	g.openInput()
@@ -124,8 +125,8 @@ func TestEmptyLineSendsNothing(t *testing.T) {
 	if events := drain(b); len(events) != 0 {
 		t.Errorf("whitespace was sent as a message: %+v", events)
 	}
-	if g.inputOpen() {
-		t.Error("input stayed open")
+	if !g.inputOpen() {
+		t.Error("an empty Enter closed the line")
 	}
 }
 
@@ -195,21 +196,40 @@ func TestStaleKeyboardLeaveDoesNotCloseTheNextLine(t *testing.T) {
 	}
 }
 
-// A line the ghost finishes while the person is typing is not lost: it is
-// shown when the line closes. Only the latest is kept.
+// In a conversation a line the ghost finishes is shown at once, above the
+// line being typed. On a line the driver opened for an answer of its own
+// (ask_text) it is not lost either: it is shown when the line closes. Only
+// the latest is kept.
 func TestLineHeldWhileTyping(t *testing.T) {
 	g := pagingGhost(t)
 	g.openInput()
 	typing := g.balloonGen()
 	g.showPaged("first")
-	g.showPaged("second")
-	if g.balloonGen() != typing {
-		t.Fatal("a line was shown over the open input line")
+	if g.balloonGen() == typing {
+		t.Fatal("a line said in a conversation was not shown")
 	}
 	g.inputMu.Lock()
 	held := g.input.held
 	g.inputMu.Unlock()
-	if held != "second" {
+	if words, _ := g.conversationWords(); held != "" || words != "first" {
+		t.Errorf("held %q and showing %q, want nothing held and the line shown", held, words)
+	}
+	g.endConversation("test")
+
+	g.openInputWithReply(make(chan string, 1))
+	if g.inConversation() {
+		t.Fatal("the driver's question opened a conversation")
+	}
+	typing = g.balloonGen()
+	g.showPaged("second")
+	g.showPaged("third")
+	if g.balloonGen() != typing {
+		t.Fatal("a line was shown over the open input line")
+	}
+	g.inputMu.Lock()
+	held = g.input.held
+	g.inputMu.Unlock()
+	if held != "third" {
 		t.Errorf("held %q, want the latest line", held)
 	}
 	g.closeInput()
