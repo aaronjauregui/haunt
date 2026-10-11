@@ -22,8 +22,11 @@ import (
 //  4. the transcript: the summary of older turns, then the turns since.
 //  5. user: this turn's input, the person's words verbatim or an envelope.
 //  6. system: this turn's context (the time, the focused window when it
-//     may be seen, the goals held, errands due and not dealt with) and a two-line persona
-//     reminder against the character thinning out over a long transcript.
+//     may be seen, the goals held, errands due and not dealt with, the
+//     desktop notes left, today's mood, the memory lines the person's
+//     words brought in, and whether a conversation is open) and a
+//     two-line persona reminder against the character thinning out over
+//     a long transcript.
 //
 // Only part 6 is never kept: it is rebuilt every turn, after everything a
 // cache could reuse.
@@ -377,7 +380,9 @@ func afterReading(w trust, both bool) string {
 
 // turnContext is the ambient context layered on a turn: the time, what the
 // ghost can see when it is allowed to see anything, the goals it keeps an
-// eye on, and anything whose moment came without it being said.
+// eye on, anything whose moment came without it being said, then the notes
+// it has left, its mood today, the memory lines keyed by the person's
+// words, and whether a conversation is open, in that order.
 //
 // The goals are there so "I don't care about the marathon anymore" can be
 // set aside by name in the same breath, without a round trip to

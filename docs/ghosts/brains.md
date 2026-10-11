@@ -110,6 +110,7 @@ with `kv_set` as it goes; there is no read intent. Keys starting with
 | `act` | `name` (`server.tool`), `args`, `tag` | run a declared tool (`tools`); the person is asked about each tool the first time |
 | `intend` | `name`, `text`, `delay_ms` | take on a purpose that survives restarts; the same name replaces. No delay makes it a goal. |
 | `resolve`, `set_aside` | `name` | it was done; or stop watching it without claiming it was done |
+| `leave_note` | `text`, `name` (a picture's id, or empty) | put a note on the desktop, at most 160 characters, with the picture pinned above; an intention named `model/note-<n>`, so `resolve` takes it down. At most three are up; a fourth is dropped |
 
 The driver validates every intent and refuses what it must: unknown
 poses and clips are ignored, a `say` with an empty text or too many

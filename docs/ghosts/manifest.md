@@ -97,9 +97,10 @@ format is [The shell](shell.md).
 | `default_pose` | The pose worn at boot. |
 | `scale` | How large the art is drawn: above 0, at most 4, default 1. Every coordinate in the shell is in the art's own pixels. |
 | `masks` | Mask names to PNGs marking where each part may go; `silhouette` is required. |
+| `note` | Optional paper the ghost's desktop notes are written on ([The shell](shell.md#note-paper)). |
 
 Every file the shell names (the sprite, each layer's image and variants,
-the masks) is a path relative to the ghost directory that stays inside
+the masks, the note paper) is a path relative to the ghost directory that stays inside
 it; the manifest is refused otherwise.
 
 ## `[persona]`

@@ -86,6 +86,22 @@ constraint on changes, not a history.
   sending.** The model never sees an event it is not allowed to act on,
   so its only decision is whether this one is worth a word. Silence is
   refunded.
+- **Mood is the journal's, not the face's.** A ghost sets one line about
+  how it feels; it rides in the turn context, `haunt journal -mood`
+  shows it, and it counts only on the day it was set, so it clears
+  overnight with no timer. It never changes the resting pose and is
+  never shown in the balloon: a face that sulked on its own would be a
+  second expression system beside the one the model already chooses
+  with `speak`, and one the person could not see the reason for.
+- **Keyed context is pushed, sticky and cooled, and keyed by the
+  person's words only.** `recall` is pull-only, and a small model does
+  not reach for it when the person names something it was told a week
+  ago, so the lines their words match ride in the turn context unasked.
+  A line stays a few turns, for the reply to the reply, then cannot come
+  back for a while, so a subject the person keeps returning to does not
+  pin one fact into every turn. An event's fields and a window's title
+  never key: those are other people's words, and a line they brought in
+  would be the desktop steering what the ghost has in mind.
 - **Skills a ghost ships are read-only.** Haunt's and the package's
   skills are never changed by the model. What it learns goes to its own
   learned skills, which are checked against the tools it has and
@@ -120,6 +136,29 @@ constraint on changes, not a history.
   one. A reminder raised into a quiet hour is still held afterwards.
 - **A line's lifetime belongs to the driver.** A brain's timer to hide
   its own line would hide the reply that arrived meanwhile.
+- **A conversation is a mode of the balloon, not a panel.** Typing at a
+  ghost widens the balloon and keeps the line open between messages; it
+  stays an image on a pass-through surface, with no input region,
+  selection or scrollbar of its own, and the wheel over the ghost is
+  what scrolls it. Nothing in it expires while it is open: a reply that
+  went away while the person was still reading it would be the driver
+  taking the conversation back mid-sentence. A click on the ghost during
+  one is a poke, not a closing; clicking away is the keyboard leaving.
+- **Ending a conversation is the one surface lifetime a ghost decides,
+  and it is switchable.** Escape, the keyboard leaving and a quiet spell
+  are the driver's; `end_conversation` lets the ghost say goodbye and
+  close it after its words are shown. It is the single exception to the
+  driver owning every surface's lifetime, so `[conversation]
+  ghost_may_end = false` takes it away, and the decision is then not
+  offered at all rather than refused.
+- **A desktop note is an intention with a surface.** It is held,
+  listed, capped and resolved as an intention is, so nothing new is
+  needed to see it, list it or take it down; the surface is the
+  driver's, placed beside the ghost, dragged and taken down with a click
+  like anything else on the desk. Notes are capped on their own and
+  never pushed out by reminders. A note clicked away is silent: the turn
+  context stops listing it, and no event wakes the ghost to remark on
+  it.
 - **Quiet hours, the fullscreen rule and reduced motion are the room's.**
   No ghost can override them, and a ghost cannot silence itself either,
   because being able to would make quiet negotiable.

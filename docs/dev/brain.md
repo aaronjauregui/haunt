@@ -41,7 +41,7 @@ the model decides what to make of an event and whether to say anything.
 | Runner | `brain_model.go` | which events become turns, the queue, deferral, refunds, the waking and thinking indicators, the balloon, the why-trace, errand discharge |
 | Prompt | `prompt.go` | the messages of a turn, the standing rules |
 | Decide | `decide.go` | the loop, the registry, the gates every decision shares |
-| Decisions | `decisions_*.go` | one file per group: speech, face, pictures, web, files, intentions, notes, memory, skills, servers |
+| Decisions | `decisions_*.go` | one file per group: speech, face, pictures, web, files, intentions, notes, mood, memory, skills, servers |
 | Transcript | `transcript.go` | `transcript.db`, replay, compaction, recall over the conversation |
 | Envelope | `envelope.go` | the one-line event a turn nobody started is sent as |
 | Client | `internal/model` | the HTTP call, streaming, tool calls, prefill, sampling, thinking, retries, deadlines, trust |
@@ -110,9 +110,13 @@ watching the ghost wake) in the balloon: "the model said nothing for
 2m0s — is it running?". A failed turn is left out of the next prompt
 whole, input and all, so the model never sees a question with no answer.
 
-**Typing and pictures.** Words finished while the input line is open are
-held and shown when it closes (`holdLine`). Words that follow a `draw`
-wait until the picture has been up for its twenty seconds.
+**Typing and pictures.** Words finished while a line the driver opened
+for its own question (`ask_text`) is up are held and shown when it closes
+(`holdLine`). In a conversation nothing is held: the words stream into
+the conversation view above the open line, and once finished they stay
+there, with nothing lingering out, until the conversation ends
+(`conversation.go`). Words that follow a `draw` wait until the picture
+has been up for its twenty seconds.
 
 ## The prompt
 
@@ -524,8 +528,8 @@ Two flags on a decision say what is gated after which source
 (`gatedAfter` in `web.go`):
 
 - **`sideEffect`**, reaching past the person in front of the ghost, is
-  gated after either source: `tell`, `intend`, `resolve`, `set_aside`, `mood`, a
-  `style` set or reset, and every server tool.
+  gated after either source: `tell`, `intend`, `resolve`, `set_aside`,
+  `leave_note`, `mood`, a `style` set or reset, and every server tool.
 - **`leaves`**, sending words off the machine, is gated only after a
   file: `search`, whose query goes to the provider, and `read_page`,
   whose URL can carry a file's text to any host.
@@ -533,8 +537,8 @@ Two flags on a decision say what is gated after which source
 The trust table then narrows that (`gateAfterReading` in `trust.go`): a
 decision whose class does not need the after-read question where the
 model runs is not gated at all. On a local model that leaves `tell` and
-the server tools; `intend`, `resolve`, `set_aside`, `mood`, `style`, `search`
-and `read_page` are free after a read there, since none of them takes
+the server tools; `intend`, `resolve`, `set_aside`, `leave_note`, `mood`,
+`style`, `search` and `read_page` are free after a read there, since none of them takes
 the words anywhere the person does not own.
 
 On the person's turn the act is put to them in the balloon, naming what
@@ -565,7 +569,7 @@ read it (`readGate`, `gateAfterReading`, `mayRemember`, `labelled`):
 | read, an event turn | the same | quiet hours and the ration | consent, the `unprompted` policy, quiet hours and the ration; the after-read question |
 | lookup | `recall`, `skill_view`, `intentions`, `pictures` | nothing | nothing |
 | write | `remember`, `forget`, `rewrite_notes`, `skill_write` | the label | the echo check and the label |
-| keep | `intend`, `resolve`, `set_aside`, `mood`, `style` | nothing | the after-read question |
+| keep | `intend`, `resolve`, `set_aside`, `leave_note`, `mood`, `style` | nothing | the after-read question |
 | reach | `tell`, every `<server>__<tool>`, and any decision not in the table | consent, the marks, the after-read question | the same |
 | show | `speak`, `stay_silent`, `say`, `ask`, `ask_text`, `end_conversation`, `face`, `clip`, `draw`, `show`, `look` | nothing | nothing |
 

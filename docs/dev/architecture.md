@@ -145,7 +145,7 @@ ghost's public actions to the others as `observed` events.
 
 | What | Where | Writer |
 |---|---|---|
-| A scripted brain's store, a ghost's intentions (desktop notes among them, with where each was left), allowances, why-trace, placement, session snapshot | `ghosts/<name>/state.db`, keys under `_haunt/` hidden from brains | the running ghost only |
+| A scripted brain's store, a ghost's intentions (desktop notes among them, with where each was left), its mood and the day it was set, allowances, why-trace, placement, session snapshot | `ghosts/<name>/state.db`, keys under `_haunt/` hidden from brains | the running ghost only |
 | Grants and the pinned author key | `ghosts/<name>/grants.toml` | the CLI; watched by the running ghost |
 | Who is resident | `resident` | the CLI |
 | The room's spend log | `room-curiosity.json` | the troupe |

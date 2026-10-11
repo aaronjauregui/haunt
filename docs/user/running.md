@@ -71,6 +71,8 @@ resident set is who `haunt run` and the service start.
   anything new the ghost says replaces it. The last 50 are kept; the
   whole conversation is `haunt history` ([memory](memory.md)). In a
   conversation the wheel scrolls the conversation instead.
+- **Click a note** it left on the desktop to take it down, or drag it
+  where you want it ([Notes on the desktop](memory.md#notes-on-the-desktop)).
 - **From a script**, `haunt say "text"`. With several ghosts resident and
   no `-ghost`, it goes to the one you last interacted with.
 
