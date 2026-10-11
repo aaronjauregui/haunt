@@ -104,8 +104,9 @@ a question it is putting to you, show beneath the rest until the ghost
 next speaks or you answer, and are not kept as anything the ghost said.
 Nothing in the balloon goes away while the conversation lasts.
 
-Clicking the ghost during a conversation pokes it and leaves the
-conversation and the half-typed line alone. The conversation ends when
+Clicking the ghost during a conversation pokes it, and what it says to
+the poke shows in the conversation like anything else it says; the
+conversation and the half-typed line are left alone. The conversation ends when
 you press Escape, click away (the keyboard goes elsewhere), after three
 minutes with nothing typed and nothing said, or when the ghost says
 goodbye. A ghost ends one with
