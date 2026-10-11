@@ -29,11 +29,14 @@ type Entry struct {
 
 // convRow is one line's slot in the laid-out transcript. A picture's
 // first slot carries the thumbnail and how many slots it covers; the
-// slots after it are empty.
+// slots after it are empty. A row of the person's (right) sits against
+// the right edge, its prefix in a gutter there, so the two sides of the
+// conversation read apart at a glance.
 type convRow struct {
 	prefix string
 	text   string
 	thumb  *image.NRGBA
+	right  bool
 }
 
 // maxThumbs bounds the thumbnails a renderer keeps scaled: the caret
@@ -54,8 +57,10 @@ func (r *Renderer) ConversationLines() int {
 }
 
 // RenderConversation paints the conversation view: entries laid out as
-// wrapped lines under a dim one-word prefix (`you`, or the theme's
-// Speaker), a picture as a thumbnail, a blank line between entries; the
+// wrapped lines beside a dim one-word prefix, the ghost's left-aligned
+// with the theme's Speaker in a left gutter and the person's
+// right-aligned (ragged left) with `you` in a right gutter, a picture as
+// a thumbnail on the ghost's side, a blank line between entries; the
 // last lines that fit, moved up by offset lines (clamped to the top); and
 // the line being typed last. The panel is always the full width, and
 // grows with the transcript until it reaches the height cap, so once it
@@ -65,7 +70,7 @@ func (r *Renderer) RenderConversation(entries []Entry, offset int, line string, 
 	t := r.theme
 	lh := r.lineHeight()
 	gap := lh / 2
-	rows, indent := r.layoutConversation(entries)
+	rows, indent, youW := r.layoutConversation(entries)
 
 	total := len(rows)
 	room := r.ConversationLines()
@@ -84,6 +89,7 @@ func (r *Renderer) RenderConversation(entries []Entry, offset int, line string, 
 	text := &font.Drawer{Dst: view, Src: image.NewUniform(t.Text), Face: r.face}
 	dim := &font.Drawer{Dst: view, Src: image.NewUniform(r.dim()), Face: r.face}
 	ascent := r.face.Metrics().Ascent.Ceil()
+	left, right := t.Padding, t.MaxWidth-t.Padding
 	for i, row := range rows {
 		y := t.Padding + (i-first)*lh
 		h := lh
@@ -93,18 +99,18 @@ func (r *Renderer) RenderConversation(entries []Entry, offset int, line string, 
 		if y+h <= t.Padding || y >= t.Padding+shown*lh {
 			continue
 		}
-		if row.prefix != "" {
-			dim.Dot = fixed.P(t.Padding, y+ascent)
-			dim.DrawString(row.prefix)
-		}
 		if row.thumb != nil {
-			at := image.Pt(t.Padding+indent, y)
+			drawAligned(dim, row.prefix, left, y+ascent, false)
+			at := image.Pt(left+indent, y)
 			draw.Draw(view, row.thumb.Bounds().Add(at), row.thumb, image.Point{}, draw.Over)
 			continue
 		}
-		if row.text != "" {
-			text.Dot = fixed.P(t.Padding+indent, y+ascent)
-			text.DrawString(row.text)
+		if row.right {
+			drawAligned(dim, row.prefix, right, y+ascent, true)
+			drawAligned(text, row.text, right-youW, y+ascent, true)
+		} else {
+			drawAligned(dim, row.prefix, left, y+ascent, false)
+			drawAligned(text, row.text, left+indent, y+ascent, false)
 		}
 	}
 
@@ -114,16 +120,32 @@ func (r *Renderer) RenderConversation(entries []Entry, offset int, line string, 
 	return &sprite.Sprite{Img: img}, total
 }
 
+// drawAligned draws s on the baseline y, starting at x, or ending at x
+// when right is set.
+func drawAligned(d *font.Drawer, s string, x, y int, right bool) {
+	if s == "" {
+		return
+	}
+	if right {
+		x -= font.MeasureString(d.Face, s).Ceil()
+	}
+	d.Dot = fixed.P(x, y)
+	d.DrawString(s)
+}
+
 // layoutConversation lays the entries out as line slots, and says how far
-// the words are indented past the prefixes.
-func (r *Renderer) layoutConversation(entries []Entry) ([]convRow, int) {
+// the ghost's words are indented past its name, and how far the person's
+// stop short of the right edge to leave room for `you`. Both sides wrap
+// to the same width, so the person's lines keep clear of the left gutter.
+func (r *Renderer) layoutConversation(entries []Entry) ([]convRow, int, int) {
 	t := r.theme
 	lh := r.lineHeight()
 	speaker := strings.TrimSpace(t.Speaker)
 	if speaker == "" {
 		speaker = "ghost"
 	}
-	indent := max(font.MeasureString(r.face, "you").Ceil(), font.MeasureString(r.face, speaker).Ceil()) + lh/2
+	you := font.MeasureString(r.face, "you").Ceil()
+	indent := max(you, font.MeasureString(r.face, speaker).Ceil()) + lh/2
 	width := t.MaxWidth - 2*t.Padding - indent
 	maxThumb := lh * max(r.ConversationLines()/2, 1)
 
@@ -152,11 +174,11 @@ func (r *Renderer) layoutConversation(entries []Entry) ([]convRow, int) {
 			continue
 		}
 		for _, l := range r.wrap(text, width) {
-			rows = append(rows, convRow{prefix: prefix, text: l})
+			rows = append(rows, convRow{prefix: prefix, text: l, right: e.You})
 			prefix = ""
 		}
 	}
-	return rows, indent
+	return rows, indent, you + lh/2
 }
 
 // thumbnail is src scaled down to fit w by h (nearest neighbour, as

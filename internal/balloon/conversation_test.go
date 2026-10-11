@@ -120,3 +120,57 @@ func TestRenderConversationFixedWidth(t *testing.T) {
 		t.Errorf("a full view changed size as it grew: %v, %v", full.Img.Bounds(), fuller.Img.Bounds())
 	}
 }
+
+// inkSpan is the leftmost and rightmost columns in line slot row of the
+// conversation view that differ from the panel, or -1, -1 for a blank one.
+func inkSpan(r *Renderer, img *image.NRGBA, row int) (int, int) {
+	t := r.theme
+	lh := r.lineHeight()
+	bg := img.NRGBAAt(t.Padding-1, t.Padding+row*lh+lh/2)
+	lo, hi := -1, -1
+	for y := t.Padding + row*lh; y < t.Padding+(row+1)*lh; y++ {
+		for x := t.Padding; x < t.MaxWidth-t.Padding; x++ {
+			if img.NRGBAAt(x, y) == bg {
+				continue
+			}
+			if lo < 0 || x < lo {
+				lo = x
+			}
+			hi = max(hi, x)
+		}
+	}
+	return lo, hi
+}
+
+// TestRenderConversationSides: the person's lines end at the right edge,
+// `you` past them, every wrapped line too; the ghost's start at the left
+// with its name.
+func TestRenderConversationSides(t *testing.T) {
+	r := conversationRenderer(t)
+	th := r.theme
+	_, _, youW := r.layoutConversation(nil)
+	long := strings.Repeat("a fairly long question that wraps ", 4)
+	sp, n := r.RenderConversation([]Entry{
+		{You: true, Text: "hello"},
+		{Text: "Hello yourself."},
+		{You: true, Text: long},
+	}, 0, "", false)
+	img := sp.Img
+	if n < 6 {
+		t.Fatalf("%d lines: the long question did not wrap", n)
+	}
+	left, right, mid := th.Padding, th.MaxWidth-th.Padding, th.MaxWidth/2
+	near := func(a, b int) bool { return a >= b-4 && a <= b }
+
+	if lo, hi := inkSpan(r, img, 0); !near(hi, right-1) || lo < mid {
+		t.Errorf("the person's line spans %d..%d, want it in the right half ending at %d", lo, hi, right-1)
+	}
+	if lo, hi := inkSpan(r, img, 2); lo < left || lo > left+3 || hi > mid {
+		t.Errorf("the ghost's line spans %d..%d, want it in the left half starting at %d", lo, hi, left)
+	}
+	for row := 5; row < n; row++ {
+		if _, hi := inkSpan(r, img, row); !near(hi, right-youW-1) {
+			t.Errorf("wrapped line %d ends at %d, want %d", row, hi, right-youW-1)
+		}
+	}
+}

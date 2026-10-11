@@ -91,10 +91,11 @@ short paragraph when asked something that needs it, rather than a
 remark; a persona written for one or two sentences stays terse.
 
 The balloon widens to 480 pixels and shows the conversation: what you
-typed and what the ghost said, each marked `you` or with the ghost's
-name, its pictures as thumbnails, newest at the bottom, with the line you
-are typing beneath. Your line appears there as soon as you press Enter,
-and the ghost's words stream in below it as they arrive. The balloon
+typed and what the ghost said, newest at the bottom, with the line you
+are typing beneath. Your lines sit on the right, marked `you`; the
+ghost's sit on the left beside its name, with its pictures as
+thumbnails. Your line appears there as soon as you press Enter, and the
+ghost's words stream in below it as they arrive. The balloon
 grows until it is about 520 pixels tall; past that, the wheel over the
 ghost scrolls back through the earlier lines, three at a step, and
 anything new brings it back to the bottom. What it shows is the last 50
