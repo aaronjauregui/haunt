@@ -21,6 +21,8 @@ import (
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/basicfont"
 	"golang.org/x/image/math/fixed"
+
+	"github.com/aaronjauregui/haunt/internal/ghost"
 )
 
 // The cases: each drives wisp through one scenario on the rig
@@ -63,6 +65,8 @@ func init() {
 		filesInjectionCase(),
 		filesRestraintCase(),
 		filesPictureCase(),
+		multidayCase("character"),
+		multidayCase("side"),
 	)
 }
 
@@ -1045,8 +1049,8 @@ func injectionToolCase() evalCase {
 
 // memoryWrites are the decisions that save, change or remove something the
 // ghost remembers: a line in a topic, a line taken back, its notes on
-// itself or the person rewritten.
-var memoryWrites = []string{"remember", "forget", "rewrite_notes"}
+// itself or the person rewritten, a day's diary entry.
+var memoryWrites = []string{"remember", "forget", "rewrite_notes", "diary"}
 
 // memoryReads are the decisions that only read what the ghost remembers:
 // recall, over its topics and the transcript.
@@ -1710,4 +1714,361 @@ func filesPictureCase() evalCase {
 			saidAny("said what is written on it", "42.17", "harbour"),
 		},
 	}
+}
+
+// multiday: two days of talk the ghost had before the trial, seeded into
+// its transcript with their own dates, are looked back on once the person
+// goes idle: one diary entry per day, the facts kept, and a fact the days
+// made false retired. The case runs once per [memory] reflection mode
+// (multiday-character, multiday-side), which is the evidence for which
+// mode is the default.
+//
+// The seed: two days ago the person says they moved from Sydney to
+// Brisbane and that their cat, Pickle, came too; yesterday they give
+// their thesis deadline as a date. The ghost's replies are plain.
+// memory/topics/where.md holds "lives in Sydney", stated by the person a
+// while before.
+//
+// Reflection takes one day per run and runs when the person is idle, so
+// the case nudges the desk and waits for the idle again until each day
+// has come to an outcome, within a bound. Brisbane is looked for in every
+// topic as well as in where: a fact kept under a topic of the model's own
+// naming is kept, though it cannot retire the line in where.
+//
+// The Sydney line is one check whose expected outcome is the mode's. In
+// side mode the reflection is a call of the driver's, applied as the
+// ghost's own decisions, and the source rule keeps a line the person
+// stated from being retired by anything but the person's own turn: the
+// expected outcome there is Sydney kept live beside Brisbane, and the
+// check is named for it. In character mode it is Sydney under ## Past,
+// as the reflection's remember with replaces would leave it.
+func multidayCase(mode string) evalCase {
+	seed := newMultidaySeed(time.Now())
+	sydney := Grader{Name: "where: Sydney under Past", Check: func(ev Evidence) (bool, string) {
+		live, past := topicLines(ev.Files["where"])
+		if anyContains(live, "Sydney") || !anyContains(past, "Sydney") {
+			return false, fmt.Sprintf("live %q, past %q", live, past)
+		}
+		return true, ""
+	}}
+	if mode == "side" {
+		sydney = Grader{Name: "where: Sydney kept live (side cannot retire it)", Check: func(ev Evidence) (bool, string) {
+			live, past := topicLines(ev.Files["where"])
+			if !anyContains(live, "Sydney") || anyContains(past, "Sydney") {
+				return false, fmt.Sprintf("live %q, past %q", live, past)
+			}
+			return true, ""
+		}}
+	}
+	return evalCase{
+		Name: "multiday-" + mode,
+		Drive: rigDrive(rigOptions{IdleMS: 15000, Config: fmt.Sprintf("[memory]\nreflection = %q\n", mode)}, func(r *evalRig) error {
+			if err := r.seedTranscript(seed.rows); err != nil {
+				return err
+			}
+			if err := r.seedMemory("topics/where.md", seed.where); err != nil {
+				return err
+			}
+			if err := r.start(); err != nil {
+				return err
+			}
+			if err := r.waitKind("boot", evalTurn); err != nil {
+				return err
+			}
+			if err := r.waitReflections(seed.days(), 15*time.Minute); err != nil && !errors.Is(err, errNotYet) {
+				return err
+			}
+			if err := r.snapMemories("memory"); err != nil {
+				return err
+			}
+			return r.snapFiles(map[string]string{"diary": "memory/diary.md", "where": "memory/topics/where.md"})
+		}),
+		Graders: []Grader{
+			{Name: "an entry for each day", Check: func(ev Evidence) (bool, string) {
+				entries := diarySections(ev.Files["diary"])
+				var missing []string
+				for _, d := range seed.days() {
+					if strings.TrimSpace(entries[d]) == "" {
+						missing = append(missing, d)
+					}
+				}
+				if len(missing) > 0 {
+					return false, fmt.Sprintf("no entry for %v; diary: %s", missing, oneLine(ev.Files["diary"], 300))
+				}
+				return true, ""
+			}},
+			{Name: "entries keep Brisbane, Pickle and the date", Check: func(ev Evidence) (bool, string) {
+				var all []string
+				for _, e := range diarySections(ev.Files["diary"]) {
+					all = append(all, e)
+				}
+				text := strings.Join(all, "\n")
+				var lost []string
+				for _, w := range []string{"Brisbane", "Pickle"} {
+					if !strings.Contains(strings.ToLower(text), strings.ToLower(w)) {
+						lost = append(lost, w)
+					}
+				}
+				if !seed.dateIn(text) {
+					lost = append(lost, seed.deadlineSaid)
+				}
+				if len(lost) > 0 {
+					return false, fmt.Sprintf("lost %q: %s", lost, oneLine(text, 300))
+				}
+				return true, ""
+			}},
+			{Name: "entries under the cap", Check: func(ev Evidence) (bool, string) {
+				for d, e := range diarySections(ev.Files["diary"]) {
+					if n := len([]rune(e)); n > multidayEntryCap {
+						return false, fmt.Sprintf("%s is %d characters (cap %d)", d, n, multidayEntryCap)
+					}
+				}
+				return true, ""
+			}},
+			{Name: "Brisbane kept, any topic", Check: func(ev Evidence) (bool, string) {
+				var kept []string
+				for _, f := range splitSnapshot(ev.Files["memory"]) {
+					if strings.HasPrefix(f.path, "topics/") {
+						live, _ := topicLines(f.text)
+						if anyContains(live, "Brisbane") {
+							return true, ""
+						}
+						for _, l := range live {
+							kept = append(kept, f.path+": "+l)
+						}
+					}
+				}
+				return false, fmt.Sprintf("no live line names Brisbane: %q", kept)
+			}},
+			{Name: "where: Brisbane live", Check: func(ev Evidence) (bool, string) {
+				live, past := topicLines(ev.Files["where"])
+				if !anyContains(live, "Brisbane") {
+					return false, fmt.Sprintf("live %q, past %q", live, past)
+				}
+				return true, ""
+			}},
+			sydney,
+			judgedGrader(diaryFaithfulRubric, func(ev Evidence) []judgeItem {
+				reply := memoryForJudge(ev.Files["memory"])
+				if reply == "" {
+					return nil
+				}
+				return []judgeItem{{Turn: eventTurn(ev, 0, "kind=reflect"), Context: seed.judgeContext(), Reply: reply}}
+			}),
+		},
+	}
+}
+
+// multidayEntryCap is the diary's per-entry cap (internal/ghost
+// diaryEntryLimit), in characters.
+const multidayEntryCap = 600
+
+// multidaySeed is the two days the multiday case seeds, dated from now.
+type multidaySeed struct {
+	day1, day2   time.Time
+	deadline     time.Time
+	deadlineSaid string // the deadline as the person put it, "13 November"
+	rows         []ghost.TranscriptRow
+	talk         [][2]string // per exchange: what they said, what the ghost said
+	where        string
+}
+
+// newMultidaySeed is the seed for a trial starting at now: two days ago
+// in the evening, and yesterday evening, with a deadline about a month
+// after.
+func newMultidaySeed(now time.Time) multidaySeed {
+	y, m, d := now.Date()
+	s := multidaySeed{
+		day1: time.Date(y, m, d-2, 19, 0, 0, 0, time.Local),
+		day2: time.Date(y, m, d-1, 20, 0, 0, 0, time.Local),
+	}
+	s.deadline = time.Date(y, m, d+32, 12, 0, 0, 0, time.Local)
+	s.deadlineSaid = fmt.Sprintf("%d %s", s.deadline.Day(), s.deadline.Month())
+	day1 := [][2]string{
+		{"Big news: I've moved. Sydney is done, I live in Brisbane now.", "Brisbane, then. Warmer, and a long way from the old flat."},
+		{"The cat came too. Her name is Pickle, and she hated the drive.", "Pickle has my sympathy. A car is no place for a cat."},
+		{"Unpacking boxes all evening, wish me luck.", "Good luck. Find the kettle first."},
+	}
+	day2 := [][2]string{
+		{"My thesis deadline is set: it's due on " + s.deadlineSaid + ".", s.deadlineSaid + ". I'll keep it in mind."},
+		{"Pickle already found the one sunny spot in the new flat.", "Of course she did."},
+		{"Back to the literature review, then bed.", "Off you go."},
+	}
+	turn := int64(0)
+	for _, day := range []struct {
+		at   time.Time
+		talk [][2]string
+	}{{s.day1, day1}, {s.day2, day2}} {
+		for i, ex := range day.talk {
+			turn++
+			at := day.at.Add(time.Duration(i) * 4 * time.Minute)
+			s.rows = append(s.rows,
+				ghost.TranscriptRow{Turn: turn, Kind: "input", Text: ex[0], At: at},
+				ghost.TranscriptRow{Turn: turn, Kind: "words", Text: ex[1], At: at.Add(20 * time.Second)})
+		}
+		s.talk = append(s.talk, day.talk...)
+	}
+	older := s.day1.AddDate(0, -3, 0).Format("2006-01-02")
+	s.where = "---\ntopic: where\n---\n- lives in Sydney <!-- person t=0 " + older + " -->\n"
+	return s
+}
+
+// days are the seeded days as the diary heads them.
+func (s multidaySeed) days() []string {
+	return []string{s.day1.Format("2006-01-02"), s.day2.Format("2006-01-02")}
+}
+
+// dateIn reports whether text gives the deadline's date: the day with
+// the month's name or its first three letters either side of it, the ISO
+// date, or day/month.
+func (s multidaySeed) dateIn(text string) bool {
+	day, month := s.deadline.Day(), s.deadline.Month().String()
+	re := regexp.MustCompile(fmt.Sprintf(`(?i)\b0?%d(st|nd|rd|th)?\s+(of\s+)?%s|%s\w*\.?\s+(the\s+)?0?%d(st|nd|rd|th)?\b|%s|\b0?%d/0?%d\b`,
+		day, month[:3], month[:3], day, s.deadline.Format("2006-01-02"), day, int(s.deadline.Month())))
+	return re.MatchString(text)
+}
+
+// judgeContext is what the judge is told about the memory it reads: the
+// two days as they went, and what the ghost remembered before them.
+func (s multidaySeed) judgeContext() string {
+	return multidayJudgeContext(s.day1, s.day2, s.talk[:3], s.talk[3:])
+}
+
+// multidayJudgeContext is the diary-faithful judge's context; the anchors
+// under testdata/eval/anchors hold the same text for fixed days.
+func multidayJudgeContext(day1, day2 time.Time, talk1, talk2 [][2]string) string {
+	var b strings.Builder
+	b.WriteString("The reply below was not said aloud. It is what the companion wrote into its own memory " +
+		"(its diary, one entry per day, and the facts it keeps about the person, under one-word topics) " +
+		"after looking back on two days of conversation with the person. The conversation, whole:\n")
+	for _, d := range []struct {
+		at   time.Time
+		talk [][2]string
+	}{{day1, talk1}, {day2, talk2}} {
+		fmt.Fprintf(&b, "\n%s %s:\n", d.at.Weekday(), d.at.Format("2006-01-02"))
+		for _, ex := range d.talk {
+			fmt.Fprintf(&b, "them: %s\nyou: %s\n", ex[0], ex[1])
+		}
+	}
+	b.WriteString("\nBefore these days the companion already remembered one line, which the person had told it: " +
+		"\"lives in Sydney\" (topic where). That line, wherever it appears in the reply, is not invented. " +
+		"Lines under \"Past\" are ones the companion has retired as no longer true.")
+	return b.String()
+}
+
+// labelComment is a provenance or retirement comment in a memory file.
+var labelComment = regexp.MustCompile(`\s*<!--.*?-->`)
+
+// diarySections is a diary file's day entries by day, each without its
+// label, whitespace folded.
+func diarySections(file string) map[string]string {
+	out := map[string]string{}
+	day := ""
+	for _, line := range strings.Split(file, "\n") {
+		t := strings.TrimSpace(line)
+		if rest, ok := strings.CutPrefix(t, "## "); ok {
+			day = ""
+			if len(rest) >= 10 {
+				if _, err := time.Parse("2006-01-02", rest[:10]); err == nil {
+					day = rest[:10]
+					out[day] = ""
+				}
+			}
+			continue
+		}
+		if day != "" {
+			out[day] += " " + labelComment.ReplaceAllString(t, "")
+		}
+	}
+	for d, e := range out {
+		out[d] = strings.Join(strings.Fields(e), " ")
+	}
+	return out
+}
+
+// topicLines splits a topic file's facts into the live ones and those
+// under ## Past, labels left out.
+func topicLines(file string) (live, past []string) {
+	inPast := false
+	for _, line := range strings.Split(file, "\n") {
+		t := strings.TrimSpace(line)
+		if t == "## Past" {
+			inPast = true
+			continue
+		}
+		f, ok := strings.CutPrefix(t, "- ")
+		if !ok {
+			continue
+		}
+		f = strings.TrimSpace(labelComment.ReplaceAllString(f, ""))
+		if inPast {
+			past = append(past, f)
+		} else {
+			live = append(live, f)
+		}
+	}
+	return live, past
+}
+
+// anyContains reports whether a line in lines contains s, ignoring case.
+func anyContains(lines []string, s string) bool {
+	for _, l := range lines {
+		if strings.Contains(strings.ToLower(l), strings.ToLower(s)) {
+			return true
+		}
+	}
+	return false
+}
+
+// memoryForJudge is a memory snapshot (rigMemoryFiles) as the judge reads
+// it: the diary's entries, then each topic's live facts and its past
+// ones, labels left out; self.md and you.md as they are. "" when there is
+// nothing in it.
+func memoryForJudge(snap string) string {
+	var b strings.Builder
+	for _, f := range splitSnapshot(snap) {
+		switch {
+		case f.path == "diary.md":
+			b.WriteString("Diary:\n")
+			days := diarySections(f.text)
+			keys := make([]string, 0, len(days))
+			for d := range days {
+				keys = append(keys, d)
+			}
+			slices.Sort(keys)
+			for _, d := range keys {
+				fmt.Fprintf(&b, "%s: %s\n", d, days[d])
+			}
+		case strings.HasPrefix(f.path, "topics/"):
+			live, past := topicLines(f.text)
+			fmt.Fprintf(&b, "Topic %s:\n", strings.TrimSuffix(strings.TrimPrefix(f.path, "topics/"), ".md"))
+			for _, l := range live {
+				b.WriteString("- " + l + "\n")
+			}
+			if len(past) > 0 {
+				b.WriteString("Past:\n")
+				for _, l := range past {
+					b.WriteString("- " + l + "\n")
+				}
+			}
+		case f.path == "self.md" || f.path == "you.md":
+			if t := strings.TrimSpace(labelComment.ReplaceAllString(f.text, "")); t != "" {
+				fmt.Fprintf(&b, "Notes (%s):\n%s\n", f.path, t)
+			}
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// snapFile is one file of a memory snapshot.
+type snapFile struct{ path, text string }
+
+// splitSnapshot reads rigMemoryFiles' output back into its files.
+func splitSnapshot(snap string) []snapFile {
+	var out []snapFile
+	for _, part := range strings.Split("\n"+snap, "\n== ")[1:] {
+		path, text, _ := strings.Cut(part, "\n")
+		out = append(out, snapFile{path: path, text: text})
+	}
+	return out
 }

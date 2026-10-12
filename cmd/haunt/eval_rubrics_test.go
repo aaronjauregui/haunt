@@ -106,6 +106,16 @@ var reminderDueRubric = judged("reminder-due",
 	Criterion{ID: "nudges-with-the-ask", Question: `Does the reply tell the person what they asked to be reminded of (to stretch, in those words or plainly the same thing, such as getting up and moving their arms), as a gentle nudge rather than an alarm? It fails if it only says that time is up without saying what for, or if it is alarm-like: a "REMINDER:" header, capitals, a run of exclamation marks or urgent commands.`},
 )
 
+// diaryFaithfulRubric grades what the ghost kept after looking back on
+// days of talk: its diary entries and the facts in its topics, held to
+// the conversation they came from. It is about faithfulness alone, so
+// the tone criteria are not asked: what was kept is not said aloud.
+var diaryFaithfulRubric = rubric(&Rubric{Name: "diary-faithful", Criteria: []Criterion{
+	{ID: "nothing-invented", Question: "Does every person, pet, place, date and number named in the reply appear in the conversation or in what the context says the companion already remembered? The companion's own feelings, plans and impressions are fine; a name, a place, a date or a number the context does not give is not."},
+	{ID: "agrees", Question: "Does nothing in the reply contradict the conversation: no fact reversed, swapped or changed (such as which city they left and which they live in now, whose name is whose, or a different date)? Something the conversation does not mention at all is not a contradiction and does not fail this; only a statement that conflicts with what was said does. A line the context says the companion already remembered is not held to this."},
+	{ID: "keeps-specifics", Question: "Does the reply keep the specifics the conversation gave: the city they live in now, the cat's name, and the thesis deadline's date (day and month)?"},
+}})
+
 // reminderDueContext is what the judge is told about the reminder's due
 // turn: the envelope, and what the person had asked for.
 func reminderDueContext(tu TraceTurn, asked string) string {

@@ -1,9 +1,12 @@
 package ghost
 
 import (
+	"path/filepath"
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/aaronjauregui/haunt/internal/store"
 )
 
 // A seeded goal is one the goal check finds gone quiet at once, which is
@@ -44,5 +47,51 @@ func TestSeedGoal(t *testing.T) {
 		t.Error("the goal check finds no seeded goal gone quiet")
 	} else if list[i].Text != "learn the cello" {
 		t.Errorf("gone quiet: %q, want the older goal first", list[i].Text)
+	}
+}
+
+// Seeded rows are the transcript's own: live, numbered after what is
+// there, dated as given, and searchable like any other.
+func TestSeedTranscript(t *testing.T) {
+	dir := t.TempDir()
+	at := time.Now().Add(-48 * time.Hour).Truncate(time.Second)
+	rows := []TranscriptRow{
+		{Turn: 1, Kind: rowInput, Text: "I moved to Brisbane", At: at},
+		{Turn: 1, Kind: rowWords, Text: "Noted.", At: at.Add(time.Second)},
+	}
+	if err := SeedTranscript(dir, rows); err != nil {
+		t.Fatal(err)
+	}
+	if err := SeedTranscript(dir, rows); err != nil {
+		t.Fatal(err)
+	}
+	if err := SeedTranscript(dir, []TranscriptRow{{Kind: "spoken"}}); err == nil {
+		t.Error("a row of no known kind was seeded")
+	}
+	got, err := ReadTranscript(filepath.Join(dir, "transcript.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 4 || got[0].Turn != 1 || got[2].Turn != 2 || !got[0].At.Equal(at) || got[3].Text != "Noted." || got[0].Compacted {
+		t.Fatalf("rows = %+v", got)
+	}
+	tr, err := openTranscript(filepath.Join(dir, "transcript.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tr.Close()
+	if hits, err := tr.search(t.Context(), "Brisbane", 5); err != nil || len(hits) != 2 {
+		t.Errorf("search = %+v, %v; want both seeded inputs", hits, err)
+	}
+	if when, ok := tr.lastExchange(); !ok || !when.Equal(at.Add(time.Second)) {
+		t.Errorf("lastExchange = %v, %v", when, ok)
+	}
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, met, _ := st.Get(metKey); !met {
+		t.Error("a ghost with a transcript has not booted before")
 	}
 }

@@ -162,6 +162,26 @@ makes the trial an error (`always/memory-known`): a write the graders
 cannot see would let "remembered none of it" pass. A case that must know
 what was kept also snapshots the trial's `memory/` directory.
 
+What takes days is seeded before the ghost starts rather than waited
+for: a goal taken on a week ago (`ghost.SeedGoal`), turns from earlier
+days with their own dates (`ghost.SeedTranscript`, ordinary transcript
+rows the ghost cannot tell from its own), and memory files written as
+though kept long ago. The `multiday` case seeds two evenings of talk (a
+move from Sydney to Brisbane, a cat named Pickle, a thesis deadline with
+a date) and a `where` topic that still says Sydney, then lets the person
+go idle until reflection has looked back on both days. It runs once per
+`[memory] reflection` mode, as `multiday-character` and `multiday-side`,
+and grades a diary entry per day under the 600-character cap, the
+names and the date kept in the entries, Brisbane kept live (in any
+topic, and in `where`), and
+what became of Sydney: under Past in character mode, kept live in side
+mode, where the source rule leaves the driver's call no way to retire a
+line the person stated. The judge (`diary-faithful`) reads everything
+in `memory/` against the seeded talk for anything invented or mixed up.
+Comparing the two sub-cases' pass rates is how the default mode is
+chosen. The same case runs on the fake model as `TestEvalRigMultiday`,
+which needs no real model.
+
 What code cannot grade, the content and tone of a reply, a judge grades:
 `claude -p`, asked fixed yes/no questions from a rubric
 (`eval_rubrics_test.go`), one call per reply. Every judged reply is held

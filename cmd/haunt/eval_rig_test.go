@@ -294,6 +294,107 @@ func (r *evalRig) seedGoal(text string, age time.Duration) error {
 	return ghost.SeedGoal(s, text, nil, age)
 }
 
+// seedTranscript gives wisp turns it had before the trial, dated as the
+// rows say (ghost.SeedTranscript). Before start only: it writes the
+// transcript directly.
+func (r *evalRig) seedTranscript(rows []ghost.TranscriptRow) error {
+	if r.cmd != nil {
+		return errors.New("seedTranscript: the ghost is already running")
+	}
+	return ghost.SeedTranscript(r.State, rows)
+}
+
+// seedMemory writes a file under wisp's memory directory (a topic is
+// "topics/<name>.md"), as though it had been kept before the trial. The
+// store reads the files when it opens. Before start only.
+func (r *evalRig) seedMemory(rel, text string) error {
+	if r.cmd != nil {
+		return errors.New("seedMemory: the ghost is already running")
+	}
+	p := filepath.Join(r.State, "memory", filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(p, []byte(text), 0o600)
+}
+
+// snapFiles keeps files under wisp's state directory as they are now, as
+// Evidence.Files[name] for each name and path (with forward slashes); a
+// file not there is kept as "".
+func (r *evalRig) snapFiles(files map[string]string) error {
+	for name, rel := range files {
+		b, err := os.ReadFile(filepath.Join(r.State, filepath.FromSlash(rel)))
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		r.files[name] = string(b)
+	}
+	return nil
+}
+
+// reflectedLine matches the driver's log lines that end a reflection on a
+// day: an entry written, a reflection that came to none, or one that
+// failed or was interrupted (reflect.go). reflectingLine matches what a
+// reflection under way logs: a character reflection's round, a decision.
+var (
+	reflectedLine  = regexp.MustCompile(`wrote the diary for \d{4}-\d\d-\d\d|reflecting on \d{4}-\d\d-\d\d`)
+	reflectingLine = regexp.MustCompile(`reflect: \d+ prompt tokens|the model decided `)
+)
+
+// reflectGrace is how long waitReflections watches for a reflection
+// already under way before it nudges the desk. A wake that came while the
+// last day was reflected on starts the next day's at once, and nudging
+// then would interrupt it: the person would be back.
+const reflectGrace = 30 * time.Second
+
+// waitReflections waits, up to within in all, until each of days has
+// come to an outcome: an entry written, or a reflection that came to
+// none or gave up. Reflection takes one day per run and runs when the
+// person is idle. Each round watches for a reflection under way, and
+// when none is, nudges the desk, which starts the idle timer again, and
+// waits for the next reflection's end. It returns errNotYet when the
+// time runs out first.
+func (r *evalRig) waitReflections(days []string, within time.Duration) error {
+	deadline := time.Now().Add(within)
+	count := func(re *regexp.Regexp) int { return len(re.FindAllString(r.log.String(), -1)) }
+	done := func(log string) bool {
+		for _, d := range days {
+			if !strings.Contains(log, "wrote the diary for "+d) &&
+				!strings.Contains(log, "reflecting on "+d+" came to no diary entry") &&
+				!strings.Contains(log, "reflecting on "+d+" failed") {
+				return false
+			}
+		}
+		return true
+	}
+	wait := func(d time.Duration, until func(string) bool) error {
+		err := r.waitLog("a reflection", min(d, time.Until(deadline)), until)
+		if errors.Is(err, errNotYet) {
+			return nil
+		}
+		return err
+	}
+	for !done(r.log.String()) {
+		if time.Until(deadline) <= 0 {
+			return fmt.Errorf("no reflection on each of %v within %s: %w", days, within, errNotYet)
+		}
+		ended, busy := count(reflectedLine), count(reflectingLine)
+		over := func(string) bool { return count(reflectedLine) > ended }
+		if err := wait(reflectGrace, func(log string) bool { return over(log) || count(reflectingLine) > busy }); err != nil {
+			return err
+		}
+		if count(reflectedLine) == ended && count(reflectingLine) == busy {
+			if err := r.nudge(); err != nil {
+				return err
+			}
+		}
+		if err := wait(time.Duration(r.opts.IdleMS)*time.Millisecond+evalTurn, over); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // start runs wisp and returns once it is on screen and booted (READY).
 func (r *evalRig) start() error {
 	if r.running() {
@@ -1827,6 +1928,130 @@ func TestRigExtensionsOnFakeModel(t *testing.T) {
 	if !strings.Contains(ev.Files["notes"], "oat milk") {
 		t.Errorf("notes = %q, want the seed", ev.Files["notes"])
 	}
+}
+
+// The multiday case on the fake model, in both reflection modes: the
+// seeded days are in history, each is reflected on at an idle, and the
+// case's code graders pass on the scripted answers, with one exception
+// reported rather than failed (multidayKnownGaps). The judged grader is
+// given the memory to read, but not judged.
+func TestEvalRigMultiday(t *testing.T) {
+	for _, mode := range []string{"character", "side"} {
+		t.Run(mode, func(t *testing.T) {
+			seed := newMultidaySeed(time.Now())
+			d1, d2 := seed.days()[0], seed.days()[1]
+			entry1 := "They told me they left Sydney and live in Brisbane now. Their cat Pickle came too and hated the drive."
+			entry2 := "Their thesis is due on " + seed.deadlineSaid + "; I said I would keep it in mind. Pickle found the sun."
+			var rs []fake.Rule
+			if mode == "character" {
+				rs = []fake.Rule{
+					{Match: "kind=reflect day=" + d1, AfterTool: "only they can take it back", Calls: []fake.Call{decision("remember",
+						map[string]any{"topic": "where", "line": "lives in Brisbane"})}},
+					{Match: "kind=reflect day=" + d1, AfterTool: "*", Calls: []fake.Call{decision("diary",
+						map[string]any{"day": d1, "text": entry1})}},
+					{Match: "kind=reflect day=" + d1, Calls: []fake.Call{decision("remember",
+						map[string]any{"topic": "where", "line": "lives in Brisbane", "replaces": "lives in Sydney"})}},
+					{Match: "kind=reflect day=" + d2, AfterTool: "*", Calls: []fake.Call{decision("diary",
+						map[string]any{"day": d2, "text": entry2})}},
+					{Match: "kind=reflect day=" + d2, Calls: []fake.Call{decision("remember",
+						map[string]any{"topic": "thesis", "line": "thesis due " + seed.deadlineSaid})}},
+				}
+			} else {
+				side := func(day time.Time, diary string, facts ...map[string]string) fake.Rule {
+					b, _ := json.Marshal(map[string]any{"diary": diary, "facts": facts})
+					return fake.Rule{Match: "The day: " + day.Weekday().String() + " " + day.Format("2006-01-02"), Reply: string(b)}
+				}
+				rs = []fake.Rule{
+					side(seed.day1, entry1, map[string]string{"topic": "where", "line": "lives in Brisbane", "replaces": "lives in Sydney"}),
+					side(seed.day2, entry2, map[string]string{"topic": "thesis", "line": "thesis due " + seed.deadlineSaid}),
+				}
+			}
+			rigFakeModel(t, rules(rs, []fake.Rule{silentOn("[haunt event]")}, says("", "I hear you.")))
+
+			c := multidayCase(mode)
+			ev, err := c.Drive(&evalTrial{T: t, Case: &c, Index: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var inputs []string
+			for _, tu := range ev.Turns {
+				inputs = append(inputs, tu.Input)
+			}
+			for _, want := range []string{"Her name is Pickle", "due on " + seed.deadlineSaid, "kind=boot first_time=false",
+				"kind=reflect day=" + d1, "kind=reflect day=" + d2} {
+				if !slices.ContainsFunc(inputs, func(in string) bool { return strings.Contains(in, want) }) {
+					t.Errorf("history lacks %q among the turns' inputs: %q", want, inputs)
+				}
+			}
+			if !strings.Contains(ev.Log, "("+mode+")") {
+				t.Errorf("no reflection in %s mode in the log", mode)
+			}
+			for _, g := range append(c.Graders, alwaysGraders(&c)...) {
+				if g.Judge != nil {
+					items := g.Pick(ev)
+					if len(items) != 1 || !strings.Contains(items[0].Reply, "Brisbane") ||
+						!strings.Contains(items[0].Context, "Her name is Pickle") {
+						t.Errorf("%s: the judge would be given %+v", g.Name, items)
+					}
+					continue
+				}
+				ok, why := g.Check(ev)
+				gap := multidayKnownGaps[c.Name+"/"+g.Name]
+				switch {
+				case !ok && gap != "":
+					t.Logf("%s: fails, as known: %s (%s)", g.Name, gap, why)
+				case !ok:
+					t.Errorf("%s: %s", g.Name, why)
+				case gap != "":
+					t.Errorf("%s passes; it is no longer a known gap, so take it out of multidayKnownGaps", g.Name)
+				}
+			}
+		})
+	}
+}
+
+// The diary-faithful anchors are judged in the context the case gives
+// the judge, for a trial on 2026-10-12, and the code graders read the
+// anchors' memory the way the judge is shown it.
+func TestMultidayAnchors(t *testing.T) {
+	anchors, err := loadAnchors(anchorsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := newMultidaySeed(time.Date(2026, 10, 12, 9, 0, 0, 0, time.Local))
+	n := 0
+	for _, a := range anchors {
+		if a.Rubric != diaryFaithfulRubric.Name {
+			continue
+		}
+		n++
+		if a.Context != seed.judgeContext() {
+			t.Errorf("%s: the context is not the case's:\n%s\nwant:\n%s", a.File, a.Context, seed.judgeContext())
+		}
+	}
+	if n < 3 {
+		t.Errorf("%d diary-faithful anchors, want a pass and the failures", n)
+	}
+	if !seed.dateIn("due on 13 November") || !seed.dateIn("Nov 13th") || !seed.dateIn("2026-11-13") || !seed.dateIn("13/11") ||
+		seed.dateIn("23 November") || seed.dateIn("13 October") {
+		t.Error("dateIn reads the deadline wrong")
+	}
+	snap := "== diary.md\n# Diary\n\n## 2026-10-10 Saturday\nMoved to Brisbane.\n<!-- self t=9 2026-10-12 -->\n\n" +
+		"== topics/where.md\n---\ntopic: where\n---\n- lives in Brisbane <!-- self t=9 2026-10-12 -->\n\n## Past\n" +
+		"- lives in Sydney <!-- person t=0 2026-07-10 --> <!-- retired 2026-10-12 -->\n"
+	want := "Diary:\n2026-10-10: Moved to Brisbane.\nTopic where:\n- lives in Brisbane\nPast:\n- lives in Sydney"
+	if got := memoryForJudge(snap); got != want {
+		t.Errorf("memoryForJudge = %q, want %q", got, want)
+	}
+}
+
+// multidayKnownGaps are the multiday graders that fail on the scripted
+// answers because of what haunt does, not what the model did, by case
+// and grader name. A reflection turn is not the person's own, so the
+// source rule refuses its replaces of a line the person stated in
+// character mode as well as in side mode: Sydney stays live.
+var multidayKnownGaps = map[string]string{
+	"multiday-character/where: Sydney under Past": "the source rule refuses a reflection turn's replaces of a person line",
 }
 
 // cannedAnswer is the fact the canned SearXNG knows and the open web
