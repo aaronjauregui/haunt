@@ -7,8 +7,9 @@ have not written a character for one. [Persona and
 skills](persona-and-skills.md) is the reference for every field; this
 page is how to use them, and what a local model does with each.
 
-Every behaviour claimed here was run on Gemma 4 31B (QAT, Q4) on
-`llama-server` with a ghost from this repository, and is quoted from
+Every behaviour claimed here was run on Gemma 4 31B (QAT, Q4), and where
+marked on Qwen3 30B-A3B Instruct 2507 (Q4), on `llama-server` with a
+ghost from this repository, and is quoted from
 `haunt history`. The ghost is `examples/ember`, a warm and talkative
 hearth spirit, the opposite end of the levers from wisp, the terse and
 dry demo ghost. Run it as you read:
@@ -78,9 +79,11 @@ focused window's title; the tools it decides with (`remember`, `recall`,
 [The manifest](manifest.md) has every field and every capability.
 `haunt run <dir>` refuses a file it cannot load and says why.
 
-Statements about Qwen3 30B-A3B, the second chat template this page
-covers, are marked **Not yet run here**. They come from the model card
-and the template, not from a run, and are there to be checked.
+The second chat template this page covers is Qwen3 30B-A3B Instruct
+2507 (`Qwen3-30B-A3B-Instruct-2507-UD-Q4_K_XL.gguf`), on the same server
+flags with its card's sampling, `--temp 0.7 --top-p 0.8 --top-k 20
+--min-p 0`, and the same haunt config. What it did differently is
+labelled **Qwen** where it comes up.
 
 ## 1. What the model actually sees
 
@@ -350,6 +353,19 @@ earlier turn) is the likely trigger. Until that is understood, Ember
 ships without a prefill and holds its voice from `system` and the
 examples.
 
+**Qwen:** the question does not arise, because Qwen3 Instruct 2507
+mostly does not reach the speak call (section 8): it writes its reply as
+the text of the decide call, and haunt takes that text as the words, with
+no prefill. Wisp with `prefill = "Hm. "` on Qwen never said "Hm." in
+four replies, and none copied an earlier one:
+
+    you:   my grandmother died this morning
+    ghost: I didn't know her, but I know you do. Take the time you need—this
+           screen won't mind the silence.
+
+So whether the copying is Gemma's alone is not settled: on Qwen the
+prefill was never sent.
+
 The failure modes of a prefill on any model, beyond that one:
 
 - **A prefill that is a sentence** speaks for the model before it has
@@ -386,18 +402,16 @@ That is Ember's. Its server starts with `--temp 1.0 --top-p 0.95
 
 **`temperature`** spreads the choice of each word. Lower is steadier and
 plainer, higher is livelier and wanders. Ember runs at 0.8 and held
-its voice in every run here. Start at 0.8 on Gemma 4. *Qwen3 30B-A3B, not yet run here:* its model card suggests
-0.7 for the instruct model.
+its voice in every run here. Start at 0.8 on Gemma 4.
 
 **`top_p`** keeps the most likely words up to that share of the
 probability. With `min_p` set it does little; leave it at the server's
-value. *Qwen3, not yet run here:* the card suggests 0.8.
+value.
 
 **`min_p`** drops any word less likely than that fraction of the
 likeliest. It is the cleanest way to stop a high temperature from
 producing nonsense, since it adapts to how sure the model is. 0.05 on
-both Gemma 4 and, *not yet run here*, Qwen3 (whose card suggests 0, with
-`top_k` 20, which haunt cannot set: section 11).
+Gemma 4.
 
 **`repeat_penalty`** lowers the odds of any token already in the recent
 window. Words such as "the" and "you" are repeated tokens too, so a high
@@ -418,15 +432,24 @@ the next reply was:
            been treating you so far?}**
            Wait, no markdown in responses... let me just provide it simply: 💬 ...
 
+**Qwen** at 1.5 did not hold. Replies ran to several paragraphs (92
+words on the first turn, past the 60-word cap haunt's own graders hold
+a reply to) and made things up about the person:
+
+    you:   tell me about your evening
+    ghost: I watched dusk settle over your screen like old linen—slow and soft—and
+           lit my little flame when you turned off all but one window for reading.
+           The book's title slipped away before I could catch it, though; ...
+
 **Don't set `repeat_penalty` above about 1.1 on a ghost; 2.0 is
-unusable on Gemma 4.** Use DRY instead.
+unusable on Gemma 4, and 1.5 already too much on Qwen.** Use DRY
+instead.
 
 **`dry_multiplier`** penalises repeating a run of tokens that already
 appeared, growing with the run's length, so it stops a phrase from
 coming back without touching single common words. A talkative character
 repeats itself sooner than a terse one, which is why Ember sets 0.8.
-For a talkative character start at 0.8 on both models (*Qwen3 not yet
-run here*); a terse one has little to repeat and can leave it off, as
+For a talkative character start at 0.8 on both models; a terse one has little to repeat and can leave it off, as
 wisp does.
 
 **`xtc_probability`** sometimes removes the likeliest choices, forcing
@@ -440,6 +463,25 @@ and its last reply was its example verbatim, as without XTC (section
 3). It bought nothing visible. **Don't reach for XTC on a terse
 character**: a one-sentence reply has few words to vary, and the one
 the model would choose is often the right one.
+
+**Qwen, starting settings.** Ember ran five turns with its own
+`[persona.sampling]` (temperature 0.8, min_p 0.05, DRY 0.8, over the
+server's card defaults) and three with the card's values in their
+place (temperature 0.7, top_p 0.8, min_p 0). The replies could not be
+told apart by setting: both ran 10 to 41 words, both leaned on dashes,
+and both opened the very first boot with "You're back.", as if the two
+had met before:
+
+    event: kind=boot first_time=true
+    ghost: You're back. I was just thinking of the last time we sat together—was
+           it the quiet after the rain?          (card settings)
+    ghost: You're back. I was just wondering if you'd come by. How was your
+           morning?                              (Ember's settings)
+
+That is the model, not the sampler. Start a ghost on Qwen from the
+card's values on the server (`--temp 0.7 --top-p 0.8 --top-k 20
+--min-p 0`) and Ember's DRY 0.8 on top for a talkative character, and
+fix the invented past in the persona, not in sampling.
 
 The person's `[model.sampling]` takes the same keys, as does a
 per-ghost `[model.ghost.<name>.sampling]` ([The model](../user/model.md));
@@ -470,12 +512,15 @@ token, and the whole prompt is read again each time the kind of turn
 changes. Event turns always decide without thinking, the person's turns
 with it, so a mixed day misses often.
 
-*Qwen3 30B-A3B, not yet run here:* the Instruct-2507 build has no
-thinking mode at all, and ignores `enable_thinking`. The original hybrid
-build puts its switch at the end, not the top: with `enable_thinking`
-false the template appends an empty `<think>\n\n</think>\n\n` after the
-assistant header, so the decide and speak prompts would share
-everything up to the generation prompt.
+**Qwen:** Instruct 2507 has no thinking mode, and its template reads
+neither switch. With `thinking = "off"` haunt still sends
+`reasoning_effort: "none"` and `enable_thinking: false`; with
+`"medium"` it sends `reasoning_effort: "medium"` and no kwargs. The
+server accepted both without complaint, the decide call wrote 20 to 55
+tokens either way, and the cache was the same (3296 of 3460 cached on
+the person's first turn with `"medium"`). The key changes nothing on
+this build; leave it `"off"` so a switch to a thinking model does not
+surprise you.
 
 ## 7. Context and cache
 
@@ -557,23 +602,70 @@ continues.
   (`<|tool_call>call:ask{...}<tool_call|>`); haunt reads that back as a
   call ([The model brain](../dev/brain.md#deciding-then-speaking)).
 
-**Qwen3 30B-A3B instruct.** **Not yet run here**; from the template and
-the model card:
+**Qwen3 30B-A3B Instruct 2507** (run here; the template served by
+`/props`), rendered with `/apply-template` from a haunt-shaped speak
+call:
 
-- ChatML: `<|im_start|>system\n...<|im_end|>`. Tools are listed as JSON
-  inside `<tools></tools>` in the first system message, after its
-  content, so the decide and speak prompts would differ after part 1 as
-  on Gemma, and `slots` should matter the same way.
-- Tool calls are JSON in `<tool_call></tool_call>`, results come back
-  as `<tool_response>` in a user turn.
-- Thinking: see section 6. Neither build puts a marker at the top of the
-  prompt, so the thinking setting should not cost the cache.
-- haunt sends system messages after the transcript (part 6). Render a
-  haunt-shaped prompt with `/apply-template` (section 1) before running a
-  ghost on any template, to check it accepts a system message there.
+    <|im_start|>system
+    PART1<|im_end|>
+    <|im_start|>system
+    PART2<|im_end|>
+    <|im_start|>user
+    boot<|im_end|>
+    <|im_start|>assistant
+    <tool_call>
+    {"name": "speak", "arguments": {"pose": "happy"}}
+    </tool_call><|im_end|>
+    <|im_start|>user
+    <tool_response>
+    Now say it.
+    </tool_response><|im_end|>
+    <|im_start|>assistant
+    Hm. Hello.<|im_end|>
+    <|im_start|>user
+    hello<|im_end|>
+    <|im_start|>system
+    PART6<|im_end|>
+    ...
+    <|im_start|>assistant
+    <think>
 
-The difference seen between the two, on the same five turns: *not yet
-run here.*
+    </think>
+
+    Hm.
+
+- Tools go into the first system turn after part 1, under `# Tools`, as
+  JSON inside `<tools></tools>`, so the two calls differ right after
+  part 1, as on Gemma, and `slots` matters the same way.
+- A system message after the transcript (part 6) renders as a system
+  turn where it falls; the template accepts it.
+- A tool result renders as a user turn holding `<tool_response>`.
+- There is no thinking marker at the top and none in the generation
+  prompt. A trailing assistant message, the prefill, gets an empty
+  `<think>\n\n</think>\n\n` in front of it, and no earlier reply has one.
+
+Render a haunt-shaped prompt like this (section 1) before running a
+ghost on any other template.
+
+**The difference seen** on Ember's five turns: Qwen rarely calls
+`speak`. On every turn where it used a tool first (`mood`, `remember`,
+`face`, `recall`), it wrote the reply as the text of its second decide
+round and ended there, so haunt took the text as the words: no speak
+call, no prefill, and the face left as it was or guessed from the words
+(once `asleep`, for "I'm here, not quite gone"). Compare the two logs
+for the turn that remembered the tea:
+
+    Gemma 4:  decide: 3253 prompt tokens (2859 cached), 37 out
+              speak: 1530 prompt tokens (1062 cached), 26 out
+              turn over: person took=7.8s face=happy by=speak
+    Qwen:     decide: 3611 prompt tokens (3464 cached), 28 out
+              decide: 3660 prompt tokens (3638 cached), 36 out
+              turn over: person took=700ms face=-
+
+Qwen's turns took 300 to 900 ms against Gemma's 5 to 10 s, with the
+decide prompt cached as well (3270 to 3820 of 3420 to 4030), since only
+3 billion of its parameters are active per token. It also called `mood`
+on most turns; Gemma never called it in any run here.
 
 ## 9. The ghost's own notes and the diary
 
@@ -663,7 +755,8 @@ server-side route as an experiment, not a fix.
 
 - **`logit_bias`**: ban or discourage tokens, such as a model's
   favourite opener ("Oh," is the tokens `Oh` and `,` on Gemma 4, ids
-  12932 and 236764, from `/tokenize`). Haunt does not expose it.
+  12932 and 236764, and 11908 and 11 on Qwen, from `/tokenize`; ids
+  differ per model). Haunt does not expose it.
   Server-side: `--logit-bias 12932-5`, which also biases the decide
   call.
 - **A grammar on the speak call**: constrain the words to, say, no
@@ -691,7 +784,14 @@ server-side route as an experiment, not a fix.
   workarounds for an older Gemma template.
 - **`top_k` and `presence_penalty`**: two samplers the Qwen3 card asks
   for (20, and 0 to 2) that `[persona.sampling]` does not take.
-  Server-side: `--top-k 20`, `--presence-penalty`.
+  Server-side: `--top-k 20` and `--presence-penalty N`, both in this
+  build's `--help`; the Qwen runs here had `top_k` 20 from the server
+  and `presence_penalty` 0.
+- **Requiring a tool call**: `tool_choice: "required"` on the decide
+  call would make a model that answers in text, as Qwen does after a
+  tool, call `speak` instead, keeping the prefill and the chosen face.
+  llama-server reads `"required"`; haunt does not send `tool_choice`,
+  and there is no server-side default.
 
 ## 12. Troubleshooting
 
