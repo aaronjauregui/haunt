@@ -140,7 +140,7 @@ var verbClasses = map[string]verbClass{
 	"list_files": classReadAsked, "read_file": classReadAsked, "search_files": classReadAsked,
 	"recall": classLookup, "skill_view": classLookup, "intentions": classLookup, "pictures": classLookup,
 	"remember": classWrite, "rewrite_notes": classWrite, "skill_write": classWrite, "forget": classWrite,
-	"intend": classKeep, "resolve": classKeep, "set_aside": classKeep, "style": classKeep,
+	diaryName: classWrite, "intend": classKeep, "resolve": classKeep, "set_aside": classKeep, "style": classKeep,
 	"mood": classKeep, "leave_note": classKeep,
 	"tell":    classReach,
 	speakName: classShow, silentName: classShow, "face": classShow, "clip": classShow,

@@ -3,9 +3,12 @@ package ghost
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/memory"
@@ -16,7 +19,8 @@ import (
 // driver writes that, not the model: the source is what the turn had
 // read when the line was written (provenance). Recall searches the topics
 // and the conversation (transcript.go), so what was said a month ago is
-// as reachable as what was saved.
+// as reachable as what was saved. The diary (diary.go) is written here
+// too, by the reflection turn alone (reflect.go).
 
 func init() {
 	register(verb{
@@ -46,6 +50,81 @@ func init() {
 		params: []string{"about:string", "text:string"},
 		run:    rewriteNotes,
 	})
+	register(diaryDecision{verb{
+		id: diaryName,
+		desc: "Write the entry in your diary for the day you are looking back on: day as 2026-10-11, " +
+			"text in the first person, under 600 characters. Ends the turn.",
+		params: []string{"day:string", "text:string"},
+		ends:   true,
+		run:    writeDiary,
+	}})
+}
+
+// diaryDecision is offered on a reflection turn only: a day's entry is
+// written once, looking back, not in the middle of the day it is about.
+type diaryDecision struct{ verb }
+
+func (diaryDecision) offeredTo(g *Ghost) bool {
+	t := g.current()
+	return t != nil && t.kind() == reflectKind
+}
+
+// writeDiary writes the entry for the day the reflection turn is about,
+// whatever day the call names: text under diaryEntryLimit characters,
+// through the same write gate and label as the notes. A day that already
+// has an entry, the ghost's or one the person wrote, keeps it.
+func writeDiary(_ context.Context, g *Ghost, t *turn, args json.RawMessage) (string, error) {
+	var a struct {
+		Day  string `json:"day"`
+		Text string `json:"text"`
+	}
+	if err := decode(args, &a); err != nil {
+		return "", err
+	}
+	if _, err := memoryOf(g); err != nil || g.mind.memDir == "" {
+		return "", refuse("you have no diary to write in")
+	}
+	day := ""
+	if t != nil {
+		day = envelopeField(t.input, "day")
+	}
+	if _, err := time.ParseInLocation(dayForm, day, time.Local); err != nil {
+		return "", refuse("the diary is written when you look back on a day, not now")
+	}
+	text := strings.TrimSpace(labelLine.ReplaceAllString(a.Text, ""))
+	if text == "" {
+		return "", fmt.Errorf("write what?")
+	}
+	if n := utf8.RuneCountInString(text); n > diaryEntryLimit {
+		return "", fmt.Errorf("the entry is %d characters; keep it under %d", n, diaryEntryLimit)
+	}
+	if err := g.mayRemember(t, text); err != nil {
+		return "", err
+	}
+	switch err := writeDiaryEntry(g.mind.memDir, day, g.labelled(text, t)); {
+	case errors.Is(err, errHasEntry):
+		return "", refuse("%s %s already has an entry in your diary; it stays as it is", weekday(day), day)
+	case err != nil:
+		return "", err
+	}
+	said := fmt.Sprintf("Written in your diary for %s %s.", weekday(day), day)
+	if asked := strings.TrimSpace(a.Day); asked != "" && asked != day {
+		said += fmt.Sprintf(" (Under %s, the day you are looking back on, not %s.)", day, asked)
+	}
+	return said, nil
+}
+
+// envelopeField is one field's value in an envelope, unquoted, or "".
+func envelopeField(input, key string) string {
+	for _, f := range strings.Fields(input) {
+		if v, ok := strings.CutPrefix(f, key+"="); ok {
+			if u, err := strconv.Unquote(v); err == nil {
+				return u
+			}
+			return v
+		}
+	}
+	return ""
 }
 
 // recallHits is how many lines recall returns from each source.
@@ -298,6 +377,8 @@ func recall(ctx context.Context, g *Ghost, t *turn, args json.RawMessage) (strin
 				who = "they said"
 			case rowSummary:
 				who = "in summary"
+			case rowDiary:
+				who = "in your diary"
 			}
 			fmt.Fprintf(&b, "- %s, %s: %s\n", h.At.Format("2 Jan 2006"), who, clip(h.Text, 300))
 		}
@@ -335,7 +416,8 @@ func rewriteNotes(_ context.Context, g *Ghost, t *turn, args json.RawMessage) (s
 }
 
 // MemoryWrite reports whether a decision saved something the ghost
-// keeps (a line, its notes, a skill of its own), and the words it saved;
+// keeps (a line, its notes, a diary entry, a skill of its own), and the
+// words it saved;
 // a removal saves none. For `haunt
 // history`'s echo check, which compares what was saved with what the
 // ghost read.
@@ -348,7 +430,7 @@ func MemoryWrite(name string, args json.RawMessage) (saved string, ok bool) {
 	case "remember":
 		json.Unmarshal(args, &a)
 		return strings.TrimSpace(a.Line), true
-	case "rewrite_notes":
+	case "rewrite_notes", diaryName:
 		json.Unmarshal(args, &a)
 		return strings.TrimSpace(a.Text), true
 	case "skill_write":

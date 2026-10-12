@@ -89,3 +89,33 @@ func TestCompactionHistory(t *testing.T) {
 		t.Errorf("-json:\n%s", out.String())
 	}
 }
+
+// A day folded behind its diary entry reads back as diary <day>: where
+// the day was, after its turns; -json leaves it out, as a summary.
+func TestHistoryDiary(t *testing.T) {
+	day := time.Date(2026, 10, 11, 21, 0, 0, 0, time.Local)
+	next := day.Add(14 * time.Hour)
+	rows := []ghost.TranscriptRow{
+		{Turn: 1, Kind: "input", Text: "the oven", At: day, Compacted: true},
+		{Turn: 1, Kind: "words", Text: "Hot.", At: day, Compacted: true},
+		{Turn: 1, Kind: "diary", Text: "We talked about the oven.", At: day},
+		{Turn: 2, Kind: "input", Text: "morning", At: next},
+		{Turn: 2, Kind: "words", Text: "Morning.", At: next},
+	}
+	msgs := messagesOf(rows)
+	var out bytes.Buffer
+	if err := showHistory(&out, msgs, nil, 50, false, false); err != nil {
+		t.Fatal(err)
+	}
+	want := "you:   the oven\nghost: Hot.\ndiary 2026-10-11: We talked about the oven.\nyou:   morning\nghost: Morning.\n"
+	if out.String() != want {
+		t.Errorf("history:\n%s\nwant\n%s", out.String(), want)
+	}
+	out.Reset()
+	if err := showHistory(&out, msgs, nil, 50, false, true); err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(out.String(), "\n"); n != 2 || strings.Contains(out.String(), "oven.") {
+		t.Errorf("-json:\n%s", out.String())
+	}
+}

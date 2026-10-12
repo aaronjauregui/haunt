@@ -16,10 +16,12 @@ import (
 //     exchanges. Changes only with the manifest or the shell, and with a
 //     conversation opening or ending (rule 8 is written for the mode).
 //  2. system: self.md and you.md, the ghost's notes on itself and on the
-//     person. Changes when either is rewritten.
+//     person, then the diary of the last days. Changes when either is
+//     rewritten, when a diary entry is written, and when the day turns.
 //  3. system: the skills index, then the memory index. Changes when a
 //     skill or a topic does.
-//  4. the transcript: the summary of older turns, then the turns since.
+//  4. the transcript: the days folded behind their diary entries, the
+//     summary of older turns, then the turns since.
 //  5. user: this turn's input, the person's words verbatim or an envelope.
 //  6. system: this turn's context (the time, the focused window when it
 //     may be seen, the goals held, errands due and not dealt with, the
@@ -57,7 +59,8 @@ func (b *modelBrain) prompt(t *turn, now time.Time) ([]model.Message, error) {
 }
 
 // notes is part 2: what the ghost has written about itself and about the
-// person.
+// person, then its diary of the last days (diary.go), which changes when
+// an entry is written and when the day turns.
 func (b *modelBrain) notes() string {
 	self, you := "", ""
 	if b.mem != nil {
@@ -72,7 +75,11 @@ func (b *modelBrain) notes() string {
 		}
 		return strings.TrimSpace(s)
 	}
-	return "Your notes on yourself:\n" + none(self) + "\n\nYour notes on the person you live with:\n" + none(you)
+	out := "Your notes on yourself:\n" + none(self) + "\n\nYour notes on the person you live with:\n" + none(you)
+	if d := b.diary(time.Now()); d != "" {
+		out += "\n\n" + d
+	}
+	return out
 }
 
 // indexes is part 3: the skills a ghost can load, then the topics it

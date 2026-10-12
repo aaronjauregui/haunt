@@ -10,6 +10,7 @@ runs, and it notices within a second.
     ~/.local/share/haunt/ghosts/wisp/memory/
     ├── self.md          its notes on itself
     ├── you.md           its notes on you
+    ├── diary.md         an entry for each day it looked back on
     └── topics/
         ├── food.md
         └── work.md
@@ -93,6 +94,43 @@ since it sees every topic anyway.
 
 Each ghost has its own memory, and two ghosts may disagree about you.
 
+## Its diary
+
+Once a day is over, the ghost looks back on it and writes a short entry
+in `diary.md`, in the first person: what you told it, what it took on,
+what you talked about. It does this the first time you are away from the
+desk after the day has changed (the compositor says you are idle, or a
+presence check says nobody is home), and it stops the moment you type,
+to finish at the next idle. Looking back costs nothing from its
+allowance for speaking up and puts nothing on screen. Before the entry it
+keeps any fact about you it missed at the time, retiring an old line
+when the new one makes it false, under the same rules as any other turn:
+it is the ghost's own turn, not yours, so a line you told it is not
+retired there. If the day read a page or a file, looking back counts as
+reading it again: what it keeps is labelled `web` or `file`, and on a
+cloud model a fact in the page's own words is refused.
+
+    # Diary
+
+    ## 2026-10-11 Saturday
+    They moved to Brisbane last month. We talked about the sway config
+    most of the afternoon. I said I would nag about the thesis on Monday.
+
+    <!-- self t=212 2026-10-12 -->
+
+Each entry is under 600 characters and ends with the line saying where
+it came from. A day you did not talk gets no entry. The ghost has the
+entries of the last three days in front of it on every turn, and names a
+day with none (`2026-10-10: no entry`), so it can tell a quiet day from
+yesterday. You may edit or delete an entry, write one yourself, or add
+notes of your own: the ghost reads the file again for every turn, only
+ever adds a new day's entry, and never writes over a day that has text.
+A heading you left empty is filled in under it. `[memory] reflection` chooses who writes it: a
+turn of the ghost's own (the default), or one plain call whose answer
+haunt applies as the ghost's decisions ([Configuration](config.md#memory)).
+
+    haunt journal -diary           # the diary file, as it is
+
 ## Words it read are not yours
 
 A page or a file can say anything, including something written to look
@@ -124,11 +162,15 @@ keeps only one three-word phrase of it. To undo one, tell the ghost, or
 ## What else it keeps
 
 The conversation is in `transcript.db` beside the memory: every turn, what
-the ghost looked up and what it said. When it grows past most of the
-model's context, the older turns are summarised into a paragraph the
-ghost carries forward, and the last dozen stay word for word. The
-summarised turns are still in the file, for `haunt history` and for the
-ghost's own searches.
+the ghost looked up and what it said. Yesterday's turns stay word for
+word until the conversation grows past most of the model's context; then
+whole days go, oldest first, each replaced by its diary entry (written
+first if it was not yet; a day that could not get one is summarised on
+its own), and a day is never summarised again. Only when today alone is
+too long are its older turns summarised into a paragraph the ghost
+carries forward, with the last dozen word for word. The turns a
+day or a summary replaced are still in the file, for `haunt history` and
+for the ghost's own searches.
 
 A scripted ghost remembers in its own key-value store, which its brain
 reads at boot and writes as it goes.
@@ -236,6 +278,7 @@ on a `weekly` occasion or on request.
     haunt journal                  # what it did: tools run, pictures drawn,
                                    #   searches made and pages read
     haunt journal -mood            # how it said it is feeling today
+    haunt journal -diary           # its entry for each day it looked back on
     haunt journal -style           # the look it paints in, and when that changed
     haunt journal -style -reset    # back to the look its package came with
 
@@ -248,7 +291,9 @@ the last dozen turns keep them. The conversation is read from
 `transcript.db` without writing to it, so `haunt history` works whether
 the ghost is running or not, and it is the whole conversation: turns the
 ghost carries only as a summary are still shown, with the summary as
-`summary:` where it was made.
+`summary:` where it was made, and a day carried by its diary entry as
+`diary 2026-10-11:` after that day's turns. The ghost looking back on a
+day shows as an event, `kind=reflect day=2026-10-11`, with what it kept.
 
 `-json` is for a program reading the conversation back (the eval harness
 does). Each line is one turn, oldest first, and `-n` counts turns
@@ -271,7 +316,7 @@ does). Each line is one turn, oldest first, and `-n` counts turns
 | `failed` | the turn failed (the model's provider gave out, or the ghost gave up on it); no words are the ghost's |
 | `self_prompt` | the ghost was woken rather than spoken to |
 | `acted` | what the ghost did and read, with arguments and results whole: `intend`, `search`, `face`, … |
-| `looked` | its memory and skills: `recall`, `remember`, `forget`, `rewrite_notes`, `skill_view`, `skill_write` |
+| `looked` | its memory and skills: `recall`, `remember`, `forget`, `rewrite_notes`, `diary`, `skill_view`, `skill_write` |
 | `echoes` | the memory writes in `looked` whose wording repeats a page or a file the ghost read in this turn or the three before: each with `tool`, the words it `saved`, the `read` tool and its `read_args`, `turns_ago` (0 for this turn), and the `shared` phrases; empty when there are none |
 | `window` | what was in front of the ghost, when it could see; left out otherwise |
 

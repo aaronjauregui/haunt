@@ -49,6 +49,7 @@ type File struct {
 	Awareness  AwarenessConfig
 	Curiosity  CuriosityConfig
 	Files      FilesConfig
+	Memory     MemoryConfig
 	Appearance AppearanceConfig
 	// Model is the model persona ghosts think with; ModelFor is one
 	// ghost's.
@@ -65,6 +66,7 @@ type root struct {
 	Awareness    AwarenessConfig    `toml:"awareness"`
 	Curiosity    CuriosityConfig    `toml:"curiosity"`
 	Files        FilesConfig        `toml:"files"`
+	Memory       MemoryConfig       `toml:"memory"`
 	Appearance   AppearanceConfig   `toml:"appearance"`
 	Model        ModelConfig        `toml:"model"`
 	Conversation ConversationConfig `toml:"conversation"`
@@ -113,6 +115,7 @@ func Load() (*File, error) {
 		Awareness:    r.Awareness,
 		Curiosity:    r.Curiosity,
 		Files:        r.Files,
+		Memory:       r.Memory,
 		Appearance:   r.Appearance,
 		Model:        r.Model,
 		Conversation: r.Conversation,
@@ -121,6 +124,9 @@ func Load() (*File, error) {
 		return nil, err
 	}
 	if err := f.Files.derive(path); err != nil {
+		return nil, err
+	}
+	if err := f.Memory.validate(path); err != nil {
 		return nil, err
 	}
 	if err := f.Appearance.validate(path); err != nil {
@@ -152,6 +158,41 @@ type ConversationConfig struct {
 // MayEnd is GhostMayEnd with its default: yes.
 func (c ConversationConfig) MayEnd() bool {
 	return c.GhostMayEnd == nil || *c.GhostMayEnd
+}
+
+// MemoryConfig is the [memory] section: how a persona ghost carries a day
+// forward.
+type MemoryConfig struct {
+	// Reflection is who writes the day's diary entry and keeps the facts
+	// the day left unkept: "character" (the default), a turn of the ghost's
+	// own with its memory decisions, or "side", one call with no tools
+	// whose answer the driver applies through the same gates. A side call
+	// counts as the ghost's own judgment, so it can never retire a line the
+	// person stated.
+	Reflection string `toml:"reflection"`
+}
+
+// Reflection modes.
+const (
+	ReflectCharacter = "character"
+	ReflectSide      = "side"
+)
+
+// ReflectionMode is Reflection with its default: character.
+func (c MemoryConfig) ReflectionMode() string {
+	if c.Reflection == ReflectSide {
+		return ReflectSide
+	}
+	return ReflectCharacter
+}
+
+func (c MemoryConfig) validate(path string) error {
+	switch c.Reflection {
+	case "", ReflectCharacter, ReflectSide:
+		return nil
+	}
+	return fmt.Errorf("parsing %s: [memory] reflection %q: use %q or %q, or leave it out for %q",
+		path, c.Reflection, ReflectCharacter, ReflectSide, ReflectCharacter)
 }
 
 // AnimationConfig is the [animation] portion of the user config.

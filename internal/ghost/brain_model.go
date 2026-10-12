@@ -74,6 +74,21 @@ type modelBrain struct {
 	turns chan *turn
 	busy  atomic.Bool
 	done  chan struct{}
+	// wake asks the worker to look for a day to reflect on with no turn
+	// to run first: the person has just gone idle.
+	wake chan struct{}
+
+	// reflectMu covers reflectCancel, which cancels the reflection in
+	// flight (reflect.go) when the person's words queue (interrupt).
+	reflectMu     sync.Mutex
+	reflectCancel context.CancelFunc
+	// tried is the days reflection has been run for in this process and
+	// came to no entry, so an idle desk does not ask about the same day
+	// over and over. The worker's alone.
+	tried map[string]bool
+	// failed counts each day's reflections that a model or transport
+	// error cut short. The worker's alone.
+	failed map[string]int
 
 	// deferred is what arrived during a turn and waits for the ghost to be
 	// free, oldest first. deferMu also covers the moment a turn ends, so an
@@ -180,6 +195,9 @@ func newModelBrain(g *Ghost, p brainParts) (*modelBrain, error) {
 		cfg:    p.cfg,
 		turns:  make(chan *turn, turnQueue),
 		done:   make(chan struct{}),
+		wake:   make(chan struct{}, 1),
+		tried:  map[string]bool{},
+		failed: map[string]int{},
 	}
 	if sl := p.cfg.Slots; sl != nil {
 		decide, speak := sl[0], sl[1]
@@ -232,25 +250,43 @@ func isDir(path string) bool {
 	return err == nil && st.IsDir()
 }
 
+// work runs the turns, one at a time. After each it compacts the
+// transcript, then reflects on a finished day if one is due and the person
+// is away (reflect.go), then sends what waited. A wake with no turn (the
+// person going idle, or reflectTick passing) does the reflecting alone, so
+// a person idle since before midnight still has yesterday looked back on.
 func (b *modelBrain) work() {
 	defer close(b.done)
-	for t := range b.turns {
-		b.busy.Store(true)
-		var out turnOutcome
-		b.g.guard(hlog.Brain, "a turn", func() { out = b.run(t) })
-		// The one line that says a turn has ended, spoken, silent or
-		// failed, and what it was about: what the evals wait on before
-		// the next step, and what they measure the ghost's pace and face
-		// by.
-		over := "turn over: event"
-		if t.person {
-			over = "turn over: person"
+	tick := time.NewTicker(reflectTick)
+	defer tick.Stop()
+	for {
+		select {
+		case t, ok := <-b.turns:
+			if !ok {
+				return
+			}
+			b.busy.Store(true)
+			var out turnOutcome
+			b.g.guard(hlog.Brain, "a turn", func() { out = b.run(t) })
+			// The one line that says a turn has ended, spoken, silent or
+			// failed, and what it was about: what the evals wait on before
+			// the next step, and what they measure the ghost's pace and face
+			// by.
+			over := "turn over: event"
+			if t.person {
+				over = "turn over: person"
+			}
+			if kind := t.kind(); kind != "" {
+				over += " kind=" + kind
+			}
+			b.g.log.Debug(hlog.Brain, "%s%s", over, out)
+			b.g.guard(hlog.Brain, "compacting the transcript", b.compact)
+		case <-b.wake:
+			b.busy.Store(true)
+		case <-tick.C:
+			b.busy.Store(true)
 		}
-		if kind := t.kind(); kind != "" {
-			over += " kind=" + kind
-		}
-		b.g.log.Debug(hlog.Brain, "%s%s", over, out)
-		b.g.guard(hlog.Brain, "compacting the transcript", b.compact)
+		b.g.guard(hlog.Brain, "reflecting on a day", b.reflect)
 		b.deferMu.Lock()
 		b.busy.Store(false)
 		if len(b.turns) == 0 {
@@ -260,22 +296,36 @@ func (b *modelBrain) work() {
 	}
 }
 
-// compact summarises the older turns once the transcript passes its share
-// of the context. Between turns, on the worker, so the next turn reads
-// the transcript whole either way.
+// compact folds whole days behind their diary entries, and summarises
+// the older turns of today, once the transcript passes its share of the
+// context. Between turns, on the worker, so the next turn reads the
+// transcript whole either way.
 func (b *modelBrain) compact() {
 	g := b.g
-	did, err := b.tr.compact(g.sessionContext(), compactBudget(b.cfg.ContextLength), func(ctx context.Context, text string) (string, error) {
-		r, err := stream(ctx, b.client, model.Request{
-			Messages: []model.Message{
-				{Role: "system", Content: compactPrompt},
-				{Role: "user", Content: text},
-			},
-			Thinking: false,
-			Slot:     b.speakSlot,
-		}, nil)
-		return r.text, err
+	folded, did, err := b.tr.compact(g.sessionContext(), compaction{
+		budget: compactBudget(b.cfg.ContextLength),
+		today:  dayOf(time.Now()),
+		entry:  b.diaryEntry,
+		reflect: func(_ context.Context, day string) {
+			if !b.tried[day] {
+				b.reflectDay(day, false)
+			}
+		},
+		summarise: func(ctx context.Context, text string) (string, error) {
+			r, err := stream(ctx, b.client, model.Request{
+				Messages: []model.Message{
+					{Role: "system", Content: compactPrompt},
+					{Role: "user", Content: text},
+				},
+				Thinking: false,
+				Slot:     b.speakSlot,
+			}, nil)
+			return r.text, err
+		},
 	})
+	if len(folded) > 0 {
+		g.log.Info(hlog.Brain, "folded %s behind the diary", strings.Join(folded, ", "))
+	}
 	switch {
 	case err != nil:
 		g.log.Warn(hlog.Brain, "summarising the older turns: %v", err)
@@ -364,6 +414,10 @@ func (b *modelBrain) Deliver(e proto.Event) error {
 			F("minutes", int(g.idleTimeout()/time.Minute)),
 			F("last_window", g.currentWindow().line()),
 			F("seen_for", minutes(g.windowStretch(time.Now())))), nil)
+		// The first idle after the day changes is when yesterday is
+		// reflected on; the worker looks once the idle turn, if any, is
+		// over.
+		b.nudge()
 
 	case proto.EventSession:
 		if e.Session == nil {
@@ -448,6 +502,8 @@ func (b *modelBrain) queuePerson(t *turn) bool {
 	}
 	select {
 	case b.turns <- t:
+		// The person comes before the ghost's reflecting on yesterday.
+		b.interrupt()
 		return true
 	default:
 		t.waiting.Stop()

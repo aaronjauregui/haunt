@@ -447,3 +447,24 @@ func TestConversationGhostMayEnd(t *testing.T) {
 		t.Error("ghost_may_end = false was not read")
 	}
 }
+
+// [memory] reflection is character unless it says side, and anything else
+// is refused naming the file.
+func TestMemoryReflection(t *testing.T) {
+	write(t, "")
+	f, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Memory.ReflectionMode() != ReflectCharacter {
+		t.Errorf("default reflection %q", f.Memory.ReflectionMode())
+	}
+	write(t, "[memory]\nreflection = \"side\"\n")
+	if f, err = Load(); err != nil || f.Memory.ReflectionMode() != ReflectSide {
+		t.Errorf("side was not read: %v", err)
+	}
+	write(t, "[memory]\nreflection = \"dream\"\n")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "config.toml") || !strings.Contains(err.Error(), "reflection") {
+		t.Errorf("a bad mode: %v", err)
+	}
+}

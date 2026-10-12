@@ -14,6 +14,7 @@ import (
 
 	"github.com/aaronjauregui/haunt/internal/ghost"
 	"github.com/aaronjauregui/haunt/internal/library"
+	"github.com/aaronjauregui/haunt/internal/memory"
 	"github.com/aaronjauregui/haunt/internal/skill"
 	"github.com/aaronjauregui/haunt/internal/store"
 	"github.com/aaronjauregui/haunt/skills"
@@ -25,7 +26,8 @@ import (
 // its transcript. -skills lists the routines it has, and which of them it
 // wrote itself. -style is the look its pictures have, and whether the
 // ghost was asked for one of its own. -mood is the line it set about how
-// it is feeling.
+// it is feeling. -diary is its diary, an entry for each day it looked
+// back on.
 func cmdJournal(args []string) error {
 	fs := flag.NewFlagSet("journal", flag.ExitOnError)
 	state := fs.String("state", "", "override state directory")
@@ -36,6 +38,7 @@ func cmdJournal(args []string) error {
 	style := fs.Bool("style", false, "the style it draws in, and where that came from")
 	reset := fs.Bool("reset", false, "with -style: go back to the style its package ships")
 	mood := fs.Bool("mood", false, "the mood it set, and when")
+	diary := fs.Bool("diary", false, "print its diary: an entry for each day it looked back on")
 	fs.Parse(args)
 
 	stateDir, err := resolveStateDir(*state, fs.Args())
@@ -53,6 +56,9 @@ func cmdJournal(args []string) error {
 	}
 	if *echoes {
 		return printEchoes(os.Stdout, stateDir)
+	}
+	if *diary {
+		return printDiary(os.Stdout, stateDir)
 	}
 
 	s, err := store.Open(filepath.Join(stateDir, "state.db"))
@@ -92,6 +98,21 @@ func cmdJournal(args []string) error {
 		fmt.Printf("%s  %s\n", n.Time.Format("2006-01-02 15:04"), n.Text)
 	}
 	return nil
+}
+
+// printDiary prints memory/diary.md as it is, labels and all: it is the
+// person's to read and edit, and the file is the truth.
+func printDiary(w io.Writer, stateDir string) error {
+	data, err := os.ReadFile(filepath.Join(stateDir, "memory", memory.DiaryFile))
+	if errors.Is(err, fs.ErrNotExist) {
+		fmt.Fprintln(w, "(the diary is empty)")
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(data)
+	return err
 }
 
 // printMood prints the ghost's mood and when it set it. A mood from an

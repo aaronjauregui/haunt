@@ -466,6 +466,18 @@ func saveOrRemove(dir, name string, tf topicFile) error {
 	return writeTopicFile(dir, name, tf, time.Now())
 }
 
+// DiaryFile is the ghost's diary beside self.md and you.md: one dated
+// entry per day, written by the ghost's reflection (internal/ghost
+// diary.go reads and formats it). It is not a topic and not indexed.
+const DiaryFile = "diary.md"
+
+// WriteDiary replaces the diary under dir with data, atomically, as a
+// topic file is written, so the person's editor and the ghost never see
+// half of it. Errors name the directory as "memory".
+func WriteDiary(dir, data string) error {
+	return scrub(dir, writeFile(filepath.Join(dir, DiaryFile), data))
+}
+
 // coreFile is the file behind SetCore's which.
 func coreFile(which string) (string, error) {
 	switch which {

@@ -39,6 +39,7 @@ the model decides what to make of an event and whether to say anything.
 | Part | File | Does |
 |---|---|---|
 | Runner | `brain_model.go` | which events become turns, the queue, deferral, refunds, the waking and thinking indicators, the balloon, the why-trace, errand discharge |
+| Reflection | `reflect.go`, `diary.go` | looking back on a finished day: the trigger, the day's digest, both modes, the diary file and its part of the prompt |
 | Prompt | `prompt.go` | the messages of a turn, the standing rules |
 | Decide | `decide.go` | the loop, the registry, the gates every decision shares |
 | Decisions | `decisions_*.go` | one file per group: speech, face, pictures, web, files, intentions, notes, mood, memory, skills, servers |
@@ -92,8 +93,9 @@ one line at debug, `turn over: person took=4.2s face=happy by=speak`, the
 line the evals wait on and measure pace and face by. `by` is `speak` (the
 pose the model chose with its words), `tool` (it called `face`) or
 `lexicon` (the driver's guess from the words). After the turn, the
-transcript is compacted if it needs to be, and the oldest deferred turn
-still fresh is sent.
+transcript is compacted if it needs to be, a finished day is reflected
+on if one is due and the person is away ([Reflection](#reflection)), and
+the oldest deferred turn still fresh is sent.
 
 **Silence** refunds what was charged to wake the ghost, takes down any
 interim words, and is recorded in the why-trace as a suppressed turn.
@@ -129,9 +131,9 @@ same from turn to turn so a provider's prompt cache holds:
 | # | Role | Content | Changes when |
 |---|---|---|---|
 | 1 | system | `[persona] system`, the standing rules, the `[[persona.example]]` exchanges | the manifest or the shell changes, or a conversation opens or ends |
-| 2 | system | `self.md` and `you.md`, the ghost's notes on itself and on the person | either is rewritten |
+| 2 | system | `self.md` and `you.md`, the ghost's notes on itself and on the person, then the diary of the last days | either is rewritten, a diary entry is written, or the day turns |
 | 3 | system | the skills index, then the memory topic index | a skill or a topic changes |
-| 4 | the transcript | the summary row if there is one, then every finished turn since | every turn |
+| 4 | the transcript | the summary rows if there are any, then every finished turn since | every turn |
 | 5 | user | this turn's input: the person's words verbatim, or an envelope | every turn |
 | 6 | system | the turn's context, then a two-line persona reminder | every turn |
 
@@ -163,6 +165,15 @@ Last, `In conversation: yes.` while a conversation is open
 `[persona] system` and "Stay in character.": it sits after the
 transcript, against the character thinning out over a long conversation,
 and since it is last only the suffix is recomputed on a cached prompt.
+
+Part 2 ends with the diary (`diary.go`), as `Your diary, last days:` and
+one line per day for the `diaryDays` (3) calendar days before today, each
+entry cut to `diaryEntryLimit` (600 characters) and a day with no entry
+written `2026-10-10: no entry`, so a gap in the days reads as one; today
+too if it has an entry. Nothing while the diary is empty. It is part 2
+rather than part 6 because it changes about once a day: the cached
+prefix is broken when an entry is written and again when the day turns,
+the same class of change as a `rewrite_notes`.
 
 The standing rules (`standingRules`) are regenerated from the manifest,
 the shell, the config and the conversation mode, so a persona author never writes about
@@ -297,7 +308,11 @@ kinds on the slot sharing the longest prefix, so each call reprocesses
 everything after part 1. With `[model] slots` the decide rounds go to
 one slot and every call without tools to another (`id_slot`), each slot
 keeps one kind's prompt, and a call can reuse its prompt up to this
-turn's new rows, which makes the split cost little.
+turn's new rows, which makes the split cost little. Reflection's calls,
+tools or not, go to the second slot ([Reflection](#reflection)): a
+reflection turn's prompt ends differently from a person's turn, and on
+the decide slot it would push out the prompt the person's next turn
+reuses.
 
 ## The registry
 
@@ -371,6 +386,7 @@ same way.
 | `forget` | `topic`, `line` | the source rule |
 | `recall` | `query` | none |
 | `rewrite_notes` | `about` (`self` or `you`), `text` | the echo check on cloud; labelled |
+| `diary` | `day`, `text` (under 600 characters) | offered on a reflection turn only (`offeredWhen`); terminal there; written under the day the turn is about whatever `day` says, never over an entry already there; the turn carries the day's web and file reads, so the label says `web` or `file` after one and on cloud the echo check refuses an entry in a read's words |
 | `skill_view` | `name` | none |
 | `skill_write` | `name`, `body` | the echo check on cloud; labelled; the skill host's checks |
 | `<server>__<tool>` | the server's schema | `tools`, per-tool consent, tool budget, the marks, taint |
@@ -421,6 +437,7 @@ only decision is whether this event is worth a word.
 | goal gone quiet | `kind=goal_quiet name=… goal=… goal_name=… held="8 days" last_seen=never` |
 | neighbour spoke, drew, left a note, was poked | `kind=observed from=… action=… text=…` |
 | neighbour `tell` | `kind=told from=… text=…` |
+| a finished day, while the person is away | `kind=reflect day=2026-10-11 weekday=Saturday`, a turn of its own ([Reflection](#reflection)); not charged |
 | window changed | not sent per change; rides on the next turn's context |
 
 `goal_quiet` is its own kind rather than an `intention_due` with prose,
@@ -611,6 +628,7 @@ an FTS5 table derived from them. Under `ghosts/<name>/memory/`:
 
     self.md            the ghost's notes on itself, free prose, under 1500 bytes
     you.md             its notes on the person, the same
+    diary.md           one dated entry per day it reflected on, newest last
     topics/<topic>.md  front matter, then one fact per line
 
     ---
@@ -650,6 +668,18 @@ same in the store (`ErrTheirs`). Any other line goes on any turn.
 `haunt memory show` prints past lines after the facts under `past:`,
 unnumbered, so `haunt memory rm <topic> N` counts facts alone.
 
+**The diary** is `diary.md`: `# Diary`, then a `## 2026-10-11 Saturday`
+section per day, oldest first, each entry ending with the source label
+the notes carry. Only the `diary` decision writes it, on a reflection
+turn, through `mayRemember` and `labelled`; `memory.WriteDiary` writes it
+whole and atomically. The person may edit it, and the driver keeps what
+they wrote byte for byte: text before the first day, a heading with more
+after its date, a section of their own. It only ever adds one day's
+entry: under that day's heading when the file has one with nothing under
+it, else as a new section in date order; never over a day with text. It is
+neither a topic nor indexed; the transcript's diary rows are what recall
+finds of a folded day. It is read again for every prompt.
+
 Facts are lines in topics, never a file per fact, so the topic index in
 part 3 of the prompt stays under 1500 bytes. `self.md` and `you.md` are
 in every prompt (part 2), so `rewrite_notes` refuses anything longer.
@@ -659,7 +689,7 @@ scores and keyed context's cutoff read as with the line alone, and a
 topic word ranks a line below one that has the word itself but above
 nothing (`topicWeight`, `lineWeight` in `store.go`). It also searches,
 through a second FTS5 table in `transcript.db`, what the person and the
-ghost said and the summaries, five hits from each, each labelled with
+ghost said, the summaries and the folded days' diary rows, five hits from each, each labelled with
 topic, source and date. Tool results are not searchable: a page found
 again through recall would be somebody else's words arriving with
 nothing to say so.
@@ -739,13 +769,98 @@ reading its rows in order: an assistant message carrying tool calls is
 one row holding them all, and each result is a row of its own. `silent`
 and `failed` are markers that end a turn with no message.
 
+A day is the local calendar day a turn began on (`days`, `rowDays`); a
+summary or diary row falls on the day of its own time. Reflection turns
+belong to no day and are compacted as they end, so they are never
+replayed, summarised or counted among the turns kept: what they kept is
+in memory and the diary, and their digest, the turn's context, was never
+a row.
+
 **Compaction** is the driver's, between turns. When the rows the model
-would see pass 0.6 of `[model] context_length` (32768 when unset), the
-older turns are summarised by a call with thinking off into one
-`summary` row, and the last twelve turns stay verbatim. The summarised
-rows are kept, marked compacted, for history and recall; the prompt reads
-only what is not compacted. Errands never ride on the transcript, so a
-summary cannot lose one.
+would see pass 0.6 of `[model] context_length` (32768 when unset), whole
+days go first, oldest first: a day before today with a diary entry is
+folded behind it (`compactDay`), its rows marked compacted and one
+`diary` row put in their place, dated on that day; a day the person and
+the ghost talked on that has no entry is reflected on at once, the one
+time reflection does not wait for the person to be away, and then
+folded; a day of events answered with silence is folded with nothing in
+its place. A day reflection has already come to nothing on is not asked
+again. A day that still has no entry is summarised on its own by a call
+with thinking off (`summariseDay`): its rows are compacted and one
+`summary` row put in their place, on that day, so no summary spans two
+days and a later reflection reads it as the day's digest. That repeats
+until the rows fit or only today is left. A day is never summarised once
+it has an entry. If only today is left and it is still over, today's
+older turns are summarised into one `summary` row, with the last twelve
+turns verbatim, and the summary rows past days without an entry were left
+as are rolled into it, since nothing else could shrink them; a day behind
+a diary entry is never in it. The row is stamped with the last turn it
+covers, so a summary made after midnight stays on its day. A folded day is replayed as nothing: part 2 carries
+the last `diaryDays` of the diary, and the file the rest. Compacted rows
+are kept for history and recall; the prompt reads only what is not
+compacted. Errands never ride on the transcript, so a summary cannot
+lose one.
+
+## Reflection
+
+`reflect.go`: once a day is over the ghost looks back on it, keeps any
+fact about the person it did not keep at the time, and writes the day's
+diary entry. It runs on the worker after a turn's compaction, when the
+person goes idle (`Deliver` nudges the worker), and every 15 minutes
+(`reflectTick`, for an idle that began before midnight), when the live
+transcript has a day before today that was talked on and has no entry,
+the person is idle (`g.idle`) or a presence poll says nobody is home
+(`quiet.NobodyHome`), and nothing is queued or deferred. One day per run,
+oldest first. A day whose reflection ran to its end with no entry is not
+tried again in that process, nor one cut short by a model or transport
+error three times (`reflectFailures`), which is logged once. It
+reaches no screen, so it is not charged to initiative. The person comes
+first: the cancel is armed before anything else, the worker looks at the
+queue between rounds, and queuing their words cancels the model call
+(`interrupt`); a reflection that ran because they were away also stops
+between rounds once they are back. The turn is then written as failed
+and the day waits for the next idle. A day has an entry when its section
+has text under the heading (`hasEntry`); a heading with nothing under it
+is a day still waiting for one.
+
+The turn reads what the day read (`readsOfDay`): every web or file
+result of the day, compacted or not, taints it and is one of its reads,
+as if it had made the read itself. What reflection keeps is labelled
+`web` or `file` after a read, and on cloud the echo check refuses a
+write in a read's words, so looking back cannot launder a page into the
+ghost's own conclusions.
+
+The day's digest is `digestLine` over its rows, the day's summary row
+first, cut by dropping the earliest lines: in character mode to 60% of
+what the assembled prompt and tools leave of `context_length`, never
+into a 2048-token margin for the rounds' calls and results, and to the
+floor when prompt and tools alone take 80% (`digestRoom`); in side mode to the transcript's share of the context less the
+standing prompt; never under 4000 bytes. `[memory] reflection` picks the
+mode:
+
+- **character** (the default): a turn of kind `reflect`, with the usual
+  parts 1 to 5 and, in place of the turn's context, the rule ("Write the
+  day's entry in the first person, under 600 characters…") and the
+  digest. It is offered `remember`, `forget`, `recall`, `rewrite_notes`,
+  `diary` and `stay_silent`, nothing that reaches the screen, and loops
+  as a decide call does, thinking off, until `diary` is written or it
+  stays silent; any words are dropped. Its calls go to the slot of the
+  calls without tools, so the person's next turn still finds the decide
+  prompt cached.
+- **side**: one call with thinking off and no tools (`reflectPrompt`, the
+  compaction prompt's shape) with the digest and the ghost's topics and
+  lines, asked for JSON: `{"diary", "facts": [{topic, line, replaces}],
+  "forget": [{topic, line}]}`. The driver applies each item as a call on
+  a turn of kind `reflect` through `callDecision`, the facts, then the
+  lines to forget, then the entry, so every gate and label holds and a
+  refusal is logged. Only the call is cancellable; once it has answered,
+  the answer is applied. The turn is the ghost's own, so a side call can
+  never retire a line the person stated; that is the mode's cost. A fact
+  whose `replaces` is refused for that is kept without it, beside the old
+  line.
+
+Either way the turn's rows go to the transcript, so `haunt history -why`
+shows what reflection kept.
 
 ## Why-trace and history
 
@@ -753,8 +868,8 @@ Each turn records its input, its words or silence, the decisions it
 applied, and the window in front of it in the ghost's store (`why.go`);
 the last dozen are kept. `haunt history` reads `transcript.db`
 read-only: the person's words, envelopes as `event:`, the ghost's words
-(interim ones included), `(said nothing)`, `(the turn failed)`, and a
-summary as `summary:`. `-why` joins the trace and lists the memory and
+(interim ones included), `(said nothing)`, `(the turn failed)`, a
+summary as `summary:`, and a folded day as `diary 2026-10-11:`. `-why` joins the trace and lists the memory and
 skill decisions under each reply; `-json` gives each turn whole, its
 decisions split into `acted` and `looked` (memory and skills), with the
 echo check's `echoes`. A turn older than the trace is recorded from the

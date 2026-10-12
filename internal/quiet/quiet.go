@@ -75,6 +75,10 @@ func (c *Checker) Home() bool {
 	return was
 }
 
+// NobodyHome reports whether a presence poll says the house is empty
+// now, whatever the shush and the quiet hours say.
+func (c *Checker) NobodyHome() bool { return c.away() }
+
 func (c *Checker) away() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()

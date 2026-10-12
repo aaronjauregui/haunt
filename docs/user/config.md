@@ -103,6 +103,9 @@ stall_timeout = 120             # seconds a call under way may then go quiet
 # [model.ghost.wisp.sampling]   # replaces the troupe's sampling key by key
 # temperature = 1.1
 
+[memory]                        # how a persona ghost carries a day forward; see memory.md
+reflection = "character"        # who writes the day's diary entry: "character", a turn of its own; "side", one call with no tools
+
 [conversation]                  # talking at length; see running.md
 ghost_may_end = true            # a ghost may end a conversation itself, saying goodbye
 
@@ -136,6 +139,17 @@ do](permissions.md#where-the-model-runs) has the whole table.
 A `base_url` that is not an http or https URL, a `trust` or `thinking`
 outside its values, and a negative number are refused when the config
 loads, naming the section.
+
+## Memory
+
+`[memory] reflection` says how a persona ghost looks back on a finished
+day to write its diary entry and keep what it did not keep at the time
+([Its diary](memory.md#its-diary)). `"character"` is a turn of the
+ghost's own, in its own voice, with its memory to hand. `"side"` is one
+call to the same model with no tools, whose answer haunt applies as the
+ghost's own decisions; it costs less on a slow model, and since it is
+the ghost's judgment rather than yours, it can never take back a line
+you told it. Anything else is refused when the config loads.
 
 ## Drawing with your own ComfyUI workflow
 

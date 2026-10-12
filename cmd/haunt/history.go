@@ -158,7 +158,9 @@ type historyTurn struct {
 }
 
 // summary reports whether the "turn" is a summary of older ones.
-func (t *historyTurn) summary() bool { return t.input != nil && t.input.Role == roleSummary }
+func (t *historyTurn) summary() bool {
+	return t.input != nil && (t.input.Role == roleSummary || t.input.Role == roleDiary)
+}
 
 // final is the turn's last word, or nil when it has none.
 func (t *historyTurn) final() *message {
@@ -322,6 +324,9 @@ func printLine(w io.Writer, m message) {
 	switch {
 	case m.Role == roleSummary:
 		who = "summary"
+	case m.Role == roleDiary:
+		// A day folded behind its entry, named by the day.
+		who = "diary " + m.Time.Local().Format("2006-01-02")
 	case m.Role == "assistant":
 		who = "ghost"
 	case ghost.IsEnvelope(m.Text):
@@ -403,6 +408,10 @@ func printWhy(out io.Writer, w ghost.Why) {
 // of turns the model no longer sees whole.
 const roleSummary = "summary"
 
+// roleDiary is a day folded behind its diary entry: like a summary, an
+// account of turns the model no longer sees, one per day.
+const roleDiary = "diary"
+
 // message is one line of the conversation as history shows it: an input,
 // one of the ghost's lines, or a summary.
 type message struct {
@@ -438,7 +447,7 @@ func (c call) short() call {
 
 // looked are the decisions history files under Looked.
 var looked = map[string]bool{
-	"recall": true, "remember": true, "forget": true, "rewrite_notes": true,
+	"recall": true, "remember": true, "forget": true, "rewrite_notes": true, "diary": true,
 	"skill_view": true, "skill_write": true,
 }
 
@@ -504,6 +513,8 @@ func messagesOf(rows []ghost.TranscriptRow) []message {
 			out = append(out, message{Role: "user", Text: r.Text, Time: r.At})
 		case "summary":
 			out = append(out, message{Role: roleSummary, Text: r.Text, Time: r.At})
+		case "diary":
+			out = append(out, message{Role: roleDiary, Text: r.Text, Time: r.At})
 		case "calls":
 			for ci := range r.Calls {
 				pending = append(pending, at{ri, ci})

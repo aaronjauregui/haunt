@@ -93,6 +93,32 @@ constraint on changes, not a history.
   never shown in the balloon: a face that sulked on its own would be a
   second expression system beside the one the model already chooses
   with `speak`, and one the person could not see the reason for.
+- **The day is the unit of memory over time, and a day is written up
+  once.** There is no session boundary: a ghost starting only marks time.
+  At the first idle after the day changes, the ghost reflects on the day
+  and writes a dated diary entry; compaction then folds whole days behind
+  their entries, oldest first, and never summarises a day again, since a
+  summary of a summary loses what the first one kept. A day that cannot
+  be given an entry is summarised alone, on its own day, so no summary
+  spans two days. The rolling summary stays only for today when today is
+  too long for the context. A folded day is not replayed: the diary in
+  the prompt carries the last days, and the file the rest. What a day
+  read, its reflection reads again, so a page cannot become the ghost's
+  own conclusion overnight. The person's edits to the diary are kept
+  byte for byte; the ghost only adds a new day. Reflection writes
+  through the same decisions and gates as any turn, and the diary is a
+  file the person can read and edit beside the others.
+- **Reflection is built both ways until an eval chooses.** In character,
+  a turn of the ghost's own with its memory decisions, which keeps the
+  one rule whole; as a side call, one plain request whose JSON the driver
+  applies as the ghost's decisions on a turn of its own, cheaper on a
+  slow model. The side call is the ghost's judgment and not the
+  person's, so it cannot retire a line the person stated. `[memory]
+  reflection` picks; character is the default until the eval says
+  otherwise.
+- **The person comes before reflection.** It runs only while they are
+  away and nothing waits, is cancelled the moment their words queue, and
+  is never charged to initiative, since it reaches no screen.
 - **Keyed context is pushed, sticky and cooled, and keyed by the
   person's words only.** `recall` is pull-only, and a small model does
   not reach for it when the person names something it was told a week

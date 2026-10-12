@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -27,15 +29,30 @@ import (
 // or failure.
 //
 // Compaction is the driver's. When the rows the model would see pass a
-// share of the model's context (compactShare), the older turns are
-// summarised by a call with thinking off into one summary row, and the
-// last compactKeep turns stay verbatim. The summarised rows are kept,
-// marked compacted, for history and for recall; the prompt reads only
-// what is not compacted. Errands never ride on the transcript (they come
-// from the store on every turn's context), so a summary cannot lose one.
+// share of the model's context (compactShare), whole days go first: the
+// oldest day before today that has a diary entry (diary.go) is folded
+// behind it, its rows marked compacted and one diary row put in their
+// place, and so on until the rows fit or only today is left. A day is
+// never summarised again once it has an entry; one that could not be
+// given an entry is summarised on its own, into a summary row on that
+// day. Only when today alone is over the share are its older turns
+// summarised by a call with thinking off into one summary row, with the
+// last compactKeep turns verbatim, and past days' own summaries rolled in
+// with them; a day behind its entry never is. The
+// compacted rows are kept for history and for recall; the prompt reads
+// only what is not compacted. Errands never ride on the transcript (they
+// come from the store on every turn's context), so a summary cannot lose
+// one.
 //
-// A second FTS5 table indexes the person's words, the ghost's and the
-// summaries, so recall can search the conversation as well as memory.
+// A day is the local calendar day its turn began on. The ghost's own
+// reflection turns (kind=reflect, reflect.go) belong to no day and are
+// compacted as they end: they are about a day, and what they wrote is in
+// memory. A folded day's diary row is for history and recall; the prompt
+// carries the diary in part 2 instead.
+//
+// A second FTS5 table indexes the person's words, the ghost's, the
+// summaries and the diary rows, so recall can search the conversation as
+// well as memory.
 
 // Row kinds.
 const (
@@ -47,6 +64,7 @@ const (
 	rowSilent  = "silent"  // marker: the turn ended in silence
 	rowFailed  = "failed"  // marker: the turn failed
 	rowSummary = "summary" // the summary of compacted turns
+	rowDiary   = "diary"   // a day folded behind its diary entry; At is on that day
 )
 
 const (
@@ -185,7 +203,7 @@ func (t *transcript) add(r TranscriptRow) error {
 // page found again through recall would be somebody else's words arriving
 // with nothing to say so.
 func searchable(kind string) bool {
-	return kind == rowInput || kind == rowWords || kind == rowSummary
+	return kind == rowInput || kind == rowWords || kind == rowSummary || kind == rowDiary
 }
 
 // live is the rows the model sees: everything not compacted, oldest first.
@@ -193,6 +211,13 @@ func (t *transcript) live() ([]TranscriptRow, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return queryRows(t.db, `WHERE compacted = 0 ORDER BY turn, id`)
+}
+
+// all is every row, compacted or not, oldest first.
+func (t *transcript) all() ([]TranscriptRow, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return queryRows(t.db, `ORDER BY turn, id`)
 }
 
 // TranscriptHit is one line of the conversation recall found.
@@ -287,9 +312,11 @@ func ReadTranscript(path string) ([]TranscriptRow, error) {
 }
 
 // replay renders the live rows as the messages of part 4 of the prompt:
-// the summary, then every finished turn. A turn that failed or never
-// finished is left out whole, input and all: the model never answered it,
-// and a question with no answer after it reads as one still open.
+// the summary, then every finished turn. A folded day renders nothing:
+// part 2 carries the last diaryDays of the diary, and the file the rest. A turn that failed or never finished
+// is left out whole, input and all: the model never answered it, and a
+// question with no answer after it reads as one still open. A reflection
+// turn is left out too (reflectTurns).
 func replay(rows []TranscriptRow) []model.Message {
 	var out []model.Message
 	ended := map[int64]string{}
@@ -298,12 +325,16 @@ func replay(rows []TranscriptRow) []model.Message {
 			ended[r.Turn] = r.Kind
 		}
 	}
+	reflecting := reflectTurns(rows)
 	for _, r := range rows {
-		if r.Kind == rowSummary {
+		switch r.Kind {
+		case rowSummary:
 			out = append(out, model.Message{Role: "system", Content: "Earlier, in summary:\n" + r.Text})
 			continue
+		case rowDiary:
+			continue
 		}
-		if end := ended[r.Turn]; end == "" || end == rowFailed {
+		if end := ended[r.Turn]; end == "" || end == rowFailed || reflecting[r.Turn] {
 			continue
 		}
 		switch r.Kind {
@@ -355,10 +386,89 @@ const compactPrompt = "You are summarising your own earlier conversation with th
 	"and anything you said you would do. Keep names, dates and numbers exactly. " +
 	"Leave out what you looked up unless they asked you to keep it. No preamble."
 
-// compact summarises the older turns when the live rows pass the budget,
-// keeping the last compactKeep turns verbatim. summarise makes the call;
-// it is given the earlier summary and the turns as text.
-func (t *transcript) compact(ctx context.Context, budget int, summarise func(ctx context.Context, text string) (string, error)) (bool, error) {
+// compaction is what compact needs besides the rows.
+type compaction struct {
+	// budget is the tokens the live rows may take (compactBudget).
+	budget int
+	// today is the day that is never folded (dayOf now).
+	today string
+	// entry is a day's diary entry, if it has one.
+	entry func(day string) (string, bool)
+	// reflect writes a day's entry now, when compaction needs to fold a
+	// day that has none. Nil leaves such a day to the summary.
+	reflect func(ctx context.Context, day string)
+	// summarise makes the summary call; it is given the earlier summary
+	// and the turns as text.
+	summarise func(ctx context.Context, text string) (string, error)
+}
+
+// compact brings the live rows under the budget. Whole days first, oldest
+// first: a day with a diary entry is folded behind it; a day the person
+// and the ghost talked on that has none is reflected on now, the one time
+// reflection does not wait for the person to be away, and folded once it
+// has one; a day with no talk on it is folded with nothing in its place.
+// A day that still has no entry is summarised on its own, into a summary
+// row that belongs to it, so no summary spans two days and a later
+// reflection reads it as the day's digest. Only when today is all that is
+// left over the budget are today's older turns summarised, keeping the
+// last compactKeep verbatim, with those past days' summaries rolled in. It reports the days folded and whether it
+// summarised.
+func (t *transcript) compact(ctx context.Context, c compaction) (folded []string, summarised bool, err error) {
+	done := map[string]bool{}
+	for {
+		rows, err := t.live()
+		if err != nil {
+			return folded, summarised, err
+		}
+		if estimateTokens(replay(rows)) <= c.budget {
+			return folded, summarised, nil
+		}
+		day := ""
+		for _, d := range daysOf(rows) {
+			if d < c.today && !done[d] {
+				day = d
+				break
+			}
+		}
+		if day == "" {
+			break
+		}
+		done[day] = true
+		entry, ok := "", false
+		if c.entry != nil {
+			entry, ok = c.entry(day)
+		}
+		if !ok && talked(rows, day) {
+			if c.reflect != nil {
+				c.reflect(ctx, day)
+				entry, ok = c.entry(day)
+			}
+			if !ok {
+				did, err := t.summariseDay(ctx, day, c.summarise)
+				if err != nil {
+					return folded, summarised, err
+				}
+				summarised = summarised || did
+				continue
+			}
+		}
+		if err := t.compactDay(day, entry); err != nil {
+			return folded, summarised, err
+		}
+		folded = append(folded, day)
+	}
+	did, err := t.summariseOlder(ctx, c.budget, c.today, c.entry, c.summarise)
+	return folded, summarised || did, err
+}
+
+// summariseOlder summarises today's older turns when the live rows pass
+// the budget, keeping the last compactKeep turns verbatim, and rolls in
+// the summaries past days without an entry were left as, which nothing
+// else can shrink. A day behind a diary entry is never touched: its only
+// live row is the diary row, and hasEntry keeps any other out. The summary
+// is stamped with the last turn it covers, so a call made after midnight
+// stays on its day.
+func (t *transcript) summariseOlder(ctx context.Context, budget int, today string, hasEntry func(day string) (string, bool), summarise func(ctx context.Context, text string) (string, error)) (bool, error) {
 	rows, err := t.live()
 	if err != nil {
 		return false, err
@@ -366,27 +476,83 @@ func (t *transcript) compact(ctx context.Context, budget int, summarise func(ctx
 	if estimateTokens(replay(rows)) <= budget {
 		return false, nil
 	}
+	days := rowDays(rows)
+	var gone []TranscriptRow
+	for _, r := range rows {
+		day, ok := days[r.ID]
+		if !ok || r.Kind != rowSummary || day >= today {
+			continue
+		}
+		if hasEntry != nil {
+			if _, has := hasEntry(day); has {
+				continue
+			}
+		}
+		gone = append(gone, r)
+	}
+	of := rowsOf(rows, today)
 	var turns []int64
 	seen := map[int64]bool{}
-	for _, r := range rows {
+	for _, r := range of {
 		if r.Kind != rowSummary && !seen[r.Turn] {
 			seen[r.Turn] = true
 			turns = append(turns, r.Turn)
 		}
 	}
-	if len(turns) <= compactKeep {
-		return false, nil
+	cut := int64(-1) // the first turn kept; none of today's go
+	if len(turns) > compactKeep {
+		cut = turns[len(turns)-compactKeep]
 	}
-	cut := turns[len(turns)-compactKeep] // the first turn kept
-	var b strings.Builder
-	var last int64
-	for _, r := range rows {
-		if r.Kind != rowSummary && r.Turn >= cut {
-			continue
+	ownTurns := false
+	for _, r := range of {
+		if r.Kind == rowSummary || (cut >= 0 && r.Turn < cut) {
+			gone = append(gone, r)
+			ownTurns = ownTurns || r.Kind != rowSummary
 		}
-		if r.Turn > last {
+	}
+	if !ownTurns && len(gone) < 2 {
+		return false, nil // one summary alone is already as short as it gets
+	}
+	sort.SliceStable(gone, func(i, j int) bool {
+		if gone[i].Turn != gone[j].Turn {
+			return gone[i].Turn < gone[j].Turn
+		}
+		return gone[i].ID < gone[j].ID
+	})
+	var last int64
+	var at time.Time
+	for _, r := range gone {
+		if r.Turn >= last {
+			if r.Turn > last || at.IsZero() {
+				at = r.At
+			}
 			last = r.Turn
 		}
+	}
+	return t.summariseRows(ctx, gone, last, at, summarise)
+}
+
+// summariseDay summarises a day that could not be given a diary entry on
+// its own: its rows are compacted and one summary row put in their place,
+// on that day. A day that is already only a summary is left as it is.
+func (t *transcript) summariseDay(ctx context.Context, day string, summarise func(ctx context.Context, text string) (string, error)) (bool, error) {
+	rows, err := t.live()
+	if err != nil {
+		return false, err
+	}
+	of := rowsOf(rows, day)
+	if !slices.ContainsFunc(of, func(r TranscriptRow) bool { return r.Kind != rowSummary }) {
+		return false, nil
+	}
+	turn, at := dayAnchor(of)
+	return t.summariseRows(ctx, of, turn, at, summarise)
+}
+
+// summariseRows has rows summarised, marks them compacted and puts the
+// summary in their place as turn, at.
+func (t *transcript) summariseRows(ctx context.Context, rows []TranscriptRow, turn int64, at time.Time, summarise func(ctx context.Context, text string) (string, error)) (bool, error) {
+	var b strings.Builder
+	for _, r := range rows {
 		if line := digestLine(r); line != "" {
 			b.WriteString(line)
 			b.WriteByte('\n')
@@ -401,29 +567,172 @@ func (t *transcript) compact(ctx context.Context, budget int, summarise func(ctx
 		return false, errors.New("the summary came back empty")
 	}
 	t.mu.Lock()
+	defer t.mu.Unlock()
 	tx, err := t.db.Begin()
 	if err != nil {
-		t.mu.Unlock()
 		return false, err
 	}
-	defer func() {
-		tx.Rollback()
-		t.mu.Unlock()
-	}()
-	if _, err := tx.Exec(`UPDATE rows SET compacted = 1 WHERE compacted = 0 AND (turn < ? OR kind = ?)`, cut, rowSummary); err != nil {
-		return false, err
+	defer tx.Rollback()
+	for _, r := range rows {
+		if _, err := tx.Exec(`UPDATE rows SET compacted = 1 WHERE id = ?`, r.ID); err != nil {
+			return false, err
+		}
 	}
-	at := time.Now().Format(time.RFC3339Nano)
-	res, err := tx.Exec(`INSERT INTO rows (turn, kind, text, at) VALUES (?, ?, ?, ?)`, last, rowSummary, summary, at)
-	if err != nil {
-		return false, err
-	}
-	id, _ := res.LastInsertId()
-	if _, err := tx.Exec(`INSERT INTO transcript_fts (rowid, text, kind, turn, at) VALUES (?, ?, ?, ?, ?)`,
-		id, summary, rowSummary, last, at); err != nil {
+	if err := insertRow(tx, turn, rowSummary, summary, at); err != nil {
 		return false, err
 	}
 	return true, tx.Commit()
+}
+
+// insertRow adds a summary or diary row and indexes it for recall.
+func insertRow(tx *sql.Tx, turn int64, kind, text string, at time.Time) error {
+	stamp := at.Format(time.RFC3339Nano)
+	res, err := tx.Exec(`INSERT INTO rows (turn, kind, text, at) VALUES (?, ?, ?, ?)`, turn, kind, text, stamp)
+	if err != nil {
+		return err
+	}
+	id, _ := res.LastInsertId()
+	_, err = tx.Exec(`INSERT INTO transcript_fts (rowid, text, kind, turn, at) VALUES (?, ?, ?, ?, ?)`,
+		id, text, kind, turn, stamp)
+	return err
+}
+
+// dayAnchor is where a row standing for a day's rows goes: the day's last
+// turn, at the start of that turn, which is on the day even when the turn
+// ran past midnight. A day that is only a summary takes the summary's.
+func dayAnchor(of []TranscriptRow) (int64, time.Time) {
+	last, at := of[0].Turn, of[0].At
+	for _, r := range of {
+		if r.Kind != rowSummary && r.Turn > last {
+			last, at = r.Turn, r.At
+		}
+	}
+	return last, at
+}
+
+// compactTurn marks one turn's rows compacted: a reflection turn, which is
+// never replayed and must not count toward the turns kept verbatim.
+func (t *transcript) compactTurn(turn int64) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	_, err := t.db.Exec(`UPDATE rows SET compacted = 1 WHERE turn = ? AND kind != ? AND kind != ?`, turn, rowSummary, rowDiary)
+	return err
+}
+
+// reflectTurns is the turns among rows that are the ghost reflecting on a
+// day (kind=reflect): the turns that belong to no day and are not
+// replayed.
+func reflectTurns(rows []TranscriptRow) map[int64]bool {
+	out := map[int64]bool{}
+	for _, r := range rows {
+		if r.Kind == rowEvent && EnvelopeKind(r.Text) == reflectKind {
+			out[r.Turn] = true
+		}
+	}
+	return out
+}
+
+// rowDays is the day of each row that has one, by row ID: a turn's rows
+// all fall on the day it began, a summary and a diary row on their own.
+// Reflection turns have none.
+func rowDays(rows []TranscriptRow) map[int64]string {
+	began := map[int64]string{}
+	reflecting := reflectTurns(rows)
+	out := map[int64]string{}
+	for _, r := range rows {
+		switch {
+		case r.Kind == rowSummary || r.Kind == rowDiary:
+			out[r.ID] = dayOf(r.At)
+		case reflecting[r.Turn]:
+		default:
+			if _, ok := began[r.Turn]; !ok {
+				began[r.Turn] = dayOf(r.At)
+			}
+			out[r.ID] = began[r.Turn]
+		}
+	}
+	return out
+}
+
+// daysOf is the days rows hold besides their diary rows, oldest first.
+func daysOf(rows []TranscriptRow) []string {
+	days := rowDays(rows)
+	seen := map[string]bool{}
+	var out []string
+	for _, r := range rows {
+		if day, ok := days[r.ID]; ok && r.Kind != rowDiary && !seen[day] {
+			seen[day] = true
+			out = append(out, day)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// days is the days the live transcript holds, oldest first.
+func (t *transcript) days() ([]string, error) {
+	rows, err := t.live()
+	if err != nil {
+		return nil, err
+	}
+	return daysOf(rows), nil
+}
+
+// rowsOf is a day's rows, diary rows left out, in order.
+func rowsOf(rows []TranscriptRow, day string) []TranscriptRow {
+	days := rowDays(rows)
+	var out []TranscriptRow
+	for _, r := range rows {
+		if d, ok := days[r.ID]; ok && d == day && r.Kind != rowDiary {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// talked reports whether the person or the ghost said anything on day,
+// or a summary carries what they did: a day of events answered with
+// silence has nothing to write an entry about.
+func talked(rows []TranscriptRow, day string) bool {
+	for _, r := range rowsOf(rows, day) {
+		if r.Kind == rowInput || r.Kind == rowWords || r.Kind == rowSummary {
+			return true
+		}
+	}
+	return false
+}
+
+// compactDay folds a day: its live rows are marked compacted and, when
+// entry is not empty, one diary row carries it in their place, dated on
+// that day and numbered with its last turn so it sorts where the day was.
+func (t *transcript) compactDay(day, entry string) error {
+	rows, err := t.live()
+	if err != nil {
+		return err
+	}
+	of := rowsOf(rows, day)
+	if len(of) == 0 {
+		return nil
+	}
+	turn, at := dayAnchor(of)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	tx, err := t.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, r := range of {
+		if _, err := tx.Exec(`UPDATE rows SET compacted = 1 WHERE id = ?`, r.ID); err != nil {
+			return err
+		}
+	}
+	if entry = strings.TrimSpace(entry); entry != "" {
+		if err := insertRow(tx, turn, rowDiary, entry, at); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // digestLine is one row as the summary call reads it.
@@ -431,6 +740,8 @@ func digestLine(r TranscriptRow) string {
 	switch r.Kind {
 	case rowSummary:
 		return "(summary so far) " + r.Text
+	case rowDiary:
+		return "(diary " + dayOf(r.At) + ") " + r.Text
 	case rowInput:
 		return "them: " + r.Text
 	case rowEvent:

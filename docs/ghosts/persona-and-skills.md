@@ -105,6 +105,7 @@ or a persona may name them:
 | `kind=observed from="Moth" action=spoke text="…"` | a neighbour did something in public |
 | `kind=told from="Moth" text="…"` | a neighbour addressed this ghost |
 | `kind=help` | the person picked "What can you do?" from the menu |
+| `kind=reflect day=2026-10-11 weekday=Saturday` | a finished day, looked back on while the person is away; offered only the memory tools, `diary` and `stay_silent`, and its words are never shown |
 
 The current focused window and the time of day ride on each turn
 separately, as context, along with the goals the ghost keeps an eye on,

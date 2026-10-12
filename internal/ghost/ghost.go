@@ -256,6 +256,9 @@ type Ghost struct {
 	// modelCfg is the model this ghost thinks with ([model] and its
 	// [model.ghost.<name>] table).
 	modelCfg model.Config
+	// reflection is [memory] reflection: who writes the day's diary entry
+	// (reflect.go), "character" or "side".
+	reflection string
 	// cur is the turn in flight on the model brain, nil between turns.
 	cur     atomic.Pointer[turn]
 	store   Store
@@ -774,6 +777,7 @@ func (g *Ghost) applySettings(cfg *config.File) error {
 	// out when used). Conversation is the model's, [model].
 	g.backend = backend.NewServiceWith(cfg.Backend, g.log, g.opts.Budgets)
 	g.modelCfg = cfg.ModelFor(g.manifest.Ghost.Name)
+	g.reflection = cfg.Memory.ReflectionMode()
 	g.applyConversation(cfg.Conversation)
 
 	// The folders the person shared. One that cannot be opened (a drive
