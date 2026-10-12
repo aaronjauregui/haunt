@@ -540,3 +540,24 @@ func TestCachedTokens(t *testing.T) {
 		t.Errorf("usage = %+v", usage)
 	}
 }
+
+// A slot set goes as id_slot; unset, the body has no such key, so a
+// provider that does not know it is never sent it.
+func TestSlotInBody(t *testing.T) {
+	srv := fake.NewT(t, fake.Rule{Reply: "ok"})
+	c := New(Config{BaseURL: srv.BaseURL()})
+	slot := 1
+	stream(t, c, Request{Messages: user("hi"), Slot: &slot})
+	if got := srv.Last()["id_slot"]; got != 1.0 {
+		t.Errorf("id_slot = %v, want 1", got)
+	}
+	zero := 0
+	stream(t, c, Request{Messages: user("hi"), Slot: &zero})
+	if got, ok := srv.Last()["id_slot"]; !ok || got != 0.0 {
+		t.Errorf("id_slot = %v (sent %v), want 0", got, ok)
+	}
+	stream(t, c, Request{Messages: user("hi")})
+	if got, ok := srv.Last()["id_slot"]; ok {
+		t.Errorf("id_slot sent unset as %v", got)
+	}
+}

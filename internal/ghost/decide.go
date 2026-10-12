@@ -505,6 +505,7 @@ func (b *modelBrain) decideRound(ctx context.Context, t *turn, msgs []model.Mess
 		// the wait; off for events, which mostly end in silence.
 		Thinking: t.person,
 		Sampling: b.g.manifest.Persona.Sampling,
+		Slot:     b.decideSlot,
 	}
 	// The person's turn streams as it comes; an event's words wait
 	// until the model has decided they are words.
@@ -648,6 +649,7 @@ func (b *modelBrain) speakWords(ctx context.Context, msgs []model.Message, p *pa
 		Prefill:  prefill,
 		Thinking: false,
 		Sampling: b.g.manifest.Persona.Sampling,
+		Slot:     b.speakSlot,
 	}, held.delta)
 	held.flush()
 	if r.usage != nil {

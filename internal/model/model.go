@@ -50,6 +50,13 @@ type Config struct {
 	// StallSeconds is how long a call that has shown a sign of life may
 	// then go with nothing on its stream; 0 is DefaultStall.
 	StallSeconds int `toml:"stall_timeout"`
+	// Slots is the llama-server slot for the calls with tools and the
+	// one for the calls without, sent as id_slot; nil sends none. The
+	// deciding call and the speak call share little of their prompts,
+	// and on one slot each pushes the other's out of the cache; pinned
+	// apart, each finds its own prompt where it left it. Only
+	// llama-server reads id_slot, so it is sent only when set.
+	Slots *[2]int `toml:"slots"`
 }
 
 // Default deadlines. A local server processes a cold prompt at a few
@@ -146,6 +153,10 @@ type Request struct {
 	// Sampling is laid over Config.Sampling field by field.
 	Sampling Sampling
 	Stop     []string
+	// Slot pins the call to one llama-server slot (id_slot), so calls
+	// of one kind keep finding their prompt in its cache. Nil leaves the
+	// choice to the server and sends nothing.
+	Slot *int
 }
 
 // EventKind says what an Event carries.
@@ -266,6 +277,9 @@ func (c Config) Over(o Config) Config {
 	}
 	if o.StallSeconds != 0 {
 		c.StallSeconds = o.StallSeconds
+	}
+	if o.Slots != nil {
+		c.Slots = o.Slots
 	}
 	c.Sampling = c.Sampling.Over(o.Sampling)
 	return c

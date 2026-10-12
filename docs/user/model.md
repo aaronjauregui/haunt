@@ -62,6 +62,18 @@ before its first word, so the first turn after a start can take a minute.
 The server keeps the prompt in its cache between turns, and later turns
 start in a second or two.
 
+A turn's two calls ([How a turn goes](#how-a-turn-goes)) have different
+prompts: the deciding call declares the ghost's tools and the call that
+writes the words does not. On one server slot each call pushes the
+other's prompt out of the cache, and every turn reads most of its prompt
+again. `slots = [0, 1]` under `[model]` pins the calls with tools to
+slot 0 and the rest (the words, the summary of older turns) to slot 1,
+so each finds its own prompt where it left it. The server needs at
+least two slots, which it has by default (`-np` unset gives four, with
+one cache shared between them, so the second slot costs no memory). The
+pair is sent as llama-server's `id_slot`, so set it only for
+llama-server; unset, no slot is named and the server picks.
+
 ## A cloud model
 
 A key is never in the config. Name the environment variable that holds
@@ -172,6 +184,7 @@ All under `[model]` ([Configuration](config.md)):
 | `thinking` | the provider's | `off`, `low`, `medium`, `high` |
 | `first_token_timeout` | 120 local, 90 cloud | seconds a call may go without a sign of life |
 | `stall_timeout` | 120 | seconds a call under way may go quiet |
+| `slots` | none | llama-server only: `[decide, words]` slot numbers, such as `[0, 1]`, two different numbers from 0 |
 | `[model.sampling]` | the provider's | `temperature`, `top_p`, `min_p`, `repeat_penalty`, `dry_multiplier`, `xtc_probability` |
 | `[model.ghost.<name>]` | none | any key above, for one ghost |
 

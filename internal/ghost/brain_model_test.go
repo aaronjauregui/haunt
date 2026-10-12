@@ -89,6 +89,7 @@ type request struct {
 			Name string `json:"name"`
 		} `json:"function"`
 	} `json:"tools"`
+	Slot *int `json:"id_slot"`
 }
 
 func requests(t *testing.T, srv *fake.Server) []request {
@@ -463,6 +464,56 @@ func TestTaintOnTurn(t *testing.T) {
 	// The taint was the turn's, and went with it.
 	if g.current() != nil {
 		t.Error("the turn is still the ghost's after it ended")
+	}
+}
+
+// TestSlotsPinned: with [model] slots, every call with tools (the decide
+// rounds) goes to the first slot and every call without (the speak call,
+// the summary) to the second; unset, no call names a slot.
+func TestSlotsPinned(t *testing.T) {
+	rules := []fake.Rule{
+		{Match: "them: ", Reply: "We talked about the oven, at length."},
+		{Match: "", AfterTool: speakCue, Reply: strings.Repeat("A long and winding answer, ", 6)},
+		{Match: "", Calls: []fake.Call{{Name: speakName}}},
+	}
+	g, b, srv := modelGhostWith(t, 0, model.Config{ContextLength: 3400, Slots: &[2]int{0, 1}}, rules...)
+	g.markPrompted()
+	summarised := func() bool {
+		rows, _ := b.tr.live()
+		return len(rows) > 0 && rows[0].Kind == rowSummary
+	}
+	for i := 0; i < 40 && !summarised(); i++ {
+		b.Deliver(proto.Event{Type: proto.EventMessage, Text: "tell me about the oven, number " + string(rune('a'+i%26))})
+		waitTurns(t, b, i+1)
+	}
+	if !summarised() {
+		t.Fatal("the transcript was never summarised")
+	}
+	withTools, without := 0, 0
+	for i, r := range requests(t, srv) {
+		want := 1
+		if len(r.Tools) > 0 {
+			want = 0
+			withTools++
+		} else {
+			without++
+		}
+		if r.Slot == nil || *r.Slot != want {
+			t.Errorf("request %d (%d tools) id_slot = %v, want %d", i, len(r.Tools), r.Slot, want)
+		}
+	}
+	if withTools == 0 || without < 2 {
+		t.Errorf("%d calls with tools and %d without; want decide, speak and summary calls", withTools, without)
+	}
+
+	g, b, srv = modelGhost(t, 0, speaks("hello", "smile", "Hi.")...)
+	g.markPrompted()
+	b.Deliver(proto.Event{Type: proto.EventMessage, Text: "hello"})
+	waitTurns(t, b, 1)
+	for i, r := range requests(t, srv) {
+		if r.Slot != nil {
+			t.Errorf("slots unset: request %d sent id_slot %d", i, *r.Slot)
+		}
 	}
 }
 

@@ -88,6 +88,7 @@ trust = ""                      # "local" or "cloud"; empty judges by base_url's
 thinking = ""                   # "off", "low", "medium" or "high"; empty: the provider's default. "off" suits a local model
 # first_token_timeout = 120     # seconds a call may go without a sign of life; default 120 local, 90 cloud
 stall_timeout = 120             # seconds a call under way may then go quiet
+# slots = [0, 1]               # llama-server only: the slot for the deciding call, then for the words; unset names none
 
 [model.sampling]                # each unset key is the provider's default
 # temperature = 0.8

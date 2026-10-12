@@ -46,6 +46,12 @@ type modelBrain struct {
 	g      *Ghost
 	client model.Client
 	cfg    model.Config
+	// decideSlot is the server slot for the calls with tools (the decide
+	// rounds) and speakSlot the one for every call without (the speak
+	// call, compaction): [model] slots, read once; nil when unset, which
+	// sends no slot. Each kind of call then finds its own prompt in the
+	// server's cache instead of the other kind's.
+	decideSlot, speakSlot *int
 
 	tr  *transcript
 	mem memory.Store // nil when the ghost has no state directory
@@ -175,6 +181,10 @@ func newModelBrain(g *Ghost, p brainParts) (*modelBrain, error) {
 		turns:  make(chan *turn, turnQueue),
 		done:   make(chan struct{}),
 	}
+	if sl := p.cfg.Slots; sl != nil {
+		decide, speak := sl[0], sl[1]
+		b.decideSlot, b.speakSlot = &decide, &speak
+	}
 	trPath := ":memory:"
 	if p.stateDir != "" {
 		trPath = filepath.Join(p.stateDir, "transcript.db")
@@ -262,6 +272,7 @@ func (b *modelBrain) compact() {
 				{Role: "user", Content: text},
 			},
 			Thinking: false,
+			Slot:     b.speakSlot,
 		}, nil)
 		return r.text, err
 	})
