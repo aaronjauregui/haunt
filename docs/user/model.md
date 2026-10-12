@@ -68,11 +68,15 @@ writes the words does not. On one server slot each call pushes the
 other's prompt out of the cache, and every turn reads most of its prompt
 again. `slots = [0, 1]` under `[model]` pins the calls with tools to
 slot 0 and the rest (the words, the summary of older turns) to slot 1,
-so each finds its own prompt where it left it. The server needs at
-least two slots, which it has by default (`-np` unset gives four, with
-one cache shared between them, so the second slot costs no memory). The
-pair is sent as llama-server's `id_slot`, so set it only for
-llama-server; unset, no slot is named and the server picks.
+so each finds its own prompt where it left it. The server must give
+each slot its own cache: start it with `-np 2 --no-kv-unified`. With
+the default (slots chosen by the server, one unified cache shared
+between them) a call on one slot evicts what the other slot kept, and
+pinning gains nothing. Separate slots split the context between them
+(`-c 32768 -np 2` gives each 16384), so set `context_length` to a
+slot's share, not the whole. The pair is sent as llama-server's
+`id_slot`, so set it only for llama-server; unset, no slot is named and
+the server picks.
 
 ## A cloud model
 

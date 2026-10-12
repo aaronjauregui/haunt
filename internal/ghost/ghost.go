@@ -322,6 +322,10 @@ type Ghost struct {
 	// unprompted policy (files.go). Nil until the settings are applied.
 	files    *files.Roots
 	filesCfg config.FilesConfig
+	// awayAfter is [initiative] away_hours: the gap since the last
+	// exchange past which the model brain sends the returned event
+	// (brain_model.go). Zero sends none.
+	awayAfter time.Duration
 	// sess is the session model the watch loop is feeding, reachable from
 	// here so teardown can write its state out while the store is still
 	// open. The loop owns Observe; sessMu is what lets anyone else read it.
@@ -779,6 +783,7 @@ func (g *Ghost) applySettings(cfg *config.File) error {
 	g.modelCfg = cfg.ModelFor(g.manifest.Ghost.Name)
 	g.reflection = cfg.Memory.ReflectionMode()
 	g.applyConversation(cfg.Conversation)
+	g.awayAfter = cfg.Initiative.AwayAfter()
 
 	// The folders the person shared. One that cannot be opened (a drive
 	// not mounted) is a warning, not a failure: it is listed as

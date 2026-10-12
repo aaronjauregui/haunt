@@ -244,8 +244,9 @@ func standingRules(s standing) string {
 	}
 	rule("A message beginning `" + EnvelopePrefix + "` is the desktop telling you something happened, " +
 		"not the person. Anything else is the person talking to you; call them \"you\".")
-	rule("Most events get `stay_silent`. Speak on one only at boot, on `kind=help`, `kind=intention_due` " +
-		"or `kind=goal_quiet`, or when a skill for it says to. A changed window, an idle desk or another " +
+	rule("Most events get `stay_silent`. Speak on one only at boot, on `kind=help`, `kind=intention_due`, " +
+		"`kind=goal_quiet` or `kind=returned` (a long gap since you last talked), or when a skill for it says to. " +
+		"A changed window, an idle desk or another " +
 		"ghost talking almost never earns a remark, and never two in a row.")
 	rule("When a skill in your list covers the request or the event, call `skill_view` with its `name` " +
 		"first and follow its steps in order.")
@@ -387,7 +388,8 @@ func afterReading(w trust, both bool) string {
 }
 
 // turnContext is the ambient context layered on a turn: the time, what the
-// ghost can see when it is allowed to see anything, the goals it keeps an
+// ghost can see when it is allowed to see anything, how long since it and
+// the person last spoke (lastExchangeLine), the goals it keeps an
 // eye on, anything whose moment came without it being said, then the notes
 // it has left, its mood today, the memory lines keyed by the person's
 // words, and whether a conversation is open, in that order.
@@ -403,6 +405,9 @@ func (g *Ghost) turnContext(now time.Time) string {
 	line := "Now: " + now.Format("Mon 2 Jan 15:04") + " (" + partOfDay(now) + ")."
 	if w := g.currentWindow().line(); w != "" && g.capabilityActive("window") {
 		line += " The person's focused window: " + w + "."
+	}
+	if last := g.lastExchangeLine(now); last != "" {
+		line += "\n" + last
 	}
 	var owed, goals []string
 	for _, it := range g.loadIntentions() {

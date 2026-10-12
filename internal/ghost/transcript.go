@@ -220,6 +220,22 @@ func (t *transcript) all() ([]TranscriptRow, error) {
 	return queryRows(t.db, `ORDER BY turn, id`)
 }
 
+// lastExchange is when the person or the ghost last said something: the
+// at of the newest input or words row, compacted or not, since a summary
+// does not make a conversation more recent. Events and silences are not
+// exchanges. False before the first, or when the file cannot be read.
+func (t *transcript) lastExchange() (time.Time, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	var at string
+	err := t.db.QueryRow(`SELECT at FROM rows WHERE kind IN (?, ?) ORDER BY id DESC LIMIT 1`, rowInput, rowWords).Scan(&at)
+	if err != nil {
+		return time.Time{}, false
+	}
+	when, err := time.Parse(time.RFC3339Nano, at)
+	return when, err == nil
+}
+
 // TranscriptHit is one line of the conversation recall found.
 type TranscriptHit struct {
 	Turn int64

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func write(t *testing.T, body string) {
@@ -466,5 +467,36 @@ func TestMemoryReflection(t *testing.T) {
 	write(t, "[memory]\nreflection = \"dream\"\n")
 	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "config.toml") || !strings.Contains(err.Error(), "reflection") {
 		t.Errorf("a bad mode: %v", err)
+	}
+}
+
+// [initiative] away_hours defaults to eight hours, reads a number, takes 0
+// as off, and refuses a negative.
+func TestAwayHours(t *testing.T) {
+	write(t, "")
+	f, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.Initiative.AwayAfter(); got != 8*time.Hour {
+		t.Errorf("default away_hours: %v, want 8h", got)
+	}
+	write(t, "[initiative]\naway_hours = 12\n")
+	if f, err = Load(); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.Initiative.AwayAfter(); got != 12*time.Hour {
+		t.Errorf("away_hours = 12: %v", got)
+	}
+	write(t, "[initiative]\naway_hours = 0\n")
+	if f, err = Load(); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.Initiative.AwayAfter(); got != 0 {
+		t.Errorf("away_hours = 0: %v, want off", got)
+	}
+	write(t, "[initiative]\naway_hours = -1\n")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "away_hours") {
+		t.Errorf("a negative away_hours: %v", err)
 	}
 }

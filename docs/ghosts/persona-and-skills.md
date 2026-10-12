@@ -53,8 +53,8 @@ from the manifest, the shell and the person's config:
 1. A message beginning `[haunt event]` is the desktop telling the ghost
    something happened, not the person. Address the person as "you".
 2. Most events get `stay_silent`. It speaks on one only at boot, on
-   `kind=help`, a reminder come due, a goal gone quiet, or when a skill
-   says to; a window change, an idle desk or another ghost almost never
+   `kind=help`, a reminder come due, a goal gone quiet, coming back
+   after a long gap (`kind=returned`), or when a skill says to; a window change, an idle desk or another ghost almost never
    earns a remark, and never two in a row.
 3. When a skill covers the request or the event, it opens the skill
    with `skill_view` first and follows its steps.
@@ -106,9 +106,11 @@ or a persona may name them:
 | `kind=told from="Moth" text="…"` | a neighbour addressed this ghost |
 | `kind=help` | the person picked "What can you do?" from the menu |
 | `kind=reflect day=2026-10-11 weekday=Saturday` | a finished day, looked back on while the person is away; offered only the memory tools, `diary` and `stay_silent`, and its words are never shown |
+| `kind=returned since=3d last="Thursday evening"` | the last exchange was longer ago than `[initiative] away_hours` (8 by default): at boot, or when the person is back after going idle; once per gap |
 
 The current focused window and the time of day ride on each turn
-separately, as context, along with the goals the ghost keeps an eye on,
+separately, as context, along with how long since the last exchange
+(`Last exchange: 3 days ago (Thursday evening).`), the goals the ghost keeps an eye on,
 any errand that came due and was not yet dealt with, the notes it has
 left on the desktop (a note the person clicks away simply stops being
 listed; no event says so), the mood it set today, the lines from
