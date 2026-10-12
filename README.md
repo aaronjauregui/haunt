@@ -25,6 +25,7 @@ right-click to type at it.
 
     make demo-ai      # the ghost above: also needs a model in [model]
     make demo-troupe  # two at once, one scripted and one thinking
+    make demo-ember   # a warmer, chattier persona ghost on the same model
 
 `demo-ai` is what the picture shows, and what it asks of you is in
 [The model](docs/user/model.md).
