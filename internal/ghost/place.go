@@ -138,12 +138,14 @@ func clampTo(o wlclient.Output, x, y int) (int, int) {
 	return x, y
 }
 
-// balloonPos computes the balloon anchor for a panel lw wide: beside the
-// sprite, vertically near its top, on whichever side has room.
-func (g *Ghost) balloonPos(lw int32) (int32, int32) {
-	x, y, w, _ := g.surface.Geometry()
-	edge, known := g.outputWidth()
-	return balloonSide(x, w, lw, edge, known), y
+// balloonPos computes the top-left corner for a panel lw by lh: beside
+// the sprite on whichever side has room (balloonSide), and level with it
+// on whichever edge keeps it on the screen (balloonTop). up is for the
+// conversation panel, which stands on the ghost's feet and grows upward.
+func (g *Ghost) balloonPos(lw, lh int32, up bool) (int32, int32) {
+	x, y, w, h := g.surface.Geometry()
+	sw, sh, known := g.outputSize()
+	return balloonSide(x, w, lw, sw, known), balloonTop(y, h, lh, sh, known, up)
 }
 
 // balloonSide picks which side of the sprite a panel of width lw sits on.
@@ -167,18 +169,44 @@ func balloonSide(x, w, lw, edge int32, known bool) int32 {
 	return right
 }
 
-// outputWidth is the width of the screen this ghost is on. Not the first
+// balloonTop picks the top of a panel lh tall beside a sprite whose top is
+// at y and which is h tall, on a screen floor high. It is balloonSide's
+// rule turned on its side.
+//
+// A line, a question or a status line hangs from the ghost's top edge, so
+// it starts where a reader looks first; when that would run past the
+// bottom of the screen it stands on the ghost's bottom edge instead. A
+// ghost's default spot is the bottom right, so this is the tall reply in
+// the ordinary corner, not a corner case.
+//
+// The conversation panel (up) always stands on the ghost's bottom edge.
+// It grows as lines arrive and as the box takes rows, and growing upward
+// is what keeps the line being typed in one place: the transcript stacks
+// above it, away from the bottom of the screen, rather than pushing the
+// box down and off it.
+//
+// Either way the top never goes above the screen's top: a panel taller
+// than the room above the ghost's feet starts at y = 0 and overlaps
+// whatever is below, which beats losing its first lines.
+func balloonTop(y, h, lh, floor int32, known, up bool) int32 {
+	top := y
+	if up || (known && y+lh > floor) {
+		top = y + h - lh
+	}
+	return max(top, 0)
+}
+
+// outputSize is the size of the screen this ghost is on. Not the first
 // screen: on a two-monitor desk those are different questions, and the one
 // that matters is where the balloon is about to be drawn.
-func (g *Ghost) outputWidth() (int32, bool) {
+func (g *Ghost) outputSize() (w, h int32, known bool) {
 	if g.app == nil {
-		return 0, false
+		return 0, 0, false
 	}
 	if g.outputName != "" {
 		if o, ok := g.app.OutputNamed(g.outputName); ok {
-			return o.W, true
+			return o.W, o.H, true
 		}
 	}
-	w, _, known := g.app.OutputSize()
-	return w, known
+	return g.app.OutputSize()
 }

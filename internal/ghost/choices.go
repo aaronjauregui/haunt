@@ -180,8 +180,9 @@ func (g *Ghost) showChoiceSprite(sp *sprite.Sprite) {
 	w, h := sp.Size()
 	lw, lh := g.renderer().LogicalSize(w, h)
 	// A menu is placed like any other line, and flips to the ghost's other
-	// side for the same reason: options you cannot see cannot be chosen.
-	x, y := g.balloonPos(int32(lw))
+	// side, or stands on its feet, for the same reason: options you cannot
+	// see cannot be chosen.
+	x, y := g.balloonPos(int32(lw), int32(lh), false)
 	bln, err := g.app.CreateSpriteOpts(sp, x, y, wlclient.SurfaceOptions{
 		Fixed:    true,
 		LogicalW: int32(lw),

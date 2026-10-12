@@ -190,6 +190,18 @@ constraint on changes, not a history.
   went away while the person was still reading it would be the driver
   taking the conversation back mid-sentence. A click on the ghost during
   one is a poke, not a closing; clicking away is the keyboard leaving.
+- **A balloon goes where it can be read, beside the ghost.** To the
+  right by default and to the left when the right has no room; level
+  with the ghost's top by default and with its bottom when the top would
+  run it off the screen. The default spot is the bottom right, so both
+  flips are the ordinary case. The conversation is the exception: it
+  always stands on the ghost's feet and grows upward, capped at the room
+  above them, because a panel that grows as lines arrive and the box
+  takes rows has to grow away from the line being typed, and down is
+  usually off the screen. The cost is a drop of up to the ghost's height when a
+  conversation opens on a short balloon hanging from the ghost's top;
+  it is lost in the panel widening at the same moment, and it keeps the
+  ordinary line where a reader looks first.
 - **Ending a conversation is the one surface lifetime a ghost decides,
   and it is switchable.** Escape, the keyboard leaving and a quiet spell
   are the driver's; `end_conversation` lets the ghost say goodbye and

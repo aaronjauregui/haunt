@@ -317,7 +317,7 @@ func (g *Ghost) notePlace(n DeskNote, w, h int) (out string, x, y int, placed bo
 		g.log.Info(hlog.Place, "a note's screen %q is not connected; placing it again", n.Output)
 	}
 	gx, gy, gw, _ := g.surface.Geometry()
-	edge, known := g.outputWidth()
+	edge, _, known := g.outputSize()
 	x = int(balloonSide(gx, gw, int32(w), edge, known))
 	y = stackNote(x, int(gy), w, h, g.notes.rects())
 	if sp := g.opts.Spots; sp != nil {

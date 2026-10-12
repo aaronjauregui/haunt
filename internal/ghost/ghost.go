@@ -1472,8 +1472,11 @@ func (g *Ghost) showBalloonSpriteScroll(sp *sprite.Sprite, onScroll func(steps i
 	w, h := sp.Size()
 	lw, lh := g.renderer().LogicalSize(w, h)
 	// Measured before it is placed: which side of the ghost the panel goes
-	// on depends on how wide it is.
-	x, y := g.balloonPos(int32(lw))
+	// on depends on how wide it is, and which edge it is level with on how
+	// tall. The conversation panel, the one the wheel scrolls, grows
+	// upward from the ghost's feet.
+	x, y := g.balloonPos(int32(lw), int32(lh), onScroll != nil)
+	g.log.Debug(hlog.Balloon, "balloon at %d,%d, %dx%d, conversation=%v", x, y, lw, lh, onScroll != nil)
 	bln, err := g.app.CreateSpriteOpts(sp, x, y, wlclient.SurfaceOptions{
 		PassThrough: onScroll == nil,
 		Fixed:       onScroll != nil,
@@ -1584,10 +1587,11 @@ func (g *Ghost) placeBalloon() {
 	if bln == nil {
 		return
 	}
-	// The panel's own width, so a ghost dragged towards the right edge
-	// flips its balloon over rather than dragging it off the screen.
-	_, _, lw, _ := bln.Geometry()
-	x, y := g.balloonPos(lw)
+	// The panel's own size, so a ghost dragged towards the right edge or
+	// the bottom flips its balloon over rather than dragging it off the
+	// screen.
+	_, _, lw, lh := bln.Geometry()
+	x, y := g.balloonPos(lw, lh, bln.OnScroll != nil)
 	if err := bln.MoveTo(x, y); err != nil {
 		g.log.Warn(hlog.Balloon, "balloon follow failed: %v", err)
 	}

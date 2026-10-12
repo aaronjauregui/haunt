@@ -147,16 +147,18 @@ system = "You are Wisp."
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "box.png")
-	bottom := func(above int) int {
+	// The panel stands on the ghost's feet and grows upward, so growing
+	// is its top rising.
+	top := func(below int) int {
 		t.Helper()
 		deadline := time.Now().Add(10 * time.Second)
 		for {
-			b := balloonBottom(shot(t, c, path), spriteX, spriteY)
-			if b > above {
-				return b
+			top, _ := panelRows(shot(t, c, path), spriteX+180, spriteX+640)
+			if top >= 0 && top < below {
+				return top
 			}
 			if time.Now().After(deadline) {
-				t.Fatalf("the panel's bottom stayed at %d, want below %d", b, above)
+				t.Fatalf("the panel's top stayed at %d, want above %d", top, below)
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
@@ -164,15 +166,15 @@ system = "You are Wisp."
 
 	// The box grows a row for a backslash-Enter, and Enter sends both
 	// lines as one message.
-	one := bottom(0)
+	one := top(1 << 20)
 	if err := kb.Type(`the first line\`); err != nil {
 		t.Fatal(err)
 	}
 	if err := kb.Key(keyEnter); err != nil {
 		t.Fatal(err)
 	}
-	if two := bottom(one + 10); two > one+40 {
-		t.Errorf("the box grew from %d to %d for one row", one, two)
+	if two := top(one - 10); two < one-40 {
+		t.Errorf("the box grew from a top at %d to %d for one row", one, two)
 	}
 	if err := kb.Type("goes on here"); err != nil {
 		t.Fatal(err)
@@ -194,7 +196,7 @@ system = "You are Wisp."
 	}
 
 	// The wheel over the panel, not the ghost, scrolls it.
-	b := bottom(0)
+	_, b := panelRows(shot(t, c, path), spriteX+180, spriteX+640)
 	if err := ptr.MoveTo(spriteX+400, b-15); err != nil {
 		t.Fatal(err)
 	}
@@ -295,10 +297,10 @@ system = "You are Wisp."
 	waitLogCount(t, stderr, "turn over: person", 1)
 
 	path := filepath.Join(dir, "poke.png")
-	var before int
+	before := -1
 	deadline := time.Now().Add(10 * time.Second)
-	for before == 0 {
-		if before = balloonBottom(shot(t, c, path), spriteX, spriteY); before == 0 && time.Now().After(deadline) {
+	for before < 0 {
+		if before, _ = panelRows(shot(t, c, path), spriteX+180, spriteX+640); before < 0 && time.Now().After(deadline) {
 			t.Fatal("no conversation panel beside the ghost")
 		}
 	}
@@ -308,15 +310,16 @@ system = "You are Wisp."
 	if err := ptr.Release(); err != nil {
 		t.Fatal(err)
 	}
-	// One entry is a line of text and the gap after it.
+	// One entry is a line of text and the gap after it, and the panel
+	// grows upward by it.
 	deadline = time.Now().Add(10 * time.Second)
 	for {
-		after := balloonBottom(shot(t, c, path), spriteX, spriteY)
-		if after >= before+20 {
+		after, _ := panelRows(shot(t, c, path), spriteX+180, spriteX+640)
+		if after >= 0 && after <= before-20 {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the panel's bottom is at %d after the poke, %d before: the poke's line is not in the view", after, before)
+			t.Fatalf("the panel's top is at %d after the poke, %d before: the poke's line is not in the view", after, before)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -330,18 +333,21 @@ system = "You are Wisp."
 	}
 }
 
-// balloonBottom is the lowest row of a balloon beside the sprite, or 0
-// when there is none.
-func balloonBottom(img image.Image, spriteX, spriteY int) int {
-	bottom := 0
-	for y := spriteY; y < img.Bounds().Max.Y; y++ {
-		for x := spriteX + 180; x < min(spriteX+640, img.Bounds().Max.X); x++ {
+// panelRows is the first and last rows of a balloon's navy between
+// columns x0 and x1, anywhere on the screen, or -1, -1 when there is none.
+func panelRows(img image.Image, x0, x1 int) (top, bottom int) {
+	top, bottom = -1, -1
+	for y := img.Bounds().Min.Y; y < img.Bounds().Max.Y; y++ {
+		for x := max(x0, img.Bounds().Min.X); x < min(x1, img.Bounds().Max.X); x++ {
 			r, g, b, _ := img.At(x, y).RGBA()
 			if r>>8 < 60 && g>>8 < 60 && b>>8 > 40 && b>>8 < 90 {
+				if top < 0 {
+					top = y
+				}
 				bottom = y
 				break
 			}
 		}
 	}
-	return bottom
+	return top, bottom
 }

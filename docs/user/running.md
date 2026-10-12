@@ -123,8 +123,13 @@ are typing beneath. Your lines sit on the right, marked `you`; the
 ghost's sit on the left beside its name, with its pictures as
 thumbnails. Your line appears there as soon as you press Enter, with
 `thinking...` ticking beneath it until the ghost's words start to
-stream in below it, or until it ends its turn without a word. The balloon
-grows until it is about 520 pixels tall; past that, the wheel over the
+stream in below it, or until it ends its turn without a word. The
+conversation stands level with the ghost's feet and grows upward, so the
+line you are typing stays where it is while what was said stacks above
+it; an ordinary balloon hangs from the ghost's top instead, unless that
+would run it off the bottom of the screen. The conversation grows until
+it is about 520 pixels tall, or as tall as the room above the ghost's
+feet when that is less (but never under 200); past that, the wheel over the
 ghost or over the conversation scrolls back through the earlier lines,
 three at a step, as do Shift+Up and Shift+Down, and PageUp and PageDown
 go a page at a time. Scrolled back, the view stays where it is while the

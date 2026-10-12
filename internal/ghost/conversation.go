@@ -44,10 +44,15 @@ import (
 const conversationIdle = 3 * time.Minute
 
 // The conversation panel: wider than a remark's, for a few sentences, and
-// a little taller.
+// a little taller. It stands on the ghost's feet and grows upward
+// (balloonTop), so it is also no taller than the room above them, down to
+// conversationMinHeight: below that a panel shows too few lines to read a
+// conversation in, and is better overlapping the ghost from the top of the
+// screen.
 const (
-	conversationWidth  = 480
-	conversationHeight = 520
+	conversationWidth     = 480
+	conversationHeight    = 520
+	conversationMinHeight = 200
 )
 
 // conversation is the mode's state, under convMu.
@@ -60,9 +65,10 @@ type conversation struct {
 	idle *time.Timer
 	// idleAfter replaces conversationIdle when set, for tests.
 	idleAfter time.Duration
-	// rend is the conversation's renderer, kept for the scale it was
-	// built at.
-	rend *balloon.Renderer
+	// rend is the conversation's renderer, kept for the scale and the
+	// height cap it was built at.
+	rend    *balloon.Renderer
+	rendCap int
 	// said is the last line the ghost finished saying, which stays up
 	// when the conversation ends. Only sayInConversation sets it: words
 	// still streaming may yet be taken back, and are not the ghost's last
@@ -232,25 +238,30 @@ func (g *Ghost) endConversationIfAsked() {
 
 // conversationRenderer is the renderer for the conversation panel while
 // one is open, and base otherwise. It is the balloon's theme made wider,
-// built at base's scale and built again when that changes, so a ghost
-// dragged to a 200% screen mid-conversation is drawn sharp there too.
+// and capped at conversationCap, built at base's scale and built again
+// when either changes: a ghost dragged to a 200% screen mid-conversation
+// is drawn sharp there too, and one dragged up the screen gets a panel
+// that still fits above its feet.
 func (g *Ghost) conversationRenderer(base *balloon.Renderer) *balloon.Renderer {
 	if base == nil {
 		return nil
 	}
+	// Measured before convMu: the sprite's geometry is behind the Wayland
+	// connection's own lock.
+	capH := g.conversationCap()
 	g.convMu.Lock()
 	defer g.convMu.Unlock()
 	if !g.conv.open {
 		return base
 	}
-	if r := g.conv.rend; r != nil && r.Scale() == base.Scale() {
+	if r := g.conv.rend; r != nil && r.Scale() == base.Scale() && g.conv.rendCap == capH {
 		return r
 	}
 	theme := g.blnTheme
 	if theme.MaxWidth == 0 {
 		theme = balloon.DefaultTheme()
 	}
-	theme.MaxWidth, theme.MaxHeight = conversationWidth, conversationHeight
+	theme.MaxWidth, theme.MaxHeight = conversationWidth, capH
 	if g.manifest != nil {
 		theme.Speaker = g.manifest.Ghost.Name
 	}
@@ -259,8 +270,20 @@ func (g *Ghost) conversationRenderer(base *balloon.Renderer) *balloon.Renderer {
 		g.log.Warn(hlog.Balloon, "the conversation's balloon: %v", err)
 		return base
 	}
-	g.conv.rend = r
+	g.conv.rend, g.conv.rendCap = r, capH
 	return r
+}
+
+// conversationCap is how tall the conversation panel may grow, in logical
+// pixels: conversationHeight, or the room between the top of the screen
+// and the ghost's feet when that is less, but never under
+// conversationMinHeight. Without a compositor it is conversationHeight.
+func (g *Ghost) conversationCap() int {
+	if g.surface == nil || g.app == nil {
+		return conversationHeight
+	}
+	_, y, _, h := g.surface.Geometry()
+	return min(max(int(y+h), conversationMinHeight), conversationHeight)
 }
 
 // conversationScroll is how many lines one step of the wheel, or Shift
