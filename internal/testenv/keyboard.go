@@ -47,6 +47,11 @@ const keymapSource = `xkb_keymap {
 // separately or every capital arrives lowercase.
 const modShift = 1 << 0
 
+// keyLeftShift is the evdev code of the left shift key, which is pressed
+// as well as declared: the driver maps scancodes itself and reads shift
+// from the key, as it arrives from a real keyboard.
+const keyLeftShift = 42
+
 // NewKeyboard connects to the compositor and creates a virtual keyboard on
 // its seat.
 func (c *Compositor) NewKeyboard() (*Keyboard, error) {
@@ -154,7 +159,8 @@ func (k *Keyboard) Hold(code uint32, d time.Duration) error {
 	return k.roundtrip()
 }
 
-// Type sends the keys that produce s on a US layout, shift included.
+// Type sends the keys that produce s on a US layout, shift included, as
+// both the key and the modifier.
 // Characters the layout cannot produce are an error rather than a silent
 // omission: a test that thought it typed a password and typed "pssword"
 // would fail in a way nobody could read.
@@ -165,6 +171,9 @@ func (k *Keyboard) Type(s string) error {
 			return fmt.Errorf("no US-layout key produces %q", r)
 		}
 		if shift {
+			if err := k.kb.Key(k.tick(), keyLeftShift, statePressed); err != nil {
+				return err
+			}
 			if err := k.kb.Modifiers(modShift, 0, 0, 0); err != nil {
 				return err
 			}
@@ -173,6 +182,9 @@ func (k *Keyboard) Type(s string) error {
 			return err
 		}
 		if shift {
+			if err := k.kb.Key(k.tick(), keyLeftShift, stateReleased); err != nil {
+				return err
+			}
 			if err := k.kb.Modifiers(0, 0, 0, 0); err != nil {
 				return err
 			}

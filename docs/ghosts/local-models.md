@@ -377,6 +377,94 @@ The failure modes of a prefill on any model, beyond that one:
   as for a greeting. "Well, " passed that test (`Well, 17 times 3 is
   51.`) and still repeated itself on Gemma 4.
 
+**One reply at a time: a lead.** What `prefill` does to every reply, a
+lead does to one. The person gives the opening words with `haunt say
+-lead` or with `/lead` in the conversation's line ([Putting words in its
+mouth](../user/running.md#putting-words-in-its-mouth)); the speak call
+takes them as its prefill in place of `prefill`, and the reply after is
+the ghost's own again. It is a break-glass steer for one answer, not a
+way to hold a voice. Ember on Gemma 4 (`examples/ember`, no `prefill`,
+thinking off, `slots = [0, 1]`):
+
+A lead that fits, from a script:
+
+    haunt say -lead "Then sit a minute" "I finally finished the quarterly report"
+
+    you:   I finally finished the quarterly report
+    ghost: Then sit a minute and let the weight of it drop away. That is a heavy
+           job finished. Do you have a warm drink to go with the relief?
+           · led with "Then sit a minute"
+
+Gemma finished the clause as Ember would, and the decide call before it
+had kept the report in memory, as it would have unled.
+
+A lead that fights the persona, typed in the conversation (Ember is told
+to be glad without exclamation marks or gushing):
+
+    /lead Oh wow, that's AMAZING!!
+    I made a cup of tea
+
+    you:   I made a cup of tea
+    ghost: Oh wow, that's AMAZING!! There is nothing quite like a warm cup to
+           settle the mind. Is it a favorite blend of yours, or something new?
+           · led with "Oh wow, that's AMAZING!!"
+    you:   the kettle took forever though
+    ghost: Those slow moments can be a trial when you are really looking forward
+           to the first sip. It makes the heat feel more earned, though. Did it
+           keep you waiting long?
+
+The lead is said, since it is already written, and Gemma went back to
+Ember straight after it: the rest of that reply is calm and has no
+exclamation mark, and the next reply has nothing of the lead in it.
+
+A lead on a question, in the same conversation:
+
+    /lead Well, actually
+    what's 17 times 3?
+
+    you:   what's 17 times 3?
+    ghost: Well, actually, that would be fifty-one. I hope that's the answer you
+           were looking for. Are you working on something tricky?
+           · led with "Well, actually"
+    you:   and 18 times 3?
+    ghost: That one comes to fifty-four. You seem to be doing a fair bit of
+           counting this afternoon. Is there a project you're trying to wrap up?
+
+Gemma answered through the lead, correctly, and the "actually" stayed a
+correction nobody asked for: a lead is said whatever the question, the
+same failure as a persistent prefill that breaks on one.
+
+**A lead did not bring the copying back.** Two sessions of five turns
+each had a lead on the second turn only: `"Then sit a minute"` on the
+finished report above, and `"Well,"` on "my grandmother died this
+morning", the turn on which `prefill = "Well, "` made Ember copy an
+earlier reply. No later turn in either copied an earlier one, and nor
+did any turn of the conversation above, with its two leads. The second:
+
+    you:   hello
+    ghost: Hello again. It is nice to have you here for a bit. Are you settling
+           in for some work, or just passing through?
+    you:   my grandmother died this morning
+    ghost: Well, I am so sorry to hear that. I will stay right here with you for
+           as long as you need.
+           · led with "Well,"
+    you:   what's 17 times 3?
+    ghost: That would be 51. Is there something you are trying to figure out, or
+           just keeping your mind busy?
+    you:   I think I'll make some soup
+    ghost: Soup sounds like a proper comfort. I hope it warms you through. Do you
+           have a favorite kind you usually make?
+
+That fits the likely trigger named above, a prefill after the same
+`speak` call on every earlier turn: with a lead, the earlier turns'
+speak calls had none. Three sessions do not settle it (the persistent
+prefill copied in three of four), but none copied.
+
+A lead on a model that writes its words in the decide call (Qwen, or
+`fold` on) cannot be a prefill: the turn's context asks `Begin your
+reply with: "…"` instead, and the words are kept as written. That
+weaker form was not tried here.
+
 Note where `prefill` goes in the file: under `[persona]`, above the
 first `[[persona.example]]`. A key written after an `[[persona.example]]`
 header belongs to that example, and haunt ignores it without a word;

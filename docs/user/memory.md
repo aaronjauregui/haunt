@@ -306,7 +306,9 @@ on a `weekly` occasion or on request.
 `-why` shows whether a line answered you or an event, what window was in
 front of it, what it did, what it looked up in its memory and skills,
 and the turns where it chose to say nothing; a memory write that repeats
-a page or a file has a `!` line under it. `-n` counts turns here, and
+a page or a file has a `!` line under it, and a reply whose opening words
+you gave it ([Putting words in its mouth](running.md#putting-words-in-its-mouth))
+has `· led with "Well, actually"` under it. `-n` counts turns here, and
 lines without `-why`. The reasons live in the ghost's own store and only
 the last dozen turns keep them. The conversation is read from
 `transcript.db` without writing to it, so `haunt history` works whether

@@ -43,6 +43,15 @@ constraint on changes, not a history.
   round trip costs more than it buys: cloud by default. The decisions are
   a registry, a name, a schema and an apply function each, so a new
   behaviour is a new entry and never a new call shape.
+- **A lead is one reply's, and the model is not told of it.** The
+  person's steer for the words (`haunt say -lead`, `/lead` in the line)
+  lives on the turn and nowhere else: a prefill on every reply makes
+  Gemma 4 copy earlier replies, and a steer that outlived its reply would
+  be a persona edit nobody meant to make. It is the speak call's prefill
+  when the turn has one, and otherwise a line in the turn's context, the
+  weaker form. The standing rules never mention it and its transcript row
+  is never replayed, summarised or searched; `haunt history -why` marks
+  the reply led, so the opening is not taken for the ghost's choice.
 - **Memory is files.** Two always-present files (`self.md`, `you.md`) and
   topic files whose lines are facts, in Markdown the person can read and
   edit while the ghost runs; the FTS5 index in `state.db` is derived and

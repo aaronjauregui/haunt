@@ -145,6 +145,13 @@ type Event struct {
 	Text string `json:"text,omitempty"`
 	// From identifies the sending ghost for cross-ghost messages.
 	From string `json:"from,omitempty"`
+	// Lead, on a person's EventMessage, is the opening words of the
+	// ghost's reply to it: a one-shot steer, `haunt say -lead` or `/lead`
+	// in the input line. It applies to that reply and to nothing after
+	// it. The model brain opens the words with it; a brain that does not
+	// know it may ignore it, and one from another ghost (From set) never
+	// carries one.
+	Lead string `json:"lead,omitempty"`
 	// Tag echoes the tag of the intent this event answers, so a brain that
 	// has several AI requests in flight can tell their results apart.
 	Tag string `json:"tag,omitempty"`

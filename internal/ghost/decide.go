@@ -21,7 +21,8 @@ import (
 // driver's gates and applied, its result goes back as a tool message, and
 // the loop ends when the model calls a terminal decision. `speak` ends it
 // with the face to wear, and the words are then a second call, prose only,
-// with the persona's prefill and thinking off. `stay_silent` ends it with
+// with the persona's prefill (or, on a turn the person led, their lead)
+// and thinking off. `stay_silent` ends it with
 // nothing said. A provider with fold on (cloud by default) takes the words
 // from the decide call itself: the reply that calls `speak` carries them as
 // its text, so the pose and the words come in one round, and a reply of
@@ -158,6 +159,12 @@ func schemaOf(props ...string) json.RawMessage {
 // mark it. One turn is in flight per ghost (g.cur).
 type turn struct {
 	input string
+	// lead is the opening words the person put in the ghost's mouth for
+	// this turn's reply (proto.Event.Lead), or empty. It lives on the turn
+	// and nowhere else, so it is gone when the turn is: the speak call
+	// takes it as its prefill, and the decide call's context carries it as
+	// a hint for words written there (leadHint).
+	lead string
 	// person says someone is waiting on this turn: its words stream into
 	// the balloon as they arrive. An event turn's words are held until the
 	// model has decided to say something.
@@ -639,9 +646,14 @@ func (b *modelBrain) decide(ctx context.Context, t *turn, msgs []model.Message, 
 }
 
 // speakWords is the speak call: the conversation up to the decision, the
-// persona's prefill, thinking off and no tools, streamed through p.
-func (b *modelBrain) speakWords(ctx context.Context, msgs []model.Message, p *parts) (string, error) {
+// persona's prefill, thinking off and no tools, streamed through p. A
+// lead, when the person gave one, is the prefill in the persona's place:
+// it opens the words, and nothing of the persona's goes before it.
+func (b *modelBrain) speakWords(ctx context.Context, t *turn, msgs []model.Message, p *parts) (string, error) {
 	prefill := b.g.manifest.Persona.Prefill
+	if t.lead != "" {
+		prefill = t.lead
+	}
 	p.delta(prefill)
 	held := &heldCalls{out: p.delta}
 	r, err := stream(ctx, b.client, model.Request{

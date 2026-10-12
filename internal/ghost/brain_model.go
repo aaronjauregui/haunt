@@ -424,7 +424,7 @@ func (b *modelBrain) Deliver(e proto.Event) error {
 				F("from", e.From), F("text", text)), nil)
 			return nil
 		}
-		b.person(text)
+		b.person(text, strings.TrimSpace(e.Lead))
 
 	case proto.EventIdle:
 		b.lastIdle = time.Now()
@@ -652,9 +652,10 @@ func sinceShort(then, now time.Time) string {
 	}
 }
 
-// person queues the person's own words, verbatim.
-func (b *modelBrain) person(text string) {
-	if !b.queuePerson(&turn{input: text, person: true}) {
+// person queues the person's own words, verbatim, with the opening words
+// of the reply when they gave one (turn.lead).
+func (b *modelBrain) person(text, lead string) {
+	if !b.queuePerson(&turn{input: text, person: true, lead: lead}) {
 		b.g.log.Warn(hlog.Brain, "dropping %q: %d turns are already waiting", text, turnQueue)
 	}
 }
@@ -900,11 +901,14 @@ func (b *modelBrain) run(t *turn) (out turnOutcome) {
 
 	end, err := b.decide(ctx, t, msgs, p, nil)
 	words := ""
+	// spoke says the words came from a speak call, which a lead opens.
+	spoke := false
 	switch {
 	case err != nil:
 	case end.speak:
 		p.speaking(end.pose, !muted)
-		words, err = b.speakWords(ctx, end.msgs, p)
+		words, err = b.speakWords(ctx, t, end.msgs, p)
+		spoke = true
 		r, more := b.speakCalls(words)
 		if err != nil || !more {
 			words = beforeCalls(words)
@@ -914,12 +918,13 @@ func (b *modelBrain) run(t *turn) (out turnOutcome) {
 		// deciding. The loop takes up again from those calls, once.
 		p.retract(r.text)
 		end, err = b.decide(ctx, t, end.msgs, p, &r)
-		words = ""
+		words, spoke = "", false
 		switch {
 		case err != nil:
 		case end.speak:
 			p.speaking(end.pose, !muted)
-			words, err = b.speakWords(ctx, end.msgs, p)
+			words, err = b.speakWords(ctx, t, end.msgs, p)
+			spoke = true
 			words = beforeCalls(words)
 		case !end.silent:
 			words = end.words
@@ -953,6 +958,16 @@ func (b *modelBrain) run(t *turn) (out turnOutcome) {
 		Acted:      acted,
 		Window:     g.currentWindow(),
 	})
+	if t.lead != "" {
+		// Before the words, so history shows the ghost was led and the
+		// opening is not taken for its own choice; how, since only the
+		// speak call's lead is sure to open them.
+		how := leadHinted
+		if spoke {
+			how = leadPrefilled
+		}
+		b.record(t, TranscriptRow{Kind: rowLead, Text: t.lead, Tool: how})
+	}
 	if silent {
 		b.record(t, TranscriptRow{Kind: rowSilent})
 		// Nothing was said, so nobody was interrupted, so nothing is owed.

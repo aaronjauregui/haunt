@@ -54,7 +54,9 @@ the model decides what to make of an event and whether to say anything.
 One turn runs at a time per ghost, on the brain's worker.
 
 **Who wakes it.** `Deliver` runs on the bus and must not block. The
-person's words become a turn verbatim and queue (at most eight waiting).
+person's words become a turn verbatim and queue (at most eight waiting),
+with the message's `Lead` on the turn when they gave one ([A
+lead](#a-lead)).
 A poke is answered by the driver from a table and a double-click opens
 the driver's menu; neither reaches the model. Everything else is an
 unprompted turn, sent as an envelope only if the driver will pay for it
@@ -135,7 +137,7 @@ same from turn to turn so a provider's prompt cache holds:
 | 3 | system | the skills index, then the memory topic index | a skill or a topic changes |
 | 4 | the transcript | the summary rows if there are any, then every finished turn since | every turn |
 | 5 | user | this turn's input: the person's words verbatim, or an envelope | every turn |
-| 6 | system | the turn's context, then a two-line persona reminder | every turn |
+| 6 | system | the turn's context, then a two-line persona reminder, then on a led turn the lead's hint | every turn |
 
 Part 6 is the time and part of day, the focused window when `window` is
 granted, then on a line of its own how long since the last exchange
@@ -169,6 +171,8 @@ Last, `In conversation: yes.` while a conversation is open
 `[persona] system` and "Stay in character.": it sits after the
 transcript, against the character thinning out over a long conversation,
 and since it is last only the suffix is recomputed on a cached prompt.
+On a turn the person led, one more line closes the part, `Begin your
+reply with: "Well, actually"` (`leadHint`; [A lead](#a-lead)).
 
 Part 2 ends with the diary (`diary.go`), as `Your diary, last days:` and
 one line per day for the `diaryDays` (3) calendar days before today, each
@@ -277,7 +281,8 @@ and its result, `[persona] prefill` as a trailing assistant message,
 thinking off, no tools, `[persona.sampling]` laid over the config's. The
 pose goes on with the first words shown, and the prefill is shown as
 the opening of the words. llama-server echoes a prefill in its first
-delta; the client strips a leading copy.
+delta; the client strips a leading copy. On a led turn the lead is the
+prefill in the persona's place.
 
 **Calls in the speak call.** The speak call offers no tools, so a model
 that decided to speak with a step still to take (an `ask` from the
@@ -317,6 +322,42 @@ tools or not, go to the second slot ([Reflection](#reflection)): a
 reflection turn's prompt ends differently from a person's turn, and on
 the decide slot it would push out the prompt the person's next turn
 reuses.
+
+## A lead
+
+A lead is the opening words of one reply, put in the ghost's mouth by
+the person as a break-glass steer: `haunt say -lead "Well, actually"
+"…"`, or `/lead Well, actually` in the input line followed by the line
+it goes with (`input.go`; in a conversation and out of one alike). Both
+are the message event with `Lead` set (`proto.Event.Lead`, over the
+control socket for `say`), which `Deliver` puts on the person's turn
+(`turn.lead`). It lives on the turn and nowhere else, so it is gone when
+the turn is: never on a later turn, never across a restart. A message
+from another ghost carries none.
+
+Which call writes the words is not known until the decide loop ends, so
+the lead is given both ways:
+
+- The decide call's part 6 ends with `Begin your reply with: "Well,
+  actually"` (`leadHint`). This is the weaker form: it is all there is
+  when the words are the decide call's own text (fold on, or a round of
+  text and no call, which is how Qwen answers), and those words are used
+  as the model wrote them, opening with the lead or not.
+- If the turn reaches the speak call, the lead is its prefill, in place
+  of `[persona] prefill`, so the words open with it, it is shown as their
+  opening, and the model writes on from it.
+
+The turn's transcript gets a `lead` row just before its words or
+silence ([The transcript](#the-transcript)), and `haunt history -why`
+prints `· led with "Well, actually"` under the reply, `(as a hint: the
+words are the model's)` added when it went only as the hint. Nothing
+else changes: the led reply is the person's steer, the gates and memory
+labels are as on any turn, and the standing rules never mention leads,
+so the model is not told the person can do this.
+
+Whether a lead brings back the copying a persistent prefill causes on
+Gemma 4, and what it does to a reply there, is in [A character on a
+local model](../ghosts/local-models.md#4-prefill).
 
 ## The registry
 
@@ -789,7 +830,13 @@ by `haunt history` and `haunt journal -echoes` with the ghost still
 running (WAL). One row is one chat message, so replaying a turn is
 reading its rows in order: an assistant message carrying tool calls is
 one row holding them all, and each result is a row of its own. `silent`
-and `failed` are markers that end a turn with no message.
+and `failed` are markers that end a turn with no message. `lead` is a
+marker too, written before a led turn's words or silence: the lead in
+its text and how it was given (`prefill` or `hint`) in its tool column.
+It is never replayed, summarised (`digestLine` skips it) or searched by
+`recall`, so the model is not told it was led and the lead is not found
+as anybody's words; the words row holds the reply as shown, lead and
+all.
 
 A day is the local calendar day a turn began on (`days`, `rowDays`); a
 summary or diary row falls on the day of its own time. Reflection turns
@@ -895,9 +942,10 @@ the last dozen are kept. `haunt history` reads `transcript.db`
 read-only: the person's words, envelopes as `event:`, the ghost's words
 (interim ones included), `(said nothing)`, `(the turn failed)`, a
 summary as `summary:`, and a folded day as `diary 2026-10-11:`. `-why` joins the trace and lists the memory and
-skill decisions under each reply; `-json` gives each turn whole, its
+skill decisions under each reply, with `· led with "…"` under a led one;
+`-json` gives each turn whole, its
 decisions split into `acted` and `looked` (memory and skills), with the
-echo check's `echoes`. A turn older than the trace is recorded from the
+echo check's `echoes` and a led turn's `led` and `led_by`. A turn older than the trace is recorded from the
 transcript alone, without its window.
 
 ## Tests
@@ -917,10 +965,13 @@ read back.
 `cmd/haunt/brain_test.go` runs a real ghost in headless sway against it
 (`newBrainRig`): the greeting, a person's turn with a tool, a silent
 event turn and its refund, a deferred event, a failed turn, a reminder
-discharged once shown, a question answered by a click. The package
+discharged once shown, a question answered by a click; `lead_test.go`
+there takes a lead from `say -lead` and from `/lead` in the line to the
+speak call's prefill and `history -why`. The package
 tests in `internal/ghost` (`brain_model_test.go`, `decide_test.go`,
 `decide_new_test.go`) hold the loop itself: the terminal decisions, fold,
 the round cap, taint on the turn, compaction, the prompt order, a new
-decision in one file, calls written as text.
+decision in one file, calls written as text, a lead as prefill and as
+hint (`lead_test.go`).
 The evals are the live counterpart, on a real model
 ([Hacking](hacking.md#evals)).

@@ -2,6 +2,7 @@ package ghost
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/aaronjauregui/haunt/internal/hlog"
@@ -22,6 +23,13 @@ import (
 // The ghost holds keyboard focus only while the line is open (layer-shell
 // on-demand interactivity). A desktop companion that grabbed the keyboard
 // whenever it felt like it would be a menace.
+//
+// A line `/lead WORDS` is not sent: it sets the opening words of the
+// ghost's reply to the next line sent (proto.Event.Lead, as `haunt say
+// -lead` gives them), and the line opens again empty with the lead shown
+// beneath the conversation. An empty `/lead`, or Escape, takes it back;
+// Escape with no lead set ends the line as ever. A lead goes with one
+// line and is gone, and closing the line drops one not yet sent.
 
 // caretBlink is the caret's on/off period.
 const caretBlink = 500 * time.Millisecond
@@ -49,7 +57,17 @@ type inputState struct {
 	// if set, is told when it is.
 	held      string
 	heldShown func()
+	// lead is the opening words set with /lead for the reply to the next
+	// line sent, or empty.
+	lead string
 }
+
+// leadCommand is the line that sets a lead: "/lead" and the words.
+const leadCommand = "/lead"
+
+// leadShown is how a lead set in the line is shown beneath the
+// conversation, as the driver's own status is.
+func leadShown(lead string) string { return "(lead: \"" + lead + "\")" }
 
 // openInput starts a conversation, unless a line is already open.
 func (g *Ghost) openInput() { g.openInputWithReply(nil) }
@@ -78,6 +96,7 @@ func (g *Ghost) openInputWithReply(reply chan string) bool {
 	g.input.caret = true
 	g.input.focused = false
 	g.input.editor.Reset()
+	g.input.lead = ""
 	g.input.stop = make(chan struct{})
 	stop := g.input.stop
 	g.inputMu.Unlock()
@@ -142,6 +161,7 @@ func (g *Ghost) closeInputWith(answer string) bool {
 		g.input.reply = nil
 	}
 	g.input.editor.Reset()
+	g.input.lead = ""
 	held, shown := g.input.held, g.input.heldShown
 	g.input.held, g.input.heldShown = "", nil
 	g.inputMu.Unlock()
@@ -272,9 +292,17 @@ func (g *Ghost) onKey(code uint32, down bool) {
 
 	switch action {
 	case textinput.ActionCancel:
+		if g.setLead("") {
+			g.log.Debug(hlog.Input, "lead dropped")
+			g.drawInput()
+			return
+		}
 		g.abandonLine("escape")
 		return
 	case textinput.ActionSubmit:
+		if g.leadLine(text) {
+			return
+		}
 		if g.inConversation() {
 			g.submitInConversation(text, empty)
 			return
@@ -286,14 +314,63 @@ func (g *Ghost) onKey(code uint32, down bool) {
 			g.closeInputWith(text)
 			return
 		}
+		lead := g.takeLead()
 		g.closeInput()
 		if !empty {
 			g.remember(recalled{you: true, text: text})
-			g.publish(proto.Event{Type: proto.EventMessage, Text: text})
+			g.publish(proto.Event{Type: proto.EventMessage, Text: text, Lead: lead})
 		}
 		return
 	}
 	g.drawInput()
+}
+
+// leadLine takes a line that is a /lead command, reporting whether it
+// was one: the words after it become the lead for the next line sent,
+// none takes a lead back, and the line opens again empty. Only on a line
+// that is the person's; a line answering a question of the driver's goes
+// to the question whatever it says.
+func (g *Ghost) leadLine(text string) bool {
+	rest, ok := strings.CutPrefix(strings.TrimSpace(text), leadCommand)
+	if !ok || (rest != "" && rest[0] != ' ' && rest[0] != '\t') {
+		return false
+	}
+	lead := strings.TrimSpace(rest)
+	g.inputMu.Lock()
+	if g.input.reply != nil {
+		g.inputMu.Unlock()
+		return false
+	}
+	g.input.lead = lead
+	g.input.editor.Reset()
+	g.inputMu.Unlock()
+	g.touchConversation()
+	if lead == "" {
+		g.log.Debug(hlog.Input, "lead dropped")
+	} else {
+		g.log.Debug(hlog.Input, "lead set: %q", lead)
+	}
+	g.drawInput()
+	return true
+}
+
+// setLead replaces the lead, reporting whether there was one.
+func (g *Ghost) setLead(lead string) bool {
+	g.inputMu.Lock()
+	defer g.inputMu.Unlock()
+	had := g.input.lead != ""
+	g.input.lead = lead
+	return had
+}
+
+// takeLead is the lead for the line being sent, which it goes with and
+// no further.
+func (g *Ghost) takeLead() string {
+	g.inputMu.Lock()
+	defer g.inputMu.Unlock()
+	lead := g.input.lead
+	g.input.lead = ""
+	return lead
 }
 
 // submitInConversation is Enter in a conversation: what was typed goes
@@ -317,8 +394,9 @@ func (g *Ghost) submitInConversation(text string, empty bool) {
 	case !empty:
 		// Into the view at once, before the ghost has answered: remember
 		// draws it.
+		lead := g.takeLead()
 		g.remember(recalled{you: true, text: text})
-		g.publish(proto.Event{Type: proto.EventMessage, Text: text})
+		g.publish(proto.Event{Type: proto.EventMessage, Text: text, Lead: lead})
 		return
 	}
 	g.drawInput()
@@ -342,7 +420,7 @@ func (g *Ghost) drawInput() {
 	g.drawMu.Lock()
 	defer g.drawMu.Unlock()
 	g.inputMu.Lock()
-	open, text, caret := g.input.open, g.input.editor.Text(), g.input.caret
+	open, text, caret, lead := g.input.open, g.input.editor.Text(), g.input.caret, g.input.lead
 	g.inputMu.Unlock()
 	rend := g.renderer()
 	if !open || rend == nil {
@@ -350,7 +428,7 @@ func (g *Ghost) drawInput() {
 	}
 	var sp *sprite.Sprite
 	if g.inConversation() {
-		sp = g.conversationView(rend, text, caret)
+		sp = g.conversationView(rend, text, caret, lead)
 	} else {
 		sp = rend.RenderInput(text, caret)
 	}

@@ -11,10 +11,12 @@ import (
 
 // cmdSay pushes a text message to a running ghost. Without a name it goes
 // to the ghost you last interacted with, which with one ghost running is
-// simply that one.
+// simply that one. -lead puts the opening words of the ghost's reply to
+// this message in its mouth, for this reply only (proto.Event.Lead).
 func cmdSay(args []string) error {
 	fs := flag.NewFlagSet("say", flag.ExitOnError)
 	name := fs.String("ghost", "", "target ghost name (default: the one you last interacted with)")
+	lead := fs.String("lead", "", "words the ghost's reply to this message opens with, for this reply only")
 	fs.Parse(args)
 	if fs.NArg() == 0 {
 		return fmt.Errorf("say: message text expected")
@@ -28,7 +30,7 @@ func cmdSay(args []string) error {
 			return err
 		}
 	}
-	return control.Send(target, proto.Event{Type: proto.EventMessage, Text: text})
+	return control.Send(target, proto.Event{Type: proto.EventMessage, Text: text, Lead: strings.TrimSpace(*lead)})
 }
 
 // sayTarget picks the ghost an untargeted message is for: the one

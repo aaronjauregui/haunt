@@ -82,6 +82,26 @@ about yourself is remembered; telling it it has something wrong corrects
 that memory; asking it to remind you of something is taken on as an
 intention ([Memory, reminders and goals](memory.md)).
 
+### Putting words in its mouth
+
+When a persona ghost keeps answering in a way you do not want, you can
+give it the opening words of its next reply, and it carries on from
+them. From a script, `haunt say -lead "Well, actually" "what do you
+think?"`. In the conversation's line, type `/lead Well, actually` and
+press Enter: nothing is sent, the line opens again empty with `(lead:
+"Well, actually")` beneath the conversation, and the next line you send
+goes with it. Escape, or `/lead` on its own, takes the lead back
+without ending the conversation. A lead applies to that one reply and is
+gone; it is never kept, and the next reply is the ghost's own again. It
+is shown as part of what the ghost said, and `haunt history -why` marks
+the reply `· led with "Well, actually"`, so it is not mistaken for the
+ghost's choice. When the words are written in a call of their own (the
+default on a local server), the reply opens with the lead word for word.
+When they come in the same reply as the ghost's deciding (the default on
+a cloud model, and what Qwen does on its own), the ghost is only asked to
+begin with it, and may not ([The model
+brain](../dev/brain.md#deciding-then-speaking)).
+
 ## Talking at length
 
 Typing at a ghost opens a conversation. Enter sends the line and the line

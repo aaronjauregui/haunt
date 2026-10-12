@@ -115,7 +115,7 @@ field here works on any provider. See
 |---|---|
 | `system` | The character's text. It leads the system prompt; haunt's standing rules follow it. |
 | `example` | Example exchanges, `[[persona.example]]` with `user` and `ghost`, shown to the model after the rules as how the character sounds, not as things that happened. Two or three are plenty. |
-| `prefill` | Words every reply starts from, in the character's voice. They are the opening of what is said and shown with it. Optional. |
+| `prefill` | Words every reply starts from, in the character's voice. They are the opening of what is said and shown with it. Optional. A person's lead replaces it for one reply ([Putting words in its mouth](../user/running.md#putting-words-in-its-mouth)). |
 | `sampling` | `[persona.sampling]`: `temperature`, `top_p`, `min_p`, `repeat_penalty`, `dry_multiplier`, `xtc_probability`. Each one set is laid over the person's `[model]` sampling; a provider ignores a field it does not know. |
 
 The model also sees, every turn, a two-line reminder after the turn's

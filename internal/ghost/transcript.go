@@ -24,9 +24,11 @@ import (
 //
 // One row is one chat message, so replaying a turn is reading its rows in
 // order: an assistant message carrying tool calls is one row holding them
-// all, and each result is a row of its own. Three kinds of row are markers
-// with no message of their own: how a turn ended when it ended in silence
-// or failure.
+// all, and each result is a row of its own. Some rows are markers with no
+// message of their own: how a turn ended when it ended in silence or
+// failure, and the opening words the person gave the reply (a lead row),
+// which is never replayed, summarised or searched, so the model is not
+// told it was led and recall does not find the lead as anybody's words.
 //
 // Compaction is the driver's. When the rows the model would see pass a
 // share of the model's context (compactShare), whole days go first: the
@@ -65,6 +67,19 @@ const (
 	rowFailed  = "failed"  // marker: the turn failed
 	rowSummary = "summary" // the summary of compacted turns
 	rowDiary   = "diary"   // a day folded behind its diary entry; At is on that day
+	// rowLead is a marker: the opening words the person put in the
+	// ghost's mouth for the turn's reply (turn.lead), in Text, with how
+	// they were given in Tool (leadPrefilled, leadHinted). Written just
+	// before the turn's words or silence.
+	rowLead = "lead"
+)
+
+// How a lead was given, on its row: as the speak call's prefill, which
+// opens the words, or only as the hint in the turn's context, when the
+// words were the decide call's own text and may not open with it.
+const (
+	leadPrefilled = "prefill"
+	leadHinted    = "hint"
 )
 
 const (
@@ -89,7 +104,8 @@ type TranscriptRow struct {
 	// Text is the words of an input, an event, words, a summary, or a
 	// result; for calls, any words written beside the calls.
 	Text string
-	// Tool and CallID name a result's call.
+	// Tool and CallID name a result's call. On a lead row, Tool is how
+	// the lead was given (leadPrefilled, leadHinted).
 	Tool, CallID string
 	// Calls are a calls row's tool calls.
 	Calls []TranscriptCall
@@ -783,5 +799,7 @@ func digestLine(r TranscriptRow) string {
 	case rowSilent:
 		return "you said nothing"
 	}
+	// A lead row is not digested: a summary or a diary would tell the
+	// model it was led.
 	return ""
 }

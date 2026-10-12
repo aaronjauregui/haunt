@@ -385,9 +385,11 @@ func (g *Ghost) clickInConversation() bool {
 }
 
 // conversationView paints the view with the line being typed beneath it:
-// what has been said, from the recall, and the words still streaming.
-// Called from drawInput, with drawMu held.
-func (g *Ghost) conversationView(rend *balloon.Renderer, line string, caret bool) *sprite.Sprite {
+// what has been said, from the recall, the words still streaming, the
+// driver's status, and a lead set for the next line (leadShown), which
+// stays until the line goes with it. Called from drawInput, with drawMu
+// held.
+func (g *Ghost) conversationView(rend *balloon.Renderer, line string, caret bool, lead string) *sprite.Sprite {
 	g.recallMu.Lock()
 	said := append([]recalled(nil), g.recall.lines...)
 	g.recallMu.Unlock()
@@ -429,6 +431,9 @@ func (g *Ghost) conversationView(rend *balloon.Renderer, line string, caret bool
 	}
 	if status != "" {
 		entries = append(entries, balloon.Entry{Text: status, At: time.Now()})
+	}
+	if lead != "" {
+		entries = append(entries, balloon.Entry{Text: leadShown(lead), At: time.Now()})
 	}
 	sp, lines := rend.RenderConversation(entries, offset, line, caret)
 

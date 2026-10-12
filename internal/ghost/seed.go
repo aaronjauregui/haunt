@@ -82,12 +82,12 @@ func seedName(list []Intention) string {
 // numbered from 1 follow whatever is there already. A row with no At
 // takes now. Kind must be one of the transcript's row kinds ("input",
 // "event", "calls", "result", "words", "silent", "failed", "summary",
-// "diary"). A ghost that has talked has booted before, so its store in
+// "diary", "lead"). A ghost that has talked has booted before, so its store in
 // stateDir (state.db) is marked as its first boot would have marked it,
 // and the next boot is not its first. Like SeedGoal, it is only safe
 // while no ghost holds either file.
 func SeedTranscript(stateDir string, rows []TranscriptRow) error {
-	kinds := []string{rowInput, rowEvent, rowCalls, rowResult, rowWords, rowSilent, rowFailed, rowSummary, rowDiary}
+	kinds := []string{rowInput, rowEvent, rowCalls, rowResult, rowWords, rowSilent, rowFailed, rowSummary, rowDiary, rowLead}
 	for _, r := range rows {
 		if !slices.Contains(kinds, r.Kind) {
 			return fmt.Errorf("seeding the transcript: no row kind %q", r.Kind)

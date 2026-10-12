@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -126,6 +127,7 @@ func showHistory(w io.Writer, msgs []message, traces []ghost.Why, n int, why, as
 			// carries the reasons.
 			continue
 		}
+		printLed(w, *t.final())
 		if t.whyKept {
 			printWhy(w, t.why)
 		} else {
@@ -209,12 +211,17 @@ func mergeTurns(msgs []message, traces []ghost.Why) []historyTurn {
 // read from the input being an event envelope, which is what the driver
 // decides it by for every turn it starts from one.
 type traceRecord struct {
-	Time       time.Time    `json:"time"`
-	ProvokedBy string       `json:"provoked_by"` // "person" or "event"
-	Input      string       `json:"input"`       // an event without its envelope prefix
-	Reply      string       `json:"reply"`       // "" when nothing was said
-	Silent     bool         `json:"silent"`
-	Failed     bool         `json:"failed"` // the turn failed: the model never answered
+	Time       time.Time `json:"time"`
+	ProvokedBy string    `json:"provoked_by"` // "person" or "event"
+	Input      string    `json:"input"`       // an event without its envelope prefix
+	Reply      string    `json:"reply"`       // "" when nothing was said
+	Silent     bool      `json:"silent"`
+	Failed     bool      `json:"failed"` // the turn failed: the model never answered
+	// Led is the opening words the person gave the reply (say -lead,
+	// /lead), and LedBy how they were given: "prefill", opening the
+	// words, or "hint", asked for in the turn's context.
+	Led        string       `json:"led,omitempty"`
+	LedBy      string       `json:"led_by,omitempty"`
 	SelfPrompt bool         `json:"self_prompt"`
 	Acted      []traceCall  `json:"acted"`  // the ghost's decisions that act or read: intend, search, face, …
 	Looked     []traceCall  `json:"looked"` // its memory and skills: recall, remember, skill_view, …
@@ -274,6 +281,9 @@ func (t historyTurn) record() traceRecord {
 	// interim ones included; the calls ride on whichever carries them.
 	var said []string
 	for _, m := range t.replies {
+		if m.Led != "" {
+			r.Led, r.LedBy = m.Led, m.LedBy
+		}
 		if m.Failed {
 			r.Failed = true
 		} else if !m.Silent && strings.TrimSpace(m.Text) != "" {
@@ -342,6 +352,21 @@ func printLine(w io.Writer, m message) {
 		text = "(said nothing)"
 	}
 	fmt.Fprintf(w, "%-6s %s\n", who+":", text)
+}
+
+// printLed says, under a reply the person gave the opening words of,
+// that it was led and with what, so the opening is not read as the
+// ghost's own choice. A lead given only as a hint may not open the words
+// at all, and says so.
+func printLed(w io.Writer, m message) {
+	if m.Led == "" {
+		return
+	}
+	line := "       · led with " + strconv.Quote(m.Led)
+	if m.LedBy == "hint" {
+		line += " (as a hint: the words are the model's)"
+	}
+	fmt.Fprintln(w, line)
 }
 
 // printLooked lists what the ghost consulted or changed in its memory and
@@ -427,6 +452,9 @@ type message struct {
 	// Silent is a turn that ended in silence; Failed one whose model never
 	// answered.
 	Silent, Failed bool
+	// Led is the opening words the person gave this reply, from the
+	// turn's lead row, and LedBy how ("prefill" or "hint").
+	Led, LedBy string
 }
 
 // call is one decision and its result.
@@ -491,6 +519,8 @@ func messagesOf(rows []ghost.TranscriptRow) []message {
 
 	var out []message
 	var pending []at
+	// lead is the turn's lead row, waiting for the reply it opens.
+	var lead *ghost.TranscriptRow
 	attach := func(m *message) {
 		for _, a := range pending {
 			c := rows[a.row].Calls[a.call]
@@ -509,8 +539,10 @@ func messagesOf(rows []ghost.TranscriptRow) []message {
 	for ri, r := range rows {
 		switch r.Kind {
 		case "input", "event":
-			pending = nil
+			pending, lead = nil, nil
 			out = append(out, message{Role: "user", Text: r.Text, Time: r.At})
+		case "lead":
+			lead = &rows[ri]
 		case "summary":
 			out = append(out, message{Role: roleSummary, Text: r.Text, Time: r.At})
 		case "diary":
@@ -528,6 +560,10 @@ func messagesOf(rows []ghost.TranscriptRow) []message {
 			m := message{Role: "assistant", Text: r.Text, Time: r.At, Silent: r.Kind == "silent", Failed: r.Kind == "failed"}
 			if m.Failed || m.Silent {
 				m.Text = ""
+			}
+			if lead != nil {
+				m.Led, m.LedBy = lead.Text, lead.Tool
+				lead = nil
 			}
 			attach(&m)
 			out = append(out, m)

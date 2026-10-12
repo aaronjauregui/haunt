@@ -28,7 +28,8 @@ import (
 //     desktop notes left, today's mood, the memory lines the person's
 //     words brought in, and whether a conversation is open) and a
 //     two-line persona reminder against the character thinning out over
-//     a long transcript.
+//     a long transcript; last, on a turn the person led, the line asking
+//     for their opening words (leadHint).
 //
 // Only part 6 is never kept: it is rebuilt every turn, after everything a
 // cache could reuse.
@@ -53,9 +54,25 @@ func (b *modelBrain) prompt(t *turn, now time.Time) ([]model.Message, error) {
 	b.keyed(t)
 	msgs = append(msgs,
 		model.Message{Role: "user", Content: t.input},
-		model.Message{Role: "system", Content: g.turnContext(now) + "\n\n" + st.reminder()},
+		model.Message{Role: "system", Content: g.turnContext(now) + "\n\n" + st.reminder() + leadHint(t.lead)},
 	)
 	return msgs, nil
+}
+
+// leadHint is the line part 6 ends with when the person gave the opening
+// words of the reply (turn.lead), and nothing otherwise. The speak call
+// takes a lead as its prefill, which makes it the words' opening; words
+// the decide call writes as its own text (fold, or a model that answers
+// without calling speak, as Qwen does) cannot be prefilled, and this line
+// asking for them is the weaker form. Which call will write the words is
+// not known until the decide loop ends, so the line is there whenever a
+// lead is. Part 6 is rebuilt every turn and never kept, so the line goes
+// with the turn; the standing rules never mention leads.
+func leadHint(lead string) string {
+	if lead == "" {
+		return ""
+	}
+	return "\nBegin your reply with: \"" + lead + "\""
 }
 
 // notes is part 2: what the ghost has written about itself and about the

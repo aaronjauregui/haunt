@@ -92,7 +92,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `usage:
   haunt run [-x N] [-y N] [-output NAME] [-record FILE] [-state DIR] [-idle-ms N] [-goal-check-delay D] [ghost-dir|name ...]
   haunt dev [-x N] [-y N] [-state DIR] <ghost-dir>
-  haunt say [-ghost NAME] <text>
+  haunt say [-ghost NAME] [-lead WORDS] <text>
   haunt new [-brain] <name>
   haunt shell init [-C dir] [-art subdir] [-scale F] [-write] <art.ora>
   haunt shell check [-C dir] [-factor F] [-render DIR]
