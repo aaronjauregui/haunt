@@ -85,6 +85,10 @@ type modelBrain struct {
 	lastPoke    time.Time
 	pokeN       int
 	lastReacted time.Time
+	// lastIdle is when the person last went idle, which is what makes a
+	// window change after a long gap a return rather than a long stretch
+	// of work with nothing said (returnedTurn).
+	lastIdle time.Time
 
 	// waking is the indicator a ghost shows from the moment it is on screen
 	// until it has said hello: the boot turn is seconds on a slow model, and
@@ -161,6 +165,10 @@ var pokes = []string{
 
 // metKey records that the ghost has booted before, for the boot envelope.
 const metKey = internalKeyPrefix + "met"
+
+// returnedKey holds the last exchange the returned envelope was sent for,
+// so a gap is told about once, however many boots and windows follow it.
+const returnedKey = internalKeyPrefix + "returned_at"
 
 // brainParts is what a model brain is made from.
 type brainParts struct {
@@ -331,10 +339,19 @@ func (b *modelBrain) Deliver(e proto.Event) error {
 		}
 		// Waking up is the ghost's own news, so it is shown whether or
 		// not there turns out to be a greeting.
+		// The gap is measured before the greeting, whose words would close
+		// it; the returned turn follows the boot turn.
+		var back *turn
+		if met {
+			back = b.returnedTurn(time.Now(), true)
+		}
 		w := g.startWaiting(wakingText)
 		b.waking.Store(w)
 		boot := &turn{input: Envelope("boot", F("first_time", !met)), waiting: w, boot: true}
 		b.unpromptedTurn("boot", "boot", boot)
+		if back != nil {
+			b.unpromptedTurn("returned", "returned", back)
+		}
 
 	case proto.EventClick:
 		if !b.lastPoke.IsZero() && e.Time.Sub(b.lastPoke) <= doubleClick {
@@ -360,6 +377,7 @@ func (b *modelBrain) Deliver(e proto.Event) error {
 		b.person(text)
 
 	case proto.EventIdle:
+		b.lastIdle = time.Now()
 		b.unprompted("idle", "", Envelope("idle",
 			F("minutes", int(g.idleTimeout()/time.Minute)),
 			F("last_window", g.currentWindow().line()),
@@ -369,6 +387,12 @@ func (b *modelBrain) Deliver(e proto.Event) error {
 		if e.Session == nil {
 			return nil
 		}
+		// Coming back after a long gap is the bigger news, and says what
+		// a returning or morning fact would; one turn, not two in a row.
+		if back := b.returnedTurn(time.Now(), false); back != nil {
+			b.unpromptedTurn("returned", "returned", back)
+			return nil
+		}
 		s := e.Session
 		b.unprompted("session", "session", Envelope("session",
 			F("shape", s.Kind),
@@ -376,6 +400,13 @@ func (b *modelBrain) Deliver(e proto.Event) error {
 			F("title", s.Title),
 			F("minutes", nonZero(s.Minutes)),
 			F("count", nonZero(s.Count))), nil)
+
+	case proto.EventWindow:
+		// A window change is otherwise not sent (it rides on the next
+		// turn's context); after a long gap it is the person back.
+		if back := b.returnedTurn(time.Now(), false); back != nil {
+			b.unpromptedTurn("returned", "returned", back)
+		}
 
 	case proto.EventCron:
 		if answer := strings.TrimSpace(e.Text); answer != "" {
@@ -428,6 +459,131 @@ func (b *modelBrain) Deliver(e proto.Event) error {
 			F("text", e.Text)), nil)
 	}
 	return nil
+}
+
+// returnedTurn is the turn that tells the model a long time has passed
+// since it and the person last spoke, or nil: when [initiative]
+// away_hours is off, the gap is shorter, or this gap was told about
+// already. booting says the ghost has just started, which is a return of
+// its own; otherwise the person must have gone idle since the last
+// exchange, so a long stretch of work with nothing said is not mistaken
+// for one. Marked as told when made: one per gap, even if it is dropped.
+func (b *modelBrain) returnedTurn(now time.Time, booting bool) *turn {
+	g := b.g
+	if g.awayAfter <= 0 {
+		return nil
+	}
+	last, ok := b.tr.lastExchange()
+	if !ok || now.Sub(last) < g.awayAfter || (!booting && b.lastIdle.Before(last)) {
+		return nil
+	}
+	stamp := last.Format(time.RFC3339Nano)
+	if told, _, _ := g.store.Get(returnedKey); told == stamp {
+		return nil
+	}
+	if err := g.store.Set(returnedKey, stamp); err != nil {
+		g.log.Warn(hlog.Store, "recording the return: %v", err)
+	}
+	return &turn{input: Envelope("returned", F("since", sinceShort(last, now)), F("last", whenSpelled(last, now)))}
+}
+
+// lastExchangeLine is the second line of a turn's context: how long since
+// the person and the ghost last spoke, so a ghost back after three days
+// does not carry on as if from a minute ago. Empty before the first
+// exchange, and for a ghost with no model brain.
+//
+//	Last exchange: 3 days ago (Thursday evening).
+func (g *Ghost) lastExchangeLine(now time.Time) string {
+	if g.mind == nil {
+		return ""
+	}
+	last, ok := g.mind.tr.lastExchange()
+	if !ok {
+		return ""
+	}
+	if now.Sub(last) < time.Hour {
+		return "Last exchange: " + agoSpelled(last, now) + "."
+	}
+	return "Last exchange: " + agoSpelled(last, now) + " (" + whenSpelled(last, now) + ")."
+}
+
+// agoSpelled is how long ago, in the one unit a person would use. It is
+// the session facts' spell (internal/session) with days added and the
+// minutes dropped past the hour, since a gap of days is the case here.
+// Days are calendar days, so Thursday evening is three days before
+// Sunday morning, as a person would count it.
+func agoSpelled(then, now time.Time) string {
+	switch d := now.Sub(then); {
+	case d < time.Minute:
+		return "just now"
+	case d < 2*time.Minute:
+		return "a minute ago"
+	case d < time.Hour:
+		return fmt.Sprintf("%d minutes ago", int(d/time.Minute))
+	case d < 2*time.Hour:
+		return "an hour ago"
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%d hours ago", int(d/time.Hour))
+	case daysBetween(then, now) <= 1:
+		return "a day ago"
+	default:
+		return fmt.Sprintf("%d days ago", daysBetween(then, now))
+	}
+}
+
+// daysBetween is how many midnights lie between then and now.
+func daysBetween(then, now time.Time) int {
+	noon := func(t time.Time) time.Time {
+		y, m, d := t.In(now.Location()).Date()
+		return time.Date(y, m, d, 12, 0, 0, 0, now.Location())
+	}
+	return int((noon(now).Sub(noon(then)) + 12*time.Hour) / (24 * time.Hour))
+}
+
+// whenSpelled names a past moment from now as a person would: "this
+// morning", "yesterday evening", "last night", "Thursday evening" within
+// the week, and the date past it.
+func whenSpelled(then, now time.Time) string {
+	then = then.In(now.Location())
+	part := partOfDay(then)
+	y, m, d := now.Date()
+	today := time.Date(y, m, d, 0, 0, 0, 0, now.Location())
+	switch {
+	case !then.Before(today):
+		if part == "night" {
+			if then.Hour() < 5 {
+				return "last night"
+			}
+			return "tonight"
+		}
+		return "this " + part
+	case !then.Before(today.AddDate(0, 0, -1)):
+		switch {
+		case part != "night":
+			return "yesterday " + part
+		case then.Hour() >= 22:
+			return "last night"
+		default:
+			return "early yesterday"
+		}
+	case !then.Before(today.AddDate(0, 0, -6)):
+		return then.Format("Monday") + " " + part
+	default:
+		return then.Format("Monday 2 January")
+	}
+}
+
+// sinceShort is a gap for an envelope: "40m", "9h", "3d", counting days
+// as agoSpelled does.
+func sinceShort(then, now time.Time) string {
+	switch d := now.Sub(then); {
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d/time.Minute))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d/time.Hour))
+	default:
+		return fmt.Sprintf("%dd", max(1, daysBetween(then, now)))
+	}
 }
 
 // person queues the person's own words, verbatim.

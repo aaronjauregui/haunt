@@ -48,6 +48,7 @@ type File struct {
 	Animation  AnimationConfig
 	Awareness  AwarenessConfig
 	Curiosity  CuriosityConfig
+	Initiative InitiativeConfig
 	Files      FilesConfig
 	Appearance AppearanceConfig
 	// Model is the model persona ghosts think with; ModelFor is one
@@ -64,6 +65,7 @@ type root struct {
 	Animation    AnimationConfig    `toml:"animation"`
 	Awareness    AwarenessConfig    `toml:"awareness"`
 	Curiosity    CuriosityConfig    `toml:"curiosity"`
+	Initiative   InitiativeConfig   `toml:"initiative"`
 	Files        FilesConfig        `toml:"files"`
 	Appearance   AppearanceConfig   `toml:"appearance"`
 	Model        ModelConfig        `toml:"model"`
@@ -112,6 +114,7 @@ func Load() (*File, error) {
 		Animation:    r.Animation,
 		Awareness:    r.Awareness,
 		Curiosity:    r.Curiosity,
+		Initiative:   r.Initiative,
 		Files:        r.Files,
 		Appearance:   r.Appearance,
 		Model:        r.Model,
@@ -128,6 +131,10 @@ func Load() (*File, error) {
 	}
 	if err := f.Model.validate(path); err != nil {
 		return nil, err
+	}
+	if h := f.Initiative.AwayHours; h != nil && *h < 0 {
+		return nil, fmt.Errorf("parsing %s: [initiative] away_hours %v: use a number of hours from 0, or leave it out for %d",
+			path, *h, DefaultAwayHours)
 	}
 	// What [backend] points at is checked here rather than on first use,
 	// so that a file it cannot read is named while the person is still
@@ -405,6 +412,30 @@ func (f *File) ObligationsPerDay() int {
 		return DefaultObligationsPerDay
 	}
 	return *f.Curiosity.ObligationsPerDay
+}
+
+// InitiativeConfig is the [initiative] section: when the ghost is given a
+// turn of its own for time having passed.
+type InitiativeConfig struct {
+	// AwayHours is the gap since the person and the ghost last spoke, in
+	// hours, past which the ghost gets a turn to notice it has been a
+	// while (the returned event). Absent means DefaultAwayHours; 0
+	// switches the event off. The line on every turn saying how long it
+	// has been stays either way: it costs no turn.
+	AwayHours *float64 `toml:"away_hours"`
+}
+
+// DefaultAwayHours is a night or a working day: long enough that a word
+// about it is natural, short enough that a weekend away is noticed.
+const DefaultAwayHours = 8
+
+// AwayAfter is AwayHours as a duration, with its default; zero means off.
+func (c InitiativeConfig) AwayAfter() time.Duration {
+	h := float64(DefaultAwayHours)
+	if c.AwayHours != nil {
+		h = *c.AwayHours
+	}
+	return time.Duration(h * float64(time.Hour))
 }
 
 // AppearanceConfig is the [appearance] portion of the user config: how

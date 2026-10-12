@@ -136,7 +136,11 @@ same from turn to turn so a provider's prompt cache holds:
 | 6 | system | the turn's context, then a two-line persona reminder | every turn |
 
 Part 6 is the time and part of day, the focused window when `window` is
-granted, the goals the ghost keeps an eye on with their names (so "I
+granted, then on a line of its own how long since the last exchange
+(`Last exchange: 3 days ago (Thursday evening).`, or `20 minutes ago.`
+under an hour; none before the first): `lastExchangeLine` over the
+transcript's `lastExchange`, the newest `input` or `words` row,
+compacted or not. Then the goals the ghost keeps an eye on with their names (so "I
 don't care about the marathon anymore" is a `set_aside` in one call), and
 the errands that came due and were not dealt with, so a reminder whose
 own turn was dropped, silent or held back by quiet is in front of the model on every turn until it resolves it, whatever the
@@ -173,7 +177,7 @@ the model is better off knowing why it will be asked or refused.
 
 1. A message beginning `[haunt event]` is the desktop, not the person.
 2. Most events get `stay_silent`; speak only at boot, on `kind=help`,
-   `intention_due` or `goal_quiet`, or when a skill says to. A window,
+   `intention_due`, `goal_quiet` or `returned`, or when a skill says to. A window,
    idle or another ghost almost never earns a remark, never two in a row.
 3. When a skill covers the request or event, `skill_view` it first and
    follow its steps.
@@ -409,6 +413,7 @@ only decision is whether this event is worth a word.
 | double-click | the driver's menu; not sent |
 | menu "What can you do?" | `kind=help`, as a turn the person is waiting on |
 | boot | `kind=boot first_time=true\|false` |
+| a long gap since the last exchange | `kind=returned since=3d last="Thursday evening"` |
 | idle | `kind=idle minutes=N last_window="app: title" seen_for=42m` (`seen_for` only when watching) |
 | session fact | `kind=session shape=… app=… title=… minutes=N count=N` |
 | occasion | `kind=occasion name="morning"` |
@@ -418,6 +423,16 @@ only decision is whether this event is worth a word.
 | neighbour spoke, drew, left a note, was poked | `kind=observed from=… action=… text=…` |
 | neighbour `tell` | `kind=told from=… text=…` |
 | window changed | not sent per change; rides on the next turn's context |
+
+`returned` is sent when the last exchange is at least `[initiative]
+away_hours` (8) old: after the boot turn on a boot with
+`first_time=false` (the gap measured before the greeting, whose words
+would close it), or on the first session fact or window change once the
+person has gone idle since the last exchange, so a long stretch of work
+with nothing said is not taken for a return. On a session fact it takes
+that fact's place. `_haunt/returned_at` holds the exchange it was sent
+for, so a gap is told once, even if the turn is dropped. It is charged
+as `returned` and refunded on silence, like any unprompted turn.
 
 `goal_quiet` is its own kind rather than an `intention_due` with prose,
 because a finding sent as prose made the model skip the skill, resolve

@@ -34,6 +34,9 @@ actions_per_day = 12            # unprompted actions per ghost, per rolling 24 h
 # actions_per_day_total = 18    # across every resident ghost; default grows sub-linearly with the room
 obligations_per_day = 24        # things you put on its books (reminders, occasions); a backstop, not a dial
 
+[initiative]
+away_hours = 8                  # a gap since you last spoke this long gets the ghost a turn to notice it; 0 turns that off
+
 [backend]                       # the models the driver calls itself; conversation is [model]
 tool_timeout = 120              # seconds one tool-server call may take
 log_prompts = false             # dump vision questions and image parameters to the log (HAUNT_BACKEND_DEBUG=1 does the same)

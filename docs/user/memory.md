@@ -128,6 +128,25 @@ gave each one. It holds the last hundred; painting the hundred and first
 drops the oldest. A ghost puts one back in its balloon from there when
 you ask to see it again, so showing costs nothing and paints nothing new.
 
+## It knows how long it has been
+
+Every turn, the ghost is told when the two of you last spoke, after the
+time:
+
+    Last exchange: 3 days ago (Thursday evening).
+
+Under an hour it is just the minutes; before you have ever spoken there
+is no line. So a ghost started on Monday morning does not carry on from
+Friday's conversation as if it were a minute ago.
+
+When the gap is long, eight hours by default, the ghost also gets a turn
+of its own to notice it: at its start, or when you come back to the
+desk (a window change or a session fact after you have been idle). It
+is one turn per gap, paid from the same daily allowance as anything
+else it does unasked, and given back if it says nothing. `[initiative]
+away_hours` in [config.md](config.md) sets the gap; 0 turns the turn
+off and keeps the line.
+
 ## Reminders
 
     remind me in 10 minutes to check the build
