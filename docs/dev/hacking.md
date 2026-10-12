@@ -73,6 +73,7 @@ rig in `cmd/haunt/brain_test.go` (`newBrainRig`) writes a config whose
     make demo                 # whisper, scripted, nested sway window
     make demo-ai              # wisp on your [model]
     make demo-troupe          # both
+    make demo-ember           # ember, the warm one, on your [model]
     make demo-seriko SERIKO=<nar or dir>
     make demo-headless        # the demo plumbing with no window
 

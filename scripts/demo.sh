@@ -45,13 +45,14 @@ EOF
 # lives there too, so trying somebody else's shell leaves nothing behind in
 # your library and nothing in the directory you ran this from.
 #
-# GHOST=whisper (default) or wisp, or several separated by spaces —
+# GHOST=whisper (default), wisp or ember, or several separated by spaces —
 # GHOST="whisper wisp" puts both on screen at once, which is how you watch
 # the multi-ghost behaviour: neither opens on top of the other, and `haunt
 # say` follows whichever you last poked. Whisper is the scripted example
 # brain, built to WASM; wisp declares no brain at all and so thinks with
 # your model ([model] in ~/.config/haunt/config.toml, read as it is),
-# drawing via [backend.image].
+# drawing via [backend.image]. Ember is a second persona ghost on your
+# model, copied from examples/ember.
 seriko="${SERIKO:-}"
 ghosts="${GHOST:-whisper}"
 ghost_dirs=()
@@ -198,8 +199,14 @@ Never tell the same story twice. `recall` "ghost story" first, and if
 you have told one, tell a different one.
 EOF
         ;;
+    ember)
+        # The second persona ghost, warm where wisp is dry. Its package is
+        # examples/ember as it stands, so the demo runs the file the guide
+        # (docs/ghosts/local-models.md) is written against.
+        cp examples/ember/ghost.toml "$workdir/ember/ghost.toml"
+        ;;
     *)
-        echo "unknown ghost \"$ghost\" in GHOST (use whisper and/or wisp)"; exit 1
+        echo "unknown ghost \"$ghost\" in GHOST (use whisper, wisp and/or ember)"; exit 1
         ;;
     esac
 done
@@ -234,6 +241,14 @@ if [ "$ghost_count" -gt 1 ]; then
     echo ">>   A ghost that has been run before comes back to where it was left, so"
     echo ">>   to watch the second one *step aside* from a shared default corner,"
     echo ">>   start from a clean slate:  XDG_DATA_HOME=\$(mktemp -d) make demo-troupe"
+fi
+if [[ " $ghosts " == *" ember "* ]]; then
+    config="${HAUNT_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/haunt}/config.toml"
+    if ! grep -q '^\[model\]' "$config" 2>/dev/null; then
+        echo ">> warning: no [model] in $config; ember has nothing to think with (docs/user/model.md)"
+    fi
+    echo ">> ember thinks with your [model]. try:  say \"I had a long day\"  |  say \"remember I take my tea with honey\""
+    echo ">>     memory:   go run ./cmd/haunt memory ls -state $workdir/data/haunt/ghosts/ember"
 fi
 if [[ " $ghosts " == *" wisp "* ]]; then
     # Wisp thinks with the person's own [model]; without one it can only

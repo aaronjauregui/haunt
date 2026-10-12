@@ -1,6 +1,6 @@
 GO ?= go
 
-.PHONY: build test vet fmt eval eval-baseline demo demo-ai demo-troupe demo-seriko demo-headless demo-record install-user clean
+.PHONY: build test vet fmt eval eval-baseline demo demo-ai demo-ember demo-troupe demo-seriko demo-headless demo-record install-user clean
 
 build:
 	$(GO) build ./...
@@ -57,6 +57,12 @@ demo:
 # IDLE_MS=10000 shortens the wait before it speaks unprompted.
 demo-ai:
 	GHOST=wisp ./scripts/demo.sh
+
+# The second persona ghost, examples/ember: warm and talkative where wisp
+# is dry and short, on the same [model]. The guide to building a character
+# on a local model (docs/ghosts/local-models.md) is written against it.
+demo-ember:
+	GHOST=ember ./scripts/demo.sh
 
 # Two ghosts at once, in one nested sway. Whisper is scripted and wisp
 # thinks with your model, so they behave differently — which is the point.

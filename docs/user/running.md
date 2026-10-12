@@ -10,6 +10,7 @@ library.
     make demo         # whisper: a scripted ghost with a WASM brain
     make demo-ai      # wisp: no brain of its own, thinks with your [model]
     make demo-troupe  # both at once
+    make demo-ember   # ember: a second persona ghost, warm where wisp is dry
     make demo-seriko SERIKO=<ghost.nar>   # somebody else's ukagaka shell art
 
 `make demo-ai` needs a model in `[model]` first ([The model](model.md)).

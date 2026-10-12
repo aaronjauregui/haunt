@@ -35,6 +35,10 @@ For someone making a ghost: art, a persona, skills, tools, or a brain.
 - [Persona and skills](ghosts/persona-and-skills.md): the character and
   its examples, prefill and sampling, the standing rules haunt adds, the
   ghost's tools, and routines as skills.
+- [A character on a local model](ghosts/local-models.md): building a
+  persona on llama-server, lever by lever, with the example ghost ember;
+  prefill, sampling, thinking, the cache, chat templates, and the knobs
+  haunt does not expose.
 - [Tools and triggers](ghosts/tools-and-triggers.md): MCP servers,
   scheduled polls and presence checks.
 - [Scripted brains](ghosts/brains.md): events, intents, brainkit, WASM and
