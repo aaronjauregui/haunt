@@ -43,6 +43,28 @@ might be there. Tell it something and it is kept; tell it it has
 something wrong and it takes the line back. There is no separate belief
 store and no correction menu.
 
+When something it kept stops being true (you moved, you changed jobs),
+the ghost keeps the new line and moves the old one to the end of the
+topic, under a `## Past` heading, with the date it was retired:
+
+    - lives in Brisbane <!-- person t=530 2026-10-12 -->
+
+    ## Past
+    - lives in Sydney <!-- person t=98 2026-09-30 --> <!-- retired 2026-10-12 -->
+
+A past line is kept for you to read and is no longer a fact: it is not
+counted, searched or put in front of the ghost. If it was retired
+wrongly, move it back above the heading. A topic file without the
+heading is read as it always is. When the ghost keeps a line in a topic
+that already has others, it is shown them, so a line the new one makes
+false is in front of it while it can still retire it.
+
+A line you told it is yours: the ghost takes it back or retires it only
+on a turn you started, and only if it read no page or file on that turn.
+On an event, or after reading something, it is refused, so nothing on
+your screen can talk it out of what you said. A line it kept from a page
+or worked out itself it may take back on any turn.
+
 A search matches a fact's own words and the name of its topic, so
 asking about "food" finds "likes apples" filed under food. A topic's name
 counts for less than the fact's words: a fact that says "food" itself
@@ -50,7 +72,9 @@ comes first.
 
 It does not have to think of searching. When you mention something a
 topic has a line about ("I bought apples"), that line is put in front of
-the ghost with your words, unasked: up to three lines a turn, each kept
+the ghost with your words, unasked, with the date it was kept (`lives in
+Brisbane (where, 2026-10-12)`), so of two lines that disagree it can
+tell the later and take it as the true one: up to three lines a turn, each kept
 in mind for three turns and then not brought up again for ten, so a
 subject you keep returning to does not pin the same fact into every
 reply. Only your words do this; a window's title or something another
@@ -61,7 +85,8 @@ its memory holds only a line or two, nothing is brought in this way,
 since it sees every topic anyway.
 
     haunt memory ls              # topics, with their line counts
-    haunt memory show food       # a topic's lines, numbered, with where each came from
+    haunt memory show food       # a topic's lines, numbered, with where each came from;
+                                 #   then its past lines, under past:, not numbered
     haunt memory rm food 2       # remove its second line
     haunt memory rm food         # remove the whole topic
     haunt memory reindex         # rebuild the search index from the files

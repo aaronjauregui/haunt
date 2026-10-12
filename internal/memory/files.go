@@ -48,26 +48,46 @@ type Topic struct {
 	Name    string
 	Updated time.Time
 	Facts   []Fact
+	Past    []PastFact // the lines under ## Past, oldest retired first
+}
+
+// PastFact is a line under a topic's ## Past: kept and readable, no
+// longer a fact. Retired is the date it was moved there, zero for a line
+// the person moved by hand without one.
+type PastFact struct {
+	Fact
+	Retired time.Time
 }
 
 // TopicInfo is what `haunt memory ls` and the index show of a topic.
 type TopicInfo struct {
 	Name  string
-	Lines int
+	Lines int    // facts, not counting the past
+	Past  int    // lines under ## Past
 	First string // the first fact, whole
 }
+
+// PastHeading starts the part of a topic file that holds retired lines.
+// Everything below it is past: not a fact, not indexed, not in the
+// prompt, but kept for the person (and `haunt memory show`) to read, and
+// moved back up by hand if it was retired wrongly.
+const PastHeading = "## Past"
 
 // topicFile is a topic file as lines, so a rewrite keeps what the person
 // wrote around the facts: front matter keys this package does not know,
 // headings, blank lines.
 type topicFile struct {
 	front []string // between the --- fences, without them
-	body  []string
+	body  []string // above PastHeading
+	// past is the lines below PastHeading, nil when the file has none,
+	// so a file without one is written back without one.
+	past []string
 }
 
 var (
 	topicName  = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 	provenance = regexp.MustCompile(`\s*<!--\s*([a-z]+)(?:\s+t=(\d+))?(?:\s+(\d{4}-\d{2}-\d{2}))?\s*-->\s*$`)
+	retired    = regexp.MustCompile(`\s*<!--\s*retired\s+(\d{4}-\d{2}-\d{2})\s*-->\s*$`)
 )
 
 // NormalizeTopic turns a topic as the model or the person wrote it into
@@ -148,6 +168,30 @@ func parseFact(raw string) (Fact, bool) {
 	return f, true
 }
 
+// parsePast reads one line under ## Past: the retired comment, if any,
+// then the fact with its provenance as it was.
+func parsePast(raw string) (PastFact, bool) {
+	var p PastFact
+	if m := retired.FindStringSubmatchIndex(raw); m != nil {
+		p.Retired, _ = time.ParseInLocation(dateForm, raw[m[2]:m[3]], time.Local)
+		raw = raw[:m[0]]
+	}
+	f, ok := parseFact(raw)
+	p.Fact = f
+	return p, ok
+}
+
+// SameLine reports whether a fact is the line asked for: case and spacing
+// aside, with a bullet or a provenance comment on want ignored, so the
+// model may quote the line as it saw it.
+func SameLine(f Fact, want string) bool {
+	w := strings.Join(strings.Fields(want), " ")
+	if p, ok := parseFact(w); ok {
+		w = p.Line
+	}
+	return strings.EqualFold(f.Line, w)
+}
+
 // formatFact is the body line for a fact.
 func formatFact(line string, p Provenance) string {
 	return fmt.Sprintf("- %s <!-- %s t=%d %s -->", line, p.Source, p.Turn, p.At.Format(dateForm))
@@ -164,11 +208,29 @@ func parseTopicFile(data string) topicFile {
 			if strings.TrimSpace(lines[i]) == "---" {
 				tf.front = lines[1:i]
 				tf.body = lines[i+1:]
-				return tf
+				return tf.splitPast()
 			}
 		}
 	}
 	tf.body = lines
+	return tf.splitPast()
+}
+
+// splitPast moves the lines below PastHeading out of the body. The blank
+// lines before the heading are the writer's to put back (String), so a
+// line appended to the body lands above the gap.
+func (tf topicFile) splitPast() topicFile {
+	for i, l := range tf.body {
+		if strings.TrimSpace(l) == PastHeading {
+			tf.past = append([]string{}, tf.body[i+1:]...)
+			body := tf.body[:i]
+			for len(body) > 0 && strings.TrimSpace(body[len(body)-1]) == "" {
+				body = body[:len(body)-1]
+			}
+			tf.body = body
+			break
+		}
+	}
 	return tf
 }
 
@@ -203,7 +265,27 @@ func (tf topicFile) String() string {
 	for _, l := range tf.body {
 		b.WriteString(l + "\n")
 	}
+	if tf.past != nil {
+		if len(tf.body) > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(PastHeading + "\n")
+		for _, l := range tf.past {
+			b.WriteString(l + "\n")
+		}
+	}
 	return b.String()
+}
+
+// pastFacts is the lines under ## Past that read as facts.
+func (tf topicFile) pastFacts() []PastFact {
+	var out []PastFact
+	for _, l := range tf.past {
+		if p, ok := parsePast(l); ok {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func (tf topicFile) facts() []Fact {
@@ -217,7 +299,7 @@ func (tf topicFile) facts() []Fact {
 }
 
 func (tf topicFile) topic(name string) Topic {
-	t := Topic{Name: name, Facts: tf.facts()}
+	t := Topic{Name: name, Facts: tf.facts(), Past: tf.pastFacts()}
 	t.Updated, _ = time.Parse(time.RFC3339, tf.frontValue("updated"))
 	return t
 }
@@ -307,7 +389,7 @@ func Topics(dir string) ([]TopicInfo, error) {
 			return nil, scrub(dir, err)
 		}
 		facts := tf.facts()
-		ti := TopicInfo{Name: n, Lines: len(facts)}
+		ti := TopicInfo{Name: n, Lines: len(facts), Past: len(tf.pastFacts())}
 		if len(facts) > 0 {
 			ti.First = facts[0].Line
 		}
@@ -346,8 +428,8 @@ func RemoveTopic(dir, topic string) error {
 }
 
 // RemoveLine deletes the nth fact (1-based, as `haunt memory show`
-// numbers them) from a topic, and returns it. The topic file goes when
-// its last fact does.
+// numbers them) from a topic, and returns it. Past lines are not
+// numbered. The topic file goes when its last line, fact or past, does.
 func RemoveLine(dir, topic string, n int) (Fact, error) {
 	name, err := NormalizeTopic(topic)
 	if err != nil {
@@ -375,9 +457,10 @@ func RemoveLine(dir, topic string, n int) (Fact, error) {
 	return Fact{}, fmt.Errorf("memory: topic %q has %d lines, no line %d", name, seen, n)
 }
 
-// saveOrRemove writes a topic back, or removes it when no fact is left.
+// saveOrRemove writes a topic back, or removes it when nothing is left
+// in it, facts or past.
 func saveOrRemove(dir, name string, tf topicFile) error {
-	if len(tf.facts()) == 0 {
+	if len(tf.facts()) == 0 && len(tf.pastFacts()) == 0 {
 		return os.Remove(topicPath(dir, name))
 	}
 	return writeTopicFile(dir, name, tf, time.Now())

@@ -153,16 +153,33 @@ func memoryShow(out io.Writer, dir, topic string) error {
 	}
 	fmt.Fprintln(out, head)
 	for i, f := range t.Facts {
-		prov := f.Prov.Source
-		if f.Prov.Turn != 0 {
-			prov += fmt.Sprintf(", turn %d", f.Prov.Turn)
+		fmt.Fprintf(out, "%3d  %s  (%s)\n", i+1, f.Line, provText(f.Prov))
+	}
+	// The past is not numbered, so `memory rm <topic> N` counts facts
+	// alone, as show numbers them.
+	if len(t.Past) > 0 {
+		fmt.Fprintln(out, "past:")
+	}
+	for _, p := range t.Past {
+		prov := provText(p.Prov)
+		if !p.Retired.IsZero() {
+			prov += ", retired " + p.Retired.Format("2006-01-02")
 		}
-		if !f.Prov.At.IsZero() {
-			prov += ", " + f.Prov.At.Format("2006-01-02")
-		}
-		fmt.Fprintf(out, "%3d  %s  (%s)\n", i+1, f.Line, prov)
+		fmt.Fprintf(out, "     %s  (%s)\n", p.Line, prov)
 	}
 	return nil
+}
+
+// provText is a fact's provenance as show prints it.
+func provText(p memory.Provenance) string {
+	s := p.Source
+	if p.Turn != 0 {
+		s += fmt.Sprintf(", turn %d", p.Turn)
+	}
+	if !p.At.IsZero() {
+		s += ", " + p.At.Format("2006-01-02")
+	}
+	return s
 }
 
 // memoryReindex asks the running ghost, or rebuilds the index itself

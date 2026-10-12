@@ -119,3 +119,37 @@ func TestMemoryReindexRunning(t *testing.T) {
 		t.Errorf("state.db opened while the ghost runs: %v", err)
 	}
 }
+
+// show prints the past after the facts, under a header and unnumbered,
+// so rm's numbers are the facts' alone.
+func TestMemoryShowPast(t *testing.T) {
+	state := writeMemory(t)
+	where := "---\ntopic: where\n---\n" +
+		"- lives in Brisbane <!-- person t=9 2026-10-12 -->\n" +
+		"- works from home <!-- person t=11 2026-10-12 -->\n\n" +
+		"## Past\n- lives in Sydney <!-- person t=3 2026-09-30 --> <!-- retired 2026-10-12 -->\n"
+	if err := os.WriteFile(filepath.Join(state, "memory", "topics", "where.md"), []byte(where), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runMemory(t, "show", "-state", state, "where")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "  1  lives in Brisbane  (person, turn 9, 2026-10-12)\n" +
+		"  2  works from home  (person, turn 11, 2026-10-12)\n" +
+		"past:\n" +
+		"     lives in Sydney  (person, turn 3, 2026-09-30, retired 2026-10-12)\n"
+	if !strings.HasSuffix(out, want) {
+		t.Errorf("show =\n%s\nwant it to end\n%s", out, want)
+	}
+	if out, _ := runMemory(t, "ls", "-state", state); !strings.Contains(out, "where  2\n") {
+		t.Errorf("ls counts the past:\n%s", out)
+	}
+	if _, err := runMemory(t, "rm", "-state", state, "where", "2"); err != nil {
+		t.Fatal(err)
+	}
+	out, _ = runMemory(t, "show", "-state", state, "where")
+	if strings.Contains(out, "works from home") || !strings.Contains(out, "lives in Sydney") {
+		t.Errorf("after rm where 2:\n%s", out)
+	}
+}

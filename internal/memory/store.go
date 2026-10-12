@@ -90,9 +90,16 @@ func (s *fileStore) SetCore(which, text string) error {
 }
 
 func (s *fileStore) Index() (string, error) {
-	topics, err := Topics(s.dir)
+	all, err := Topics(s.dir)
 	if err != nil {
 		return "", err
+	}
+	// A topic left with only past lines has nothing to recall.
+	topics := all[:0]
+	for _, t := range all {
+		if t.Lines > 0 {
+			topics = append(topics, t)
+		}
 	}
 	return renderIndex(topics), nil
 }
@@ -204,27 +211,87 @@ func (s *fileStore) Forget(topic, line string) error {
 	if err != nil {
 		return scrub(s.dir, err)
 	}
-	want := strings.Join(strings.Fields(line), " ")
-	if f, ok := parseFact(want); ok {
-		want = f.Line
-	}
 	kept := tf.body[:0:0]
 	gone := 0
 	for _, raw := range tf.body {
-		if f, ok := parseFact(raw); ok && strings.EqualFold(f.Line, want) {
+		if f, ok := parseFact(raw); ok && SameLine(f, line) {
 			gone++
 			continue
 		}
 		kept = append(kept, raw)
 	}
 	if gone == 0 {
-		return fmt.Errorf("memory: topic %q has no line %q", name, want)
+		return fmt.Errorf("memory: topic %q has no line %q", name, strings.Join(strings.Fields(line), " "))
 	}
 	tf.body = kept
 	if err := saveOrRemove(s.dir, name, tf); err != nil {
 		return scrub(s.dir, err)
 	}
 	return s.reindexTopicLocked(name)
+}
+
+// ErrTheirs is Retire's refusal of a line the person stated, asked by
+// anyone else.
+var ErrTheirs = errors.New("memory: a line the person stated is retired only on their word")
+
+func (s *fileStore) Retire(topic, line string, by Provenance) error {
+	name, err := NormalizeTopic(topic)
+	if err != nil {
+		return err
+	}
+	if by.At.IsZero() {
+		by.At = time.Now()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tf, err := readTopicFile(s.dir, name)
+	if errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("memory: no topic %q", name)
+	}
+	if err != nil {
+		return scrub(s.dir, err)
+	}
+	kept := tf.body[:0:0]
+	var moved []string
+	for _, raw := range tf.body {
+		f, ok := parseFact(raw)
+		if !ok || !SameLine(f, line) {
+			kept = append(kept, raw)
+			continue
+		}
+		if f.Prov.Source == "person" && by.Source != "person" {
+			return ErrTheirs
+		}
+		l := strings.TrimSpace(raw)
+		if !strings.HasPrefix(l, "- ") && !strings.HasPrefix(l, "* ") {
+			l = "- " + l
+		}
+		moved = append(moved, l+" <!-- retired "+by.At.Format(dateForm)+" -->")
+	}
+	if len(moved) == 0 {
+		return fmt.Errorf("memory: topic %q has no line %q", name, strings.Join(strings.Fields(line), " "))
+	}
+	tf.body = kept
+	tf.past = append(append([]string{}, tf.past...), moved...)
+	if err := writeTopicFile(s.dir, name, tf, time.Now()); err != nil {
+		return scrub(s.dir, err)
+	}
+	return s.reindexTopicLocked(name)
+}
+
+func (s *fileStore) Facts(topic string) ([]Fact, error) {
+	name, err := NormalizeTopic(topic)
+	if err != nil {
+		return nil, err
+	}
+	tf, err := readTopicFile(s.dir, name)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, scrub(s.dir, err)
+	}
+	return tf.facts(), nil
 }
 
 // reindexTopicLocked replaces one topic's rows after the store wrote its
