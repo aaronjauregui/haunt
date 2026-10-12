@@ -5,6 +5,8 @@ import (
 	"image"
 	"strings"
 	"testing"
+
+	"github.com/aaronjauregui/haunt/internal/sprite"
 )
 
 // conversationRenderer is the conversation panel's renderer: wide, capped.
@@ -29,9 +31,18 @@ func talk(n int) []Entry {
 	return out
 }
 
+// lined is a conversation render with the view cut to its line count.
+func lined(sp *sprite.Sprite, v ConversationView) (*sprite.Sprite, int) { return sp, v.Lines }
+
+// inputBounds is the size of the input box alone for text.
+func inputBounds(r *Renderer, text string) image.Rectangle {
+	sp, _ := r.RenderInput(InputBox{Text: text, Caret: true})
+	return sp.Img.Bounds()
+}
+
 func pix(t *testing.T, r *Renderer, entries []Entry, offset int) []byte {
 	t.Helper()
-	sp, _ := r.RenderConversation(entries, offset, "", false)
+	sp, _ := r.RenderConversation(entries, offset, InputBox{Text: "", Caret: false})
 	return sp.Img.Pix
 }
 
@@ -39,11 +50,11 @@ func pix(t *testing.T, r *Renderer, entries []Entry, offset int) []byte {
 // panel than the line alone, and count their lines with the blank between.
 func TestRenderConversationStacks(t *testing.T) {
 	r := conversationRenderer(t)
-	alone, n := r.RenderConversation(nil, 0, "hi", true)
-	if n != 0 || alone.Img.Bounds() != r.RenderInput("hi", true).Img.Bounds() {
+	alone, n := lined(r.RenderConversation(nil, 0, InputBox{Text: "hi", Caret: true}))
+	if n != 0 || alone.Img.Bounds() != inputBounds(r, "hi") {
 		t.Errorf("no entries: %d lines, %v", n, alone.Img.Bounds())
 	}
-	two, n := r.RenderConversation([]Entry{{You: true, Text: "hello"}, {Text: "Hello yourself."}}, 0, "hi", true)
+	two, n := lined(r.RenderConversation([]Entry{{You: true, Text: "hello"}, {Text: "Hello yourself."}}, 0, InputBox{Text: "hi", Caret: true}))
 	if n != 3 {
 		t.Errorf("two one-line entries made %d lines, want 3", n)
 	}
@@ -57,11 +68,11 @@ func TestRenderConversationStacks(t *testing.T) {
 func TestRenderConversationOffset(t *testing.T) {
 	r := conversationRenderer(t)
 	entries := talk(8)
-	now, n := r.RenderConversation(entries, 0, "", false)
+	now, n := lined(r.RenderConversation(entries, 0, InputBox{Text: "", Caret: false}))
 	if n <= r.ConversationLines()+2 {
 		t.Fatalf("%d lines do not overflow the %d that fit", n, r.ConversationLines())
 	}
-	back, _ := r.RenderConversation(entries, 2, "", false)
+	back, _ := r.RenderConversation(entries, 2, InputBox{Text: "", Caret: false})
 	if back.Img.Bounds() != now.Img.Bounds() {
 		t.Errorf("scrolling changed the panel: %v against %v", back.Img.Bounds(), now.Img.Bounds())
 	}
@@ -86,8 +97,8 @@ func TestRenderConversationThumbnail(t *testing.T) {
 		pic.Pix[i] = 200
 	}
 	words := []Entry{{You: true, Text: "draw me a cat"}, {Text: "Here."}}
-	without, n := r.RenderConversation(words, 0, "", false)
-	with, m := r.RenderConversation(append(words, Entry{Image: pic}), 0, "", false)
+	without, n := lined(r.RenderConversation(words, 0, InputBox{Text: "", Caret: false}))
+	with, m := lined(r.RenderConversation(append(words, Entry{Image: pic}), 0, InputBox{Text: "", Caret: false}))
 	if m <= n+1 || with.Img.Bounds().Dy() <= without.Img.Bounds().Dy() {
 		t.Errorf("a picture: %d lines against %d, %v against %v", m, n, with.Img.Bounds(), without.Img.Bounds())
 	}
@@ -109,13 +120,13 @@ func TestRenderConversationFixedWidth(t *testing.T) {
 		{[]Entry{{Text: "Boo."}}, "hi"},
 		{talk(10), strings.Repeat("typing ", 40)},
 	} {
-		sp, _ := r.RenderConversation(tc.entries, 0, tc.line, true)
+		sp, _ := r.RenderConversation(tc.entries, 0, InputBox{Text: tc.line, Caret: true})
 		if w := sp.Img.Bounds().Dx(); w != 480 {
 			t.Errorf("%d entries, line %q: %d wide, want 480", len(tc.entries), tc.line, w)
 		}
 	}
-	full, _ := r.RenderConversation(talk(10), 0, "", true)
-	fuller, _ := r.RenderConversation(talk(11), 0, "more", false)
+	full, _ := r.RenderConversation(talk(10), 0, InputBox{Text: "", Caret: true})
+	fuller, _ := r.RenderConversation(talk(11), 0, InputBox{Text: "more", Caret: false})
 	if full.Img.Bounds() != fuller.Img.Bounds() || full.Img.Bounds().Dy() > 300 {
 		t.Errorf("a full view changed size as it grew: %v, %v", full.Img.Bounds(), fuller.Img.Bounds())
 	}
@@ -150,11 +161,11 @@ func TestRenderConversationSides(t *testing.T) {
 	th := r.theme
 	_, _, youW := r.layoutConversation(nil)
 	long := strings.Repeat("a fairly long question that wraps ", 4)
-	sp, n := r.RenderConversation([]Entry{
+	sp, n := lined(r.RenderConversation([]Entry{
 		{You: true, Text: "hello"},
 		{Text: "Hello yourself."},
 		{You: true, Text: long},
-	}, 0, "", false)
+	}, 0, InputBox{Text: "", Caret: false}))
 	img := sp.Img
 	if n < 6 {
 		t.Fatalf("%d lines: the long question did not wrap", n)
@@ -172,5 +183,58 @@ func TestRenderConversationSides(t *testing.T) {
 		if _, hi := inkSpan(r, img, row); !near(hi, right-youW-1) {
 			t.Errorf("wrapped line %d ends at %d, want %d", row, hi, right-youW-1)
 		}
+	}
+}
+
+// TestRenderConversationNewlines: a line of the person's with newlines in
+// it takes a row per line on the person's side, a blank one included.
+func TestRenderConversationNewlines(t *testing.T) {
+	r := conversationRenderer(t)
+	sp, n := lined(r.RenderConversation([]Entry{{You: true, Text: "first\n\nthird"}}, 0, InputBox{}))
+	if n != 3 {
+		t.Fatalf("three lines made %d rows", n)
+	}
+	_, _, youW := r.layoutConversation(nil)
+	right := r.theme.MaxWidth - r.theme.Padding - youW
+	// The first row carries `you` in the gutter; the third is text alone.
+	if _, hi := inkSpan(r, sp.Img, 2); hi < right-4 || hi > right {
+		t.Errorf("the third line ends at %d, want against %d", hi, right)
+	}
+	if lo, _ := inkSpan(r, sp.Img, 1); lo != -1 {
+		t.Errorf("the blank line has ink from %d", lo)
+	}
+}
+
+// TestRenderConversationRoom: a taller input box takes its rows from the
+// transcript's, and the panel stays within its cap; an offset that hides
+// later lines puts a mark beneath the view.
+func TestRenderConversationRoom(t *testing.T) {
+	r := conversationRenderer(t)
+	_, one := r.RenderConversation(talk(10), 0, InputBox{Text: "hi"})
+	sp, three := r.RenderConversation(talk(10), 0, InputBox{Text: "a\nb\nc"})
+	if three.Room != one.Room-2 {
+		t.Errorf("room with a three-row box %d, with one %d", three.Room, one.Room)
+	}
+	if h := sp.Img.Bounds().Dy(); h > r.theme.MaxHeight {
+		t.Errorf("the panel is %d tall, over the cap of %d", h, r.theme.MaxHeight)
+	}
+	at, _ := r.RenderConversation(talk(10), 0, InputBox{})
+	back, _ := r.RenderConversation(talk(10), 2, InputBox{})
+	lh := r.lineHeight()
+	gapY := r.theme.Padding + one.Room*lh + lh/4
+	mark := func(img *image.NRGBA) bool {
+		bg := img.NRGBAAt(r.theme.Padding, gapY)
+		for x := r.theme.Padding; x < r.theme.MaxWidth-r.theme.Padding; x++ {
+			if img.NRGBAAt(x, gapY) != bg {
+				return true
+			}
+		}
+		return false
+	}
+	if mark(at.Img) {
+		t.Error("a mark beneath the view at the bottom")
+	}
+	if !mark(back.Img) {
+		t.Error("no mark beneath the view scrolled back")
 	}
 }

@@ -75,7 +75,7 @@ func (g *Ghost) remember(r recalled) {
 		g.recall.lines = append(g.recall.lines[:0:0], g.recall.lines[n-recallKeep:]...)
 	}
 	g.recallMu.Unlock()
-	if g.conversationSaid() {
+	if g.conversationSaid(r.you) {
 		g.drawInput()
 	}
 }

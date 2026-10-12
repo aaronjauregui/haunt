@@ -259,43 +259,6 @@ func (r *Renderer) linesPerPage(lineHeight int) int {
 	return n
 }
 
-// RenderInput paints the line the user is typing, with a caret. It keeps a
-// fixed width so the panel does not jitter with every keystroke, and shows
-// the tail of a long line rather than the head — what you are typing now is
-// what you want to see.
-func (r *Renderer) RenderInput(text string, caretOn bool) *sprite.Sprite {
-	t := r.theme
-	metrics := r.face.Metrics()
-	lineHeight := (metrics.Ascent + metrics.Descent).Ceil() + 2
-
-	img := image.NewNRGBA(image.Rect(0, 0, t.MaxWidth, lineHeight+2*t.Padding))
-	paintPanel(img, t)
-	d := &font.Drawer{
-		Dst:  img,
-		Src:  image.NewUniform(t.Text),
-		Face: r.face,
-		Dot:  fixed.P(t.Padding, t.Padding+metrics.Ascent.Ceil()),
-	}
-	d.DrawString(r.inputLine(text, caretOn))
-	return &sprite.Sprite{Img: img}
-}
-
-// inputLine is the typed line as drawn: a prompt, the tail that fits, and
-// the caret when it is on.
-func (r *Renderer) inputLine(text string, caretOn bool) string {
-	line := "> " + text
-	inner := r.theme.MaxWidth - 2*r.theme.Padding
-	// Drop leading runes until the tail fits, so the caret stays visible.
-	for font.MeasureString(r.face, line+"|").Ceil() > inner && len(line) > 3 {
-		_, size := utf8.DecodeRuneInString(line[2:])
-		line = "> " + line[2+size:]
-	}
-	if caretOn {
-		line += "|"
-	}
-	return line
-}
-
 // WaitFrames is how many distinct frames RenderWaiting cycles through.
 const WaitFrames = 4
 

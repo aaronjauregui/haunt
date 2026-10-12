@@ -15,11 +15,14 @@ import (
 // balloon, not a window. Enter sends the line and it opens again empty,
 // with the keyboard still held; above it, in a wider panel, is what was
 // said lately, the person's lines and the ghost's and its pictures, with
-// the ghost's words streaming in at the bottom, and the wheel over the
-// ghost goes back through it; nothing on the balloon expires while it
-// lasts. A click on the ghost is still the ghost's, and leaves the
-// conversation be. It ends on
-// Escape, on the keyboard going elsewhere (a click away), on a quiet spell
+// the ghost's words streaming in at the bottom. The wheel over the ghost
+// or over the panel goes back through it, as do PageUp, PageDown and
+// Shift with Up or Down; scrolled back, the view holds its place as new
+// words arrive, with a mark beneath it until it is brought back to the
+// bottom, and the person's own next line brings it back. Nothing on the
+// balloon expires while it lasts. A click on the ghost is still the
+// ghost's, and leaves the conversation be. It ends on Escape, on the
+// keyboard going elsewhere (a click away), on a quiet spell
 // with nothing typed and nothing said, or when the ghost says goodbye
 // with end_conversation, which the person can switch off
 // ([conversation] ghost_may_end). Once it ends, the last words linger as
@@ -76,9 +79,10 @@ type conversation struct {
 	// (waitInConversation), which it may tick and take down; any other
 	// status line is not its to touch.
 	waitStatus string
-	// offset is how many lines the view is scrolled back, and lines how
-	// many there were at the last draw, to clamp it with.
-	offset, lines int
+	// offset is how many lines the view is scrolled back from the bottom;
+	// lines is how many there were at the last draw, and room how many
+	// the view had room for, to clamp it with.
+	offset, lines, room int
 	// pics are the pictures in the view, decoded once.
 	pics map[string]image.Image
 	// ending says the ghost called end_conversation this turn: the mode
@@ -121,7 +125,7 @@ func (g *Ghost) startConversation() {
 	now := time.Now()
 	g.conv.open, g.conv.since, g.conv.last = true, now, now
 	g.conv.said, g.conv.streaming, g.conv.status, g.conv.ending = "", "", "", false
-	g.conv.offset, g.conv.lines, g.conv.pics = 0, 0, nil
+	g.conv.offset, g.conv.lines, g.conv.room, g.conv.pics = 0, 0, 0, nil
 	d := g.conv.idleAfter
 	if d <= 0 {
 		d = conversationIdle
@@ -259,14 +263,15 @@ func (g *Ghost) conversationRenderer(base *balloon.Renderer) *balloon.Renderer {
 	return r
 }
 
-// conversationScroll is how many lines one step of the wheel moves the
-// conversation view.
+// conversationScroll is how many lines one step of the wheel, or Shift
+// with Up or Down, moves the conversation view.
 const conversationScroll = 3
 
 // streamInConversation puts words arriving mid-turn at the bottom of the
 // view, reporting whether there was a conversation to put them in. Empty
 // takes back what had streamed, for a turn that ended up saying nothing,
-// which leaves the last words said as the last words.
+// which leaves the last words said as the last words. A view scrolled
+// back stays where it is (conversationView).
 func (g *Ghost) streamInConversation(text string) bool {
 	g.convMu.Lock()
 	if !g.conv.open {
@@ -275,7 +280,7 @@ func (g *Ghost) streamInConversation(text string) bool {
 	}
 	g.conv.streaming, g.conv.last = text, time.Now()
 	if text != "" {
-		g.conv.status, g.conv.offset = "", 0
+		g.conv.status = ""
 	}
 	g.convMu.Unlock()
 	g.drawInput()
@@ -296,9 +301,6 @@ func (g *Ghost) statusInConversation(text string) bool {
 		return false
 	}
 	g.conv.status = text
-	if text != "" {
-		g.conv.offset = 0
-	}
 	g.convMu.Unlock()
 	g.drawInput()
 	return true
@@ -341,14 +343,19 @@ func (g *Ghost) sayInConversation(text string) bool {
 	return true
 }
 
-// conversationSaid is something new in the conversation, the person's or
-// the ghost's: the view goes back to the bottom to show it. It reports
-// whether a conversation is open.
-func (g *Ghost) conversationSaid() bool {
+// conversationSaid is something new in the conversation, the person's
+// (you) or the ghost's. The person's brings the view back to the bottom:
+// they have just spoken, and what comes next is the answer. The ghost's
+// leaves a view scrolled back where it is, since the person is reading
+// something earlier. It reports whether a conversation is open.
+func (g *Ghost) conversationSaid(you bool) bool {
 	g.convMu.Lock()
 	defer g.convMu.Unlock()
 	if g.conv.open {
-		g.conv.offset, g.conv.last = 0, time.Now()
+		g.conv.last = time.Now()
+		if you {
+			g.conv.offset = 0
+		}
 		// Something said answers whatever the status line was waiting on.
 		g.conv.status = ""
 	}
@@ -356,19 +363,54 @@ func (g *Ghost) conversationSaid() bool {
 }
 
 // scrollConversation moves the view: back for a negative count of wheel
-// steps, forward for a positive one, clamped to what there is.
+// steps, forward for a positive one.
 func (g *Ghost) scrollConversation(steps int) {
-	g.convMu.Lock()
-	rend := g.conv.rend
-	top := g.conv.lines
-	if rend != nil {
-		top -= rend.ConversationLines()
+	g.scrollConversationLines(steps * conversationScroll)
+}
+
+// scrollConversationPanel is the wheel over the conversation panel
+// itself, which scrolls it as the wheel over the ghost does; a panel the
+// wheel reaches after the conversation has ended is left alone.
+func (g *Ghost) scrollConversationPanel(steps int) {
+	if g.inConversation() {
+		g.scrollConversation(steps)
 	}
-	g.conv.offset = min(max(g.conv.offset-steps*conversationScroll, 0), max(top, 0))
+}
+
+// scrollConversationLines moves the view n lines, back for a negative n
+// and forward for a positive one, clamped so it never goes above the
+// first line or below the last.
+func (g *Ghost) scrollConversationLines(n int) {
+	g.convMu.Lock()
+	g.conv.offset = min(max(g.conv.offset-n, 0), g.conversationTop())
 	offset := g.conv.offset
 	g.convMu.Unlock()
 	g.log.Debug(hlog.Balloon, "conversation: %d lines back", offset)
 	g.drawInput()
+}
+
+// conversationTop is the furthest back the view goes: the offset that
+// shows the first line at the top. Called with convMu held.
+func (g *Ghost) conversationTop() int {
+	return max(g.conv.lines-g.conversationRoom(), 0)
+}
+
+// conversationRoom is how many lines the view shows: as many as it had
+// room for at the last draw, or as a one-row box leaves before the
+// first. Called with convMu held.
+func (g *Ghost) conversationRoom() int {
+	if g.conv.room <= 0 && g.conv.rend != nil {
+		return g.conv.rend.ConversationLines()
+	}
+	return g.conv.room
+}
+
+// conversationPage is how far PageUp and PageDown move the view: what it
+// shows, less a line kept from the last page to read on from.
+func (g *Ghost) conversationPage() int {
+	g.convMu.Lock()
+	defer g.convMu.Unlock()
+	return max(g.conversationRoom()-1, 1)
 }
 
 // clickInConversation is whether a click on the ghost belongs to an open
@@ -384,16 +426,22 @@ func (g *Ghost) clickInConversation() bool {
 	return g.input.open && g.input.reply == nil
 }
 
-// conversationView paints the view with the line being typed beneath it:
-// what has been said, from the recall, and the words still streaming.
-// Called from drawInput, with drawMu held.
-func (g *Ghost) conversationView(rend *balloon.Renderer, line string, caret bool) *sprite.Sprite {
+// conversationView paints the view with the input box beneath it: what
+// has been said, from the recall, and the words still streaming. It
+// reports the first row of the box shown. Called from drawInput, with
+// drawMu held.
+//
+// A view scrolled back holds its place: the offset counts lines from the
+// bottom, so when lines arrive below (or a status line goes) it moves by
+// as many, and the lines on screen stay on screen. At the bottom it
+// follows what arrives.
+func (g *Ghost) conversationView(rend *balloon.Renderer, in balloon.InputBox) (*sprite.Sprite, int) {
 	g.recallMu.Lock()
 	said := append([]recalled(nil), g.recall.lines...)
 	g.recallMu.Unlock()
 
 	g.convMu.Lock()
-	streaming, status, offset := g.conv.streaming, g.conv.status, g.conv.offset
+	streaming, status, offset, before := g.conv.streaming, g.conv.status, g.conv.offset, g.conv.lines
 	if g.conv.pics == nil {
 		g.conv.pics = map[string]image.Image{}
 	}
@@ -430,13 +478,27 @@ func (g *Ghost) conversationView(rend *balloon.Renderer, line string, caret bool
 	if status != "" {
 		entries = append(entries, balloon.Entry{Text: status, At: time.Now()})
 	}
-	sp, lines := rend.RenderConversation(entries, offset, line, caret)
+	start := offset
+	sp, view := rend.RenderConversation(entries, offset, in)
+	if offset > 0 && before > 0 && view.Lines != before {
+		held := min(max(offset+view.Lines-before, 0), max(view.Lines-view.Room, 0))
+		if held != offset {
+			offset = held
+			sp, view = rend.RenderConversation(entries, offset, in)
+			g.log.Debug(hlog.Balloon, "conversation: held %d lines back", offset)
+		}
+	}
 
 	g.convMu.Lock()
-	g.conv.lines = lines
-	g.conv.offset = min(g.conv.offset, max(lines-rend.ConversationLines(), 0))
+	g.conv.lines, g.conv.room = view.Lines, view.Room
+	// Only if nothing moved it meanwhile: a scroll that landed during the
+	// draw is the newer word, and the next draw shows it.
+	if g.conv.offset == start {
+		g.conv.offset = offset
+	}
+	g.conv.offset = min(g.conv.offset, g.conversationTop())
 	g.convMu.Unlock()
-	return sp
+	return sp, view.InputTop
 }
 
 // askToEnd is end_conversation: the turn's words become the goodbye.

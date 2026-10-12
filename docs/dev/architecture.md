@@ -53,7 +53,7 @@ internal/
   artimport          OpenRaster drawing to shell
   seriko             SERIKO shell art to shell
   balloon            renders balloons: text, paging, choices, the waiting indicator
-  textinput          keyboard scancodes to an editable line (US layout, pure Go)
+  textinput          keyboard scancodes to editable text (US layout, pure Go)
   wlclient           the Wayland connection: registry, shm, layer-shell surfaces, input regions, drag
   wayland/           generated bindings: layer-shell, virtual keyboard and pointer
   desktop            compositor IPC: fullscreen state and the focused window (sway, Hyprland)

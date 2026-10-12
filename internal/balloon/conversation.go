@@ -45,15 +45,33 @@ type convRow struct {
 const maxThumbs = 16
 
 // ConversationLines is how many lines of transcript the conversation view
-// shows at most above the line being typed: the most an offset can uncover
-// at once.
+// shows at most above an input box of one row: the most an offset can
+// uncover at once. Each row the box grows by takes one from it
+// (ConversationView.Room).
 func (r *Renderer) ConversationLines() int {
+	return r.conversationRoom(1)
+}
+
+// conversationRoom is how many lines of transcript fit above an input box
+// of inputRows rows.
+func (r *Renderer) conversationRoom(inputRows int) int {
 	t := r.theme
 	lh := r.lineHeight()
 	if t.MaxHeight <= 0 {
 		return 1 << 30
 	}
-	return max((t.MaxHeight-2*t.Padding-lh-lh/2)/lh, 1)
+	return max((t.MaxHeight-2*t.Padding-inputRows*lh-lh/2)/lh, 1)
+}
+
+// ConversationView is what RenderConversation drew, for the caller to
+// clamp its offset and keep the input box's scroll with.
+type ConversationView struct {
+	// Lines is the transcript's length in lines.
+	Lines int
+	// Room is how many of them the view had room for above the box.
+	Room int
+	// InputTop is the first row of the input box shown.
+	InputTop int
 }
 
 // RenderConversation paints the conversation view: entries laid out as
@@ -61,19 +79,21 @@ func (r *Renderer) ConversationLines() int {
 // with the theme's Speaker in a left gutter and the person's
 // right-aligned (ragged left) with `you` in a right gutter, a picture as
 // a thumbnail on the ghost's side, a blank line between entries; the
-// last lines that fit, moved up by offset lines (clamped to the top); and
-// the line being typed last. The panel is always the full width, and
-// grows with the transcript until it reaches the height cap, so once it
-// is full a redraw is the same size and can be done in place. lines is the
-// transcript's length in lines, for the caller to clamp its offset with.
-func (r *Renderer) RenderConversation(entries []Entry, offset int, line string, caret bool) (sp *sprite.Sprite, lines int) {
+// last lines that fit, moved up by offset lines (clamped to the top),
+// with a dim mark beneath them when offset hides later ones; and the
+// input box last. The panel is always the full width, and grows with the
+// transcript until it reaches the height cap, so once it is full a redraw
+// is the same size and can be done in place; a taller input box takes its
+// rows from the transcript's.
+func (r *Renderer) RenderConversation(entries []Entry, offset int, in InputBox) (*sprite.Sprite, ConversationView) {
 	t := r.theme
 	lh := r.lineHeight()
 	gap := lh / 2
 	rows, indent, youW := r.layoutConversation(entries)
 
 	total := len(rows)
-	room := r.ConversationLines()
+	inRows := r.InputHeight(in)
+	room := r.conversationRoom(inRows)
 	offset = min(max(offset, 0), max(total-room, 0))
 	end := total - offset
 	first := max(end-room, 0)
@@ -83,7 +103,7 @@ func (r *Renderer) RenderConversation(entries []Entry, offset int, line string, 
 		viewH += gap
 	}
 
-	img := image.NewNRGBA(image.Rect(0, 0, t.MaxWidth, viewH+lh+2*t.Padding))
+	img := image.NewNRGBA(image.Rect(0, 0, t.MaxWidth, viewH+inRows*lh+2*t.Padding))
 	paintPanel(img, t)
 	view := img.SubImage(image.Rect(t.Padding, t.Padding, t.MaxWidth-t.Padding, t.Padding+shown*lh)).(*image.NRGBA)
 	text := &font.Drawer{Dst: view, Src: image.NewUniform(t.Text), Face: r.face}
@@ -113,11 +133,14 @@ func (r *Renderer) RenderConversation(entries []Entry, offset int, line string, 
 			drawAligned(text, row.text, left+indent, y+ascent, false)
 		}
 	}
+	if offset > 0 && shown > 0 {
+		// In the gap between the view and the box, centred: there is
+		// more below, and the view is not following it.
+		r.moreMark(img, t.MaxWidth/2+lh/4, t.Padding+shown*lh+gap/2, false)
+	}
 
-	in := &font.Drawer{Dst: img, Src: image.NewUniform(t.Text), Face: r.face,
-		Dot: fixed.P(t.Padding, t.Padding+viewH+ascent)}
-	in.DrawString(r.inputLine(line, caret))
-	return &sprite.Sprite{Img: img}, total
+	top := r.drawInput(img, t.Padding+viewH, in)
+	return &sprite.Sprite{Img: img}, ConversationView{Lines: total, Room: room, InputTop: top}
 }
 
 // drawAligned draws s on the baseline y, starting at x, or ending at x

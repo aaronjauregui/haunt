@@ -119,6 +119,10 @@ func TestEmptyAndReset(t *testing.T) {
 func TestRepeats(t *testing.T) {
 	for code, want := range map[uint32]bool{
 		KeyBackspace: true,
+		KeyDelete:    true,
+		KeyLeft:      true,
+		KeyDown:      true,
+		KeyPageUp:    true,
 		30:           true, // a
 		KeySpace:     true,
 		KeyEnter:     false,
@@ -128,5 +132,134 @@ func TestRepeats(t *testing.T) {
 		if got := Repeats(code); got != want {
 			t.Errorf("Repeats(%d) = %v, want %v", code, got, want)
 		}
+	}
+}
+
+// typeText presses the keys for s on the US layout, shift included.
+func typeText(e *Editor, s string) {
+	for _, r := range s {
+		code, shift, ok := Scancode(r)
+		if !ok {
+			panic("no key for " + string(r))
+		}
+		if shift {
+			e.Key(KeyLeftShift, true)
+		}
+		press(e, code)
+		if shift {
+			e.Key(KeyLeftShift, false)
+		}
+	}
+}
+
+// A backslash before the cursor turns Enter into a new line, and goes;
+// Enter anywhere else still submits, and a backslash elsewhere stays.
+func TestBackslashEnterIsANewLine(t *testing.T) {
+	var e Editor
+	typeText(&e, `one\`)
+	if a := press(&e, KeyEnter); a != ActionNone {
+		t.Fatalf("backslash-Enter = %v, want none", a)
+	}
+	typeText(&e, `two \ three`)
+	if a := press(&e, KeyEnter); a != ActionSubmit {
+		t.Fatalf("Enter after the second line = %v, want submit", a)
+	}
+	if got, want := e.Text(), "one\ntwo \\ three"; got != want {
+		t.Errorf("text = %q, want %q", got, want)
+	}
+	typeText(&e, `\`)
+	if a := press(&e, KeyKPEnter); a != ActionNone {
+		t.Errorf("backslash-keypad Enter = %v, want none", a)
+	}
+	if got, want := e.Text(), "one\ntwo \\ three\n"; got != want {
+		t.Errorf("text = %q, want %q", got, want)
+	}
+}
+
+// The cursor moves within the text and typing goes in where it is.
+func TestCursorEditing(t *testing.T) {
+	var e Editor
+	typeText(&e, "helo")
+	press(&e, KeyLeft)
+	typeText(&e, "l")
+	press(&e, KeyEnd)
+	typeText(&e, "!")
+	press(&e, KeyHome)
+	press(&e, KeyDelete)
+	typeText(&e, "H")
+	if got, want := e.Text(), "Hello!"; got != want {
+		t.Errorf("text = %q, want %q", got, want)
+	}
+	// At the start Backspace and Left do nothing; at the end Right and
+	// Delete do nothing.
+	press(&e, KeyLeft)
+	press(&e, KeyLeft)
+	press(&e, KeyBackspace)
+	if got := e.Text(); got != "Hello!" || e.Cursor() != 0 {
+		t.Errorf("text = %q cursor %d, want %q at 0", got, e.Cursor(), "Hello!")
+	}
+	press(&e, KeyEnd)
+	press(&e, KeyRight)
+	press(&e, KeyDelete)
+	if got := e.Text(); got != "Hello!" || e.Cursor() != len("Hello!") {
+		t.Errorf("text = %q cursor %d, want %q at the end", got, e.Cursor(), "Hello!")
+	}
+}
+
+// Up and Down move between lines at the same column, to the end of a
+// shorter line, and do nothing on the first and last.
+func TestUpDownMoveBetweenLines(t *testing.T) {
+	var e Editor
+	typeText(&e, "abcdef\\")
+	press(&e, KeyEnter)
+	typeText(&e, "xy\\")
+	press(&e, KeyEnter)
+	typeText(&e, "12345")
+	// On the last line, column 5.
+	if a := press(&e, KeyDown); a != ActionNone || e.Cursor() != len(e.text) {
+		t.Errorf("Down on the last line: %v, cursor %d", a, e.Cursor())
+	}
+	press(&e, KeyUp) // "xy" is shorter: its end
+	if got := e.Cursor(); got != len("abcdef\nxy") {
+		t.Errorf("Up to a shorter line: cursor %d", got)
+	}
+	press(&e, KeyUp) // column 2 of "abcdef"
+	if got := e.Cursor(); got != 2 {
+		t.Errorf("Up to the first line: cursor %d, want 2", got)
+	}
+	if a := press(&e, KeyUp); a != ActionNone || e.Cursor() != 2 {
+		t.Errorf("Up on the first line: %v, cursor %d", a, e.Cursor())
+	}
+	press(&e, KeyDown)
+	press(&e, KeyDown)
+	if got := e.Cursor(); got != len("abcdef\nxy\n12") {
+		t.Errorf("Down twice: cursor %d", got)
+	}
+	typeText(&e, "_")
+	if got, want := e.Text(), "abcdef\nxy\n12_345"; got != want {
+		t.Errorf("text = %q, want %q", got, want)
+	}
+}
+
+// The page keys and Shift with Up or Down are for the caller, and leave
+// the text and cursor alone.
+func TestScrollActions(t *testing.T) {
+	var e Editor
+	typeText(&e, "a\\")
+	press(&e, KeyEnter)
+	typeText(&e, "b")
+	for code, want := range map[uint32]Action{KeyPageUp: ActionPageBack, KeyPageDown: ActionPageForward} {
+		if a := press(&e, code); a != want {
+			t.Errorf("key %d = %v, want %v", code, a, want)
+		}
+	}
+	e.Key(KeyLeftShift, true)
+	up, down := press(&e, KeyUp), press(&e, KeyDown)
+	e.Key(KeyLeftShift, false)
+	if up != ActionScrollBack || down != ActionScrollForward {
+		t.Errorf("Shift+Up = %v, Shift+Down = %v", up, down)
+	}
+	if e.Text() != "a\nb" || e.Cursor() != 3 {
+		t.Errorf("scrolling moved the text: %q cursor %d", e.Text(), e.Cursor())
 	}
 }

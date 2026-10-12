@@ -93,6 +93,158 @@ system = "You are Wisp."
 	}
 }
 
+// Reading back through a long conversation and writing more than one
+// line, end to end: the box grows a row for a backslash-Enter, and Enter
+// sends both lines to the model with the newline; the wheel over the
+// panel itself and the keyboard scroll the view; scrolled back, the view
+// holds its place while the ghost answers a `haunt say` with a newline in
+// it; and `haunt history` prints the two-line message readably.
+func TestConversationReadBackAndNewLines(t *testing.T) {
+	c := testenv.StartT(t)
+	dir := t.TempDir()
+	long := func(n string) string {
+		return "The " + n + " answer is a long one, because a conversation is where a ghost may say " +
+			"a few sentences. It goes on past one line and past two, so the view has to hold it. " +
+			"There is more to say about it still, and the ghost says it, line after line, " +
+			"until the answers together are more than the panel can show at once. " +
+			"And it ends here, with the " + n + " full stop."
+	}
+	var rules []fake.Rule
+	rules = append(rules, silentOn("[haunt event]"))
+	for _, q := range []string{"first", "second", "third", "said"} {
+		rules = append(rules,
+			fake.Rule{Match: q + " line", AfterTool: speakCue, Reply: long(q)},
+			fake.Rule{Match: q + " line", Calls: []fake.Call{{Name: "speak"}}})
+	}
+	rig := newBrainRig(t, dir, rules, "")
+	gDir := filepath.Join(dir, "wisp")
+	writeGhost(t, gDir, `[ghost]
+name = "wisp"
+capabilities = ["message", "llm"]
+
+[persona]
+system = "You are Wisp."
+`)
+	kb, err := c.NewKeyboard()
+	if err != nil {
+		t.Fatalf("virtual keyboard: %v", err)
+	}
+	defer kb.Close()
+	stateDir := filepath.Join(dir, "state")
+	_, stderr := rig.start(t, c, gDir, stateDir)
+	waitFake(t, rig.FakeLog, 1, 30*time.Second, repliedTo("kind=boot"))
+
+	const spriteX, spriteY = 100, 100
+	ptr, err := c.NewPointer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ptr.Close()
+	if err := ptr.MoveTo(spriteX+80, spriteY+80); err != nil {
+		t.Fatal(err)
+	}
+	if err := ptr.RightClick(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "box.png")
+	bottom := func(above int) int {
+		t.Helper()
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			b := balloonBottom(shot(t, c, path), spriteX, spriteY)
+			if b > above {
+				return b
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("the panel's bottom stayed at %d, want below %d", b, above)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+
+	// The box grows a row for a backslash-Enter, and Enter sends both
+	// lines as one message.
+	one := bottom(0)
+	if err := kb.Type(`the first line\`); err != nil {
+		t.Fatal(err)
+	}
+	if err := kb.Key(keyEnter); err != nil {
+		t.Fatal(err)
+	}
+	if two := bottom(one + 10); two > one+40 {
+		t.Errorf("the box grew from %d to %d for one row", one, two)
+	}
+	if err := kb.Type("goes on here"); err != nil {
+		t.Fatal(err)
+	}
+	if err := kb.Key(keyEnter); err != nil {
+		t.Fatal(err)
+	}
+	waitFake(t, rig.FakeLog, 1, 30*time.Second, repliedTo("the first line\ngoes on here"))
+	waitLogCount(t, stderr, "turn over: person", 1)
+	for i, q := range []string{"second", "third"} {
+		if err := kb.Type("the " + q + " line"); err != nil {
+			t.Fatal(err)
+		}
+		if err := kb.Key(keyEnter); err != nil {
+			t.Fatal(err)
+		}
+		waitFake(t, rig.FakeLog, 1, 30*time.Second, repliedTo(q+" line"))
+		waitLogCount(t, stderr, "turn over: person", i+2)
+	}
+
+	// The wheel over the panel, not the ghost, scrolls it.
+	b := bottom(0)
+	if err := ptr.MoveTo(spriteX+400, b-15); err != nil {
+		t.Fatal(err)
+	}
+	if err := ptr.Scroll(-2); err != nil {
+		t.Fatal(err)
+	}
+	waitLog(t, stderr, "conversation: 6 lines back")
+
+	// And the keyboard: PageDown to the bottom, Shift+Up a step back.
+	if err := kb.Key(pageDown); err != nil {
+		t.Fatal(err)
+	}
+	waitLog(t, stderr, "conversation: 0 lines back")
+	if err := kb.Chord(leftShift, arrowUp); err != nil {
+		t.Fatal(err)
+	}
+	waitLog(t, stderr, "conversation: 3 lines back")
+	if err := kb.Key(pageUp); err != nil {
+		t.Fatal(err)
+	}
+	waitLogCount(t, stderr, "conversation: ", 4)
+
+	// Scrolled back, the view holds its place while the ghost answers a
+	// message from the command line, which keeps its newline too.
+	rig.say(t, "a said line\nfrom the shell")
+	waitFake(t, rig.FakeLog, 1, 30*time.Second, repliedTo("a said line\nfrom the shell"))
+	waitLog(t, stderr, "conversation: held")
+	if strings.Contains(stderr.String(), "conversation ended") {
+		t.Error("the conversation ended")
+	}
+	if path := os.Getenv("HAUNT_SHOT"); path != "" {
+		if err := c.Screenshot(path); err != nil {
+			t.Errorf("screenshot: %v", err)
+		}
+	}
+
+	if out := rig.history(t, stateDir); !strings.Contains(out, "you:   the first line\n       goes on here\n") ||
+		!strings.Contains(out, "you:   a said line\n       from the shell\n") {
+		t.Errorf("haunt history does not print the two-line messages as two lines:\n%s", out)
+	}
+}
+
+// Keys the conversation tests press that type nothing.
+const (
+	leftShift = 42
+	arrowUp   = 103
+	pageUp    = 104
+	pageDown  = 109
+)
+
 // A click on the ghost mid-conversation is a poke, and what the ghost
 // says to it is one more of its lines in the view, like a reply: the
 // panel grows by an entry, and the conversation goes on.

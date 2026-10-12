@@ -4,6 +4,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/aaronjauregui/haunt/internal/balloon"
 	"github.com/aaronjauregui/haunt/internal/hlog"
 	"github.com/aaronjauregui/haunt/internal/proto"
 	"github.com/aaronjauregui/haunt/internal/sprite"
@@ -49,6 +50,10 @@ type inputState struct {
 	// if set, is told when it is.
 	held      string
 	heldShown func()
+	// top is the first row of the box shown when the text has more rows
+	// than it grows to, kept between draws so the box scrolls only as
+	// far as the caret needs (balloon.InputBox.Top).
+	top int
 }
 
 // openInput starts a conversation, unless a line is already open.
@@ -78,6 +83,7 @@ func (g *Ghost) openInputWithReply(reply chan string) bool {
 	g.input.caret = true
 	g.input.focused = false
 	g.input.editor.Reset()
+	g.input.top = 0
 	g.input.stop = make(chan struct{})
 	stop := g.input.stop
 	g.inputMu.Unlock()
@@ -250,7 +256,10 @@ func (g *Ghost) takeKeyboard(want bool) {
 // reply is never billed to the ghost's curiosity budget. In a
 // conversation the line then opens again empty; a message sent while the
 // ghost is still answering the last queues behind it, as `haunt say`
-// does.
+// does. A backslash before Enter is a new line instead (textinput), and
+// what is sent keeps its newlines. In a conversation PageUp and PageDown
+// scroll the view a page, and Shift+Up and Shift+Down as far as a step of
+// the wheel; on a line of the driver's they do nothing.
 func (g *Ghost) onKey(code uint32, down bool) {
 	// A menu holds the keyboard while it is up: digits pick a row, arrows
 	// move, Enter takes it, Escape dismisses.
@@ -266,11 +275,30 @@ func (g *Ghost) onKey(code uint32, down bool) {
 	text := g.input.editor.Text()
 	empty := g.input.editor.Empty()
 	g.inputMu.Unlock()
-	if action == textinput.ActionNone {
+	if action != textinput.ActionSubmit && action != textinput.ActionCancel {
 		g.touchConversation()
 	}
 
 	switch action {
+	case textinput.ActionPageBack, textinput.ActionPageForward:
+		if g.inConversation() {
+			page := g.conversationPage()
+			if action == textinput.ActionPageBack {
+				page = -page
+			}
+			g.scrollConversationLines(page)
+		}
+		return
+	case textinput.ActionScrollBack:
+		if g.inConversation() {
+			g.scrollConversationLines(-conversationScroll)
+		}
+		return
+	case textinput.ActionScrollForward:
+		if g.inConversation() {
+			g.scrollConversationLines(conversationScroll)
+		}
+		return
 	case textinput.ActionCancel:
 		g.abandonLine("escape")
 		return
@@ -306,6 +334,7 @@ func (g *Ghost) submitInConversation(text string, empty bool) {
 	reply := g.input.reply
 	g.input.reply = nil
 	g.input.editor.Reset()
+	g.input.top = 0
 	g.inputMu.Unlock()
 	g.touchConversation()
 	switch {
@@ -326,10 +355,11 @@ func (g *Ghost) submitInConversation(text string, empty bool) {
 
 // keyRepeats says which held keys repeat. In a menu only the arrows do: a
 // held digit picks its row once, and must not go on to type into whatever
-// the answer opens next. In a line, Backspace and anything that types.
+// the answer opens next. In a line, the editing and moving keys and
+// anything that types (textinput.Repeats).
 func (g *Ghost) keyRepeats(code uint32) bool {
 	if g.choiceOpen() {
-		return code == keyUp || code == keyDown
+		return code == textinput.KeyUp || code == textinput.KeyDown
 	}
 	return g.inputOpen() && textinput.Repeats(code)
 }
@@ -342,34 +372,52 @@ func (g *Ghost) drawInput() {
 	g.drawMu.Lock()
 	defer g.drawMu.Unlock()
 	g.inputMu.Lock()
-	open, text, caret := g.input.open, g.input.editor.Text(), g.input.caret
+	open := g.input.open
+	in := balloon.InputBox{Text: g.input.editor.Text(), Cursor: g.input.editor.Cursor(),
+		Caret: g.input.caret, Top: g.input.top}
 	g.inputMu.Unlock()
 	rend := g.renderer()
 	if !open || rend == nil {
 		return
 	}
 	var sp *sprite.Sprite
-	if g.inConversation() {
-		sp = g.conversationView(rend, text, caret)
+	var top int
+	conv := g.inConversation()
+	if conv {
+		sp, top = g.conversationView(rend, in)
 	} else {
-		sp = rend.RenderInput(text, caret)
+		sp, top = rend.RenderInput(in)
 	}
+	g.inputMu.Lock()
+	g.input.top = top
+	g.inputMu.Unlock()
 
 	// Repaint the existing panel rather than swapping surfaces: an input
 	// line redraws on every keystroke and twice a second for the caret, and
 	// destroying the surface each time makes it flicker. RenderInput keeps
-	// a fixed width precisely so this stays possible, and so does
-	// RenderConversation, which only grows taller until it reaches its cap:
-	// past that, streaming words and the wheel redraw in place too.
+	// a fixed width precisely so this stays possible, growing only a row
+	// at a time as the text does, and so does RenderConversation, which
+	// only grows taller until it reaches its cap: past that, streaming
+	// words and the wheel redraw in place too.
+	//
+	// Only a panel of the right kind is repainted: the conversation's takes
+	// the wheel and every other balloon lets the pointer through, so a
+	// balloon from before the conversation that happens to be its size is
+	// replaced, not reused.
 	g.blnMu.Lock()
 	bln := g.bln
 	g.blnMu.Unlock()
-	if bln != nil {
+	if bln != nil && (bln.OnScroll != nil) == conv {
 		if err := bln.Redraw(sp); err == nil {
 			return
 		} else if !errors.Is(err, wlclient.ErrSizeChanged) {
 			g.log.Warn(hlog.Input, "redraw: %v", err)
 		}
+	}
+	if conv {
+		// The wheel over the conversation scrolls it, as over the ghost.
+		g.showBalloonSpriteScroll(sp, g.scrollConversationPanel)
+		return
 	}
 	g.showBalloonSprite(sp)
 }

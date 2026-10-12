@@ -1,8 +1,11 @@
 package balloon
 
 import (
+	"image"
 	"strings"
 	"testing"
+
+	"golang.org/x/image/font"
 )
 
 func TestRenderSizesToContent(t *testing.T) {
@@ -83,15 +86,20 @@ func TestExplicitNewlines(t *testing.T) {
 }
 
 // TestRenderInputFixedSize: the input panel must not change size as you
-// type, which is what lets the surface be repainted in place instead of
-// destroyed and recreated — the difference between a steady box and a
-// flickering one.
+// type within a row, which is what lets the surface be repainted in place
+// instead of destroyed and recreated — the difference between a steady box
+// and a flickering one. It grows a row at a time as the text wraps or
+// gains lines, up to InputRows, and is the same size past that.
 func TestRenderInputFixedSize(t *testing.T) {
 	r, err := NewRenderer(DefaultTheme())
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := r.RenderInput("", true).Img.Bounds()
+	size := func(text string, caret bool) image.Rectangle {
+		sp, _ := r.RenderInput(InputBox{Text: text, Cursor: len([]rune(text)), Caret: caret})
+		return sp.Img.Bounds()
+	}
+	want := size("", true)
 	for _, tc := range []struct {
 		name  string
 		text  string
@@ -99,15 +107,79 @@ func TestRenderInputFixedSize(t *testing.T) {
 	}{
 		{"empty, caret off", "", false},
 		{"a word", "hello", true},
-		{"a sentence", "hello ghost, what have you been thinking about", false},
-		{"longer than the panel", strings.Repeat("verbose ", 40), true},
+		{"a short sentence", "hello ghost, how goes it", false},
 		{"multibyte", "☕☕☕ 日本語 ☕☕☕", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := r.RenderInput(tc.text, tc.caret).Img.Bounds(); got != want {
+			if got := size(tc.text, tc.caret); got != want {
 				t.Errorf("bounds = %v, want %v", got, want)
 			}
 		})
+	}
+	lh := r.lineHeight()
+	two := size("one\ntwo", true)
+	if two.Dx() != want.Dx() || two.Dy() != want.Dy()+lh {
+		t.Errorf("two lines: %v, want one row taller than %v", two, want)
+	}
+	long := size(strings.Repeat("verbose ", 40), true)
+	if long.Dx() != want.Dx() || long.Dy() <= two.Dy() {
+		t.Errorf("a long line did not wrap onto rows: %v", long)
+	}
+	capped := size(strings.Repeat("line\n", 3*InputRows), true)
+	if capped.Dy() != want.Dy()+(InputRows-1)*lh {
+		t.Errorf("%d lines: %v, want the box capped at %d rows", 3*InputRows, capped, InputRows)
+	}
+}
+
+// TestInputLayout: rows break at the person's newlines and wrap long
+// lines at a space; the caret is on the row holding the cursor, and the
+// shown rows follow it past the cap.
+func TestInputLayout(t *testing.T) {
+	r, err := NewRenderer(DefaultTheme())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, row, x := r.inputLayout("ab\n\ncd", 6)
+	if len(rows) != 3 || rows[0].text != "ab" || rows[1].text != "" || rows[2].text != "cd" || rows[2].start != 4 {
+		t.Fatalf("rows = %+v", rows)
+	}
+	if row != 2 || x <= font.MeasureString(r.face, "> c").Ceil() {
+		t.Errorf("caret on row %d at %d, want the end of row 2", row, x)
+	}
+	if _, row, _ := r.inputLayout("ab\n\ncd", 2); row != 0 {
+		t.Errorf("cursor before the first newline is on row %d", row)
+	}
+	words := strings.Repeat("word ", 60)
+	rows, _, _ = r.inputLayout(words, 0)
+	if len(rows) < 3 {
+		t.Fatalf("%d runes in %d rows", len(words), len(rows))
+	}
+	for _, rw := range rows[:len(rows)-1] {
+		if !strings.HasSuffix(rw.text, " ") {
+			t.Errorf("row %q broke mid-word", rw.text)
+		}
+	}
+	unbroken := strings.Repeat("x", 300)
+	rows, _, _ = r.inputLayout(unbroken, 300)
+	joined := ""
+	for _, rw := range rows {
+		joined += rw.text
+	}
+	if len(rows) < 2 || joined != unbroken {
+		t.Errorf("a word wider than the box: %d rows, rejoined to %d runes", len(rows), len(joined))
+	}
+
+	// Past the cap the window follows the caret, and holds while the
+	// caret moves inside it.
+	top, shown := inputWindow(10, 9, 0)
+	if top != 4 || shown != InputRows {
+		t.Errorf("caret on the last of 10 rows: top %d, %d shown", top, shown)
+	}
+	if top, _ := inputWindow(10, 6, 4); top != 4 {
+		t.Errorf("caret moved within the window: top %d, want it held at 4", top)
+	}
+	if top, _ := inputWindow(10, 1, 4); top != 1 {
+		t.Errorf("caret above the window: top %d, want 1", top)
 	}
 }
 

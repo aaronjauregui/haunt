@@ -137,6 +137,23 @@ func (k *Keyboard) Key(code uint32) error {
 	return k.roundtrip()
 }
 
+// Chord presses code with mod held, as a person types Shift+Up: mod
+// down, code pressed and released, mod up. The driver reads a modifier
+// from its key events, so mod goes as a key of its own, not only as
+// modifier state.
+func (k *Keyboard) Chord(mod, code uint32) error {
+	if err := k.kb.Key(k.tick(), mod, statePressed); err != nil {
+		return err
+	}
+	if err := k.Key(code); err != nil {
+		return err
+	}
+	if err := k.kb.Key(k.tick(), mod, stateReleased); err != nil {
+		return err
+	}
+	return k.roundtrip()
+}
+
 // Hold presses a key, keeps it down for d, and releases it — long enough,
 // past the compositor's repeat delay, for the client to repeat it.
 func (k *Keyboard) Hold(code uint32, d time.Duration) error {

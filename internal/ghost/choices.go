@@ -268,11 +268,10 @@ func (g *Ghost) onChoiceKey(code uint32, down bool) bool {
 	return true
 }
 
-// Arrow scancodes, which internal/textinput has no reason to name: they
-// produce no character.
+// The arrows a menu moves by.
 const (
-	keyUp   = 103
-	keyDown = 108
+	keyUp   = textinput.KeyUp
+	keyDown = textinput.KeyDown
 )
 
 // digit maps a number-row scancode to the digit on it.
