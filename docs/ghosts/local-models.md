@@ -304,10 +304,10 @@ prefill as the opening of the words.
 
 **On Gemma 4 through haunt, leave it unset.** This contradicts the
 `"Hm. "` that [Persona and skills](persona-and-skills.md) offers as a
-good prefill; on Gemma 4 the advice here holds. Every prefill tried
-here made Gemma 4 repeat an earlier reply word for word on later turns,
-grief included. Wisp with the prefill that [Persona and
-skills](persona-and-skills.md) suggests:
+good prefill; on Gemma 4 the advice here holds. In three of four
+sessions with a prefill, Gemma 4 repeated an earlier reply word for
+word on later turns, grief included. Wisp with the prefill that
+[Persona and skills](persona-and-skills.md) suggests:
 
 ```toml
 [persona]
@@ -330,7 +330,17 @@ prefill = "Hm. "
 Ember with `prefill = "Well, "` did the same on the grief turn, and with
 `prefill = "Oh, how lovely! "` on every turn after the greeting. Only a
 question whose answer differed from everything said before (the
-arithmetic) broke the loop. Without a prefill, no reply repeated an
+arithmetic) broke the loop. The fourth session, wisp with `"Hm. "`
+again, copied nothing, but put a blank line after the prefill on
+three replies of four, so the balloon read `Hm.`, an empty line, then
+the reply:
+
+    you:   my grandmother died this morning
+    ghost: Hm.
+
+           I'm sorry. I'll try to be less of a nuisance today.
+
+Without a prefill, no reply repeated an
 earlier one in any run here. The decide call had chosen well each time
 (`remember` the grandmother, a `sad` face); only the words were copied.
 A short probe outside haunt, with the same history but no tool call
@@ -629,6 +639,19 @@ says:
 ```toml
 After a long time apart, say in a sentence that you are glad they are back and ask after one thing from before; never recount what you talked about.
 ```
+
+Ember after a day about a move, a cat and a thesis, its transcript
+backdated a day and the ghost started again:
+
+    event: kind=boot first_time=false since=1d last="yesterday afternoon"
+    ghost: I am glad you are back. How is Biscuit doing with the new place today?
+    you:   morning. where were we?
+    ghost: Good morning. We were talking about your thesis and that deadline on
+           the 30th. Do you feel like making a start on it today?
+           · used recall {"query":"last things we talked about"}
+
+One sentence of welcome and one question, no recap until asked, and the
+answer to "where were we?" goes back to yesterday's deadline.
 
 ## 11. What you cannot do through haunt yet
 

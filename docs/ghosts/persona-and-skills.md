@@ -43,7 +43,7 @@ all:
 [A character on a local model](local-models.md) takes these levers one
 at a time on Gemma 4 through llama-server, with the example ghost
 `examples/ember` and the replies each setting produced, including where
-a lever misfires on that model (a prefill there makes later replies
+a lever misfires on that model (a prefill there can make later replies
 repeat an earlier one) and the server knobs haunt does not expose.
 
 The ghost also has its own notes on itself, `self.md` in its memory,
