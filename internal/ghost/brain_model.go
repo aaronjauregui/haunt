@@ -390,18 +390,18 @@ func (b *modelBrain) Deliver(e proto.Event) error {
 		// Waking up is the ghost's own news, so it is shown whether or
 		// not there turns out to be a greeting.
 		// The gap is measured before the greeting, whose words would close
-		// it; the returned turn follows the boot turn.
-		var back *turn
+		// it, and rides on the boot envelope: one greeting after a restart,
+		// and no returned turn later for the same gap.
+		fields := []Field{F("first_time", !met)}
 		if met {
-			back = b.returnedTurn(time.Now(), true)
+			if since, last, ok := b.gap(time.Now(), true); ok {
+				fields = append(fields, F("since", since), F("last", last))
+			}
 		}
 		w := g.startWaiting(wakingText)
 		b.waking.Store(w)
-		boot := &turn{input: Envelope("boot", F("first_time", !met)), waiting: w, boot: true}
+		boot := &turn{input: Envelope("boot", fields...), waiting: w, boot: true}
 		b.unpromptedTurn("boot", "boot", boot)
-		if back != nil {
-			b.unpromptedTurn("returned", "returned", back)
-		}
 
 	case proto.EventClick:
 		if !b.lastPoke.IsZero() && e.Time.Sub(b.lastPoke) <= doubleClick {
@@ -443,7 +443,7 @@ func (b *modelBrain) Deliver(e proto.Event) error {
 		}
 		// Coming back after a long gap is the bigger news, and says what
 		// a returning or morning fact would; one turn, not two in a row.
-		if back := b.returnedTurn(time.Now(), false); back != nil {
+		if back := b.returnedTurn(time.Now()); back != nil {
 			b.unpromptedTurn("returned", "returned", back)
 			return nil
 		}
@@ -458,7 +458,7 @@ func (b *modelBrain) Deliver(e proto.Event) error {
 	case proto.EventWindow:
 		// A window change is otherwise not sent (it rides on the next
 		// turn's context); after a long gap it is the person back.
-		if back := b.returnedTurn(time.Now(), false); back != nil {
+		if back := b.returnedTurn(time.Now()); back != nil {
 			b.unpromptedTurn("returned", "returned", back)
 		}
 
@@ -516,29 +516,41 @@ func (b *modelBrain) Deliver(e proto.Event) error {
 }
 
 // returnedTurn is the turn that tells the model a long time has passed
-// since it and the person last spoke, or nil: when [initiative]
-// away_hours is off, the gap is shorter, or this gap was told about
-// already. booting says the ghost has just started, which is a return of
-// its own; otherwise the person must have gone idle since the last
-// exchange, so a long stretch of work with nothing said is not mistaken
-// for one. Marked as told when made: one per gap, even if it is dropped.
-func (b *modelBrain) returnedTurn(now time.Time, booting bool) *turn {
+// since it and the person last spoke, or nil (gap). At boot the gap rides
+// on the boot envelope instead.
+func (b *modelBrain) returnedTurn(now time.Time) *turn {
+	since, last, ok := b.gap(now, false)
+	if !ok {
+		return nil
+	}
+	return &turn{input: Envelope("returned", F("since", since), F("last", last))}
+}
+
+// gap is how long since the person and the ghost last spoke, as the
+// envelope's since and last fields, when it is worth telling: not when
+// [initiative] away_hours is off, the gap is shorter, or this gap was told
+// about already, by a returned turn or a boot. booting says the ghost has
+// just started, which is a return of its own; otherwise the person must
+// have gone idle since the last exchange, so a long stretch of work with
+// nothing said is not mistaken for one. Marked as told when given: one per
+// gap, even if the turn carrying it is dropped.
+func (b *modelBrain) gap(now time.Time, booting bool) (since, last string, ok bool) {
 	g := b.g
 	if g.awayAfter <= 0 {
-		return nil
+		return "", "", false
 	}
-	last, ok := b.tr.lastExchange()
-	if !ok || now.Sub(last) < g.awayAfter || (!booting && b.lastIdle.Before(last)) {
-		return nil
+	at, ok := b.tr.lastExchange()
+	if !ok || now.Sub(at) < g.awayAfter || (!booting && b.lastIdle.Before(at)) {
+		return "", "", false
 	}
-	stamp := last.Format(time.RFC3339Nano)
+	stamp := at.Format(time.RFC3339Nano)
 	if told, _, _ := g.store.Get(returnedKey); told == stamp {
-		return nil
+		return "", "", false
 	}
 	if err := g.store.Set(returnedKey, stamp); err != nil {
 		g.log.Warn(hlog.Store, "recording the return: %v", err)
 	}
-	return &turn{input: Envelope("returned", F("since", sinceShort(last, now)), F("last", whenSpelled(last, now)))}
+	return sinceShort(at, now), whenSpelled(at, now), true
 }
 
 // lastExchangeLine is the second line of a turn's context: how long since

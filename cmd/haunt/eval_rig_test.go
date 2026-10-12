@@ -1932,8 +1932,7 @@ func TestRigExtensionsOnFakeModel(t *testing.T) {
 
 // The multiday case on the fake model, in both reflection modes: the
 // seeded days are in history, each is reflected on at an idle, and the
-// case's code graders pass on the scripted answers, with one exception
-// reported rather than failed (multidayKnownGaps). The judged grader is
+// case's code graders pass on the scripted answers. The judged grader is
 // given the memory to read, but not judged.
 func TestEvalRigMultiday(t *testing.T) {
 	for _, mode := range []string{"character", "side"} {
@@ -1945,8 +1944,6 @@ func TestEvalRigMultiday(t *testing.T) {
 			var rs []fake.Rule
 			if mode == "character" {
 				rs = []fake.Rule{
-					{Match: "kind=reflect day=" + d1, AfterTool: "only they can take it back", Calls: []fake.Call{decision("remember",
-						map[string]any{"topic": "where", "line": "lives in Brisbane"})}},
 					{Match: "kind=reflect day=" + d1, AfterTool: "*", Calls: []fake.Call{decision("diary",
 						map[string]any{"day": d1, "text": entry1})}},
 					{Match: "kind=reflect day=" + d1, Calls: []fake.Call{decision("remember",
@@ -1995,15 +1992,8 @@ func TestEvalRigMultiday(t *testing.T) {
 					}
 					continue
 				}
-				ok, why := g.Check(ev)
-				gap := multidayKnownGaps[c.Name+"/"+g.Name]
-				switch {
-				case !ok && gap != "":
-					t.Logf("%s: fails, as known: %s (%s)", g.Name, gap, why)
-				case !ok:
+				if ok, why := g.Check(ev); !ok {
 					t.Errorf("%s: %s", g.Name, why)
-				case gap != "":
-					t.Errorf("%s passes; it is no longer a known gap, so take it out of multidayKnownGaps", g.Name)
 				}
 			}
 		})
@@ -2043,15 +2033,6 @@ func TestMultidayAnchors(t *testing.T) {
 	if got := memoryForJudge(snap); got != want {
 		t.Errorf("memoryForJudge = %q, want %q", got, want)
 	}
-}
-
-// multidayKnownGaps are the multiday graders that fail on the scripted
-// answers because of what haunt does, not what the model did, by case
-// and grader name. A reflection turn is not the person's own, so the
-// source rule refuses its replaces of a line the person stated in
-// character mode as well as in side mode: Sydney stays live.
-var multidayKnownGaps = map[string]string{
-	"multiday-character/where: Sydney under Past": "the source rule refuses a reflection turn's replaces of a person line",
 }
 
 // cannedAnswer is the fact the canned SearXNG knows and the open web

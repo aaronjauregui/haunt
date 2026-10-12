@@ -616,34 +616,19 @@ Three things carry a character across days: the reminder (section 2)
 on every turn, the diary in part 2, and time. Every turn's part 6 says
 how long since the last exchange (`Last exchange: 3 days ago (Thursday
 evening).`), and when the gap passes `[initiative] away_hours` (8 by
-default) the ghost gets a `kind=returned` turn of its own to notice it.
+default) the ghost is told so as an event: on its boot envelope when it
+starts after the gap (`kind=boot first_time=false since=1d
+last="yesterday afternoon"`), so a restart gets one greeting, or as a
+`kind=returned` turn when it ran all along and the person comes back to
+the desk.
 
 How the ghost greets a gap is the persona's to say, and the first
-lever if the `returned` turn reads as a wall of recap. Ember's persona
+lever if the greeting reads as a wall of recap. Ember's persona
 says:
 
 ```toml
 After a long time apart, say in a sentence that you are glad they are back and ask after one thing from before; never recount what you talked about.
 ```
-
-The next day, after the diary entry above was written:
-
-    event: kind=boot first_time=false
-    ghost: I am glad to see you. How is Biscuit settling in today?
-    event: kind=returned since=1d last="yesterday afternoon"
-    ghost: I am glad you are back. How is the unpacking coming along?
-    you:   morning. where were we?
-    ghost: Good morning. We were talking about the unpacking and your thesis deadline
-           on the 30th. Have you had any tea yet?
-
-One sentence of welcome and one question each time, no recap until
-asked, and the answer to "where were we?" names yesterday's two
-subjects. The ghost was started the next day, so it spoke twice in a
-row: once for the boot and once for the gap. Both turns are haunt's,
-and the persona's line kept them short; a persona cannot merge them.
-
-That run backdated a real day's transcript by one day before the
-restart; the reflection and the greetings were Gemma 4's.
 
 ## 11. What you cannot do through haunt yet
 

@@ -231,7 +231,7 @@ func (s *fileStore) Forget(topic, line string) error {
 }
 
 // ErrTheirs is Retire's refusal of a line the person stated, asked by
-// anyone else.
+// anyone else, the ghost's reflection on a finished day aside.
 var ErrTheirs = errors.New("memory: a line the person stated is retired only on their word")
 
 func (s *fileStore) Retire(topic, line string, by Provenance) error {
@@ -259,7 +259,7 @@ func (s *fileStore) Retire(topic, line string, by Provenance) error {
 			kept = append(kept, raw)
 			continue
 		}
-		if f.Prov.Source == "person" && by.Source != "person" {
+		if f.Prov.Source == "person" && by.Source != "person" && !by.Reflection {
 			return ErrTheirs
 		}
 		l := strings.TrimSpace(raw)

@@ -53,6 +53,14 @@ constraint on changes, not a history.
   correction is the model taking a line back, and there is no
   confirmation dialogue. Each ghost has its own; two ghosts may disagree
   about the person.
+- **A line the person stated is theirs.** A line that stops being true
+  is retired to its topic's `## Past`, kept and unindexed, by `remember`
+  with `replaces`; no side call is made per write. A line whose source is
+  the person is retired or forgotten only on the person's own turn with
+  nothing read, or on the ghost's reflection on a finished day, in
+  either mode and whatever the day read: an event or a page must not
+  talk the ghost out of what the person said, but the whole day they
+  said it in may. The new line keeps the turn's own provenance.
 - **Trust follows the endpoint.** A model on loopback or a private range
   is local, any other host cloud, judged from `base_url`'s text and
   overridable with `trust`; a ghost with no model brain is cloud. Reads
@@ -112,8 +120,7 @@ constraint on changes, not a history.
   a turn of the ghost's own with its memory decisions, which keeps the
   one rule whole; as a side call, one plain request whose JSON the driver
   applies as the ghost's decisions on a turn of its own, cheaper on a
-  slow model. The side call is the ghost's judgment and not the
-  person's, so it cannot retire a line the person stated. `[memory]
+  slow model. Both may retire a line the person stated. `[memory]
   reflection` picks; character is the default until the eval says
   otherwise.
 - **The person comes before reflection.** It runs only while they are

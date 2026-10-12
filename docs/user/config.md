@@ -35,7 +35,7 @@ actions_per_day = 12            # unprompted actions per ghost, per rolling 24 h
 obligations_per_day = 24        # things you put on its books (reminders, occasions); a backstop, not a dial
 
 [initiative]
-away_hours = 8                  # a gap since you last spoke this long gets the ghost a turn to notice it; 0 turns that off
+away_hours = 8                  # a gap since you last spoke this long is told to the ghost, at its start or when you are back; 0 turns that off
 
 [backend]                       # the models the driver calls itself; conversation is [model]
 tool_timeout = 120              # seconds one tool-server call may take
@@ -150,9 +150,8 @@ day to write its diary entry and keep what it did not keep at the time
 ([Its diary](memory.md#its-diary)). `"character"` is a turn of the
 ghost's own, in its own voice, with its memory to hand. `"side"` is one
 call to the same model with no tools, whose answer haunt applies as the
-ghost's own decisions; it costs less on a slow model, and since it is
-the ghost's judgment rather than yours, it can never take back a line
-you told it. Anything else is refused when the config loads.
+ghost's own decisions; it costs less on a slow model. Either may retire
+a line you told it that the day made false. Anything else is refused when the config loads.
 
 ## Drawing with your own ComfyUI workflow
 

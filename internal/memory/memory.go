@@ -58,6 +58,11 @@ type Provenance struct {
 	Source string // person|web|file|self
 	Turn   int64
 	At     time.Time
+	// Reflection says the write is the ghost's reflection on a finished
+	// day, which may retire a line the person stated (Retire). It is not
+	// a source and is never written to the files: the new line keeps its
+	// own Source.
+	Reflection bool
 }
 
 // Hit is one recalled line.
@@ -87,8 +92,8 @@ type Store interface {
 	Forget(topic, line string) error
 	// Retire moves the facts that read as line (case and spacing aside)
 	// to the topic's ## Past, dated by.At. A line the person stated is
-	// retired only when by.Source is "person" (ErrTheirs otherwise); the
-	// ghost's gate says so first, in words.
+	// retired only when by.Source is "person" or by.Reflection is set
+	// (ErrTheirs otherwise); the ghost's gate says so first, in words.
 	Retire(topic, line string, by Provenance) error
 	// Facts is a topic's facts, Past left out; none for a topic that does
 	// not exist.

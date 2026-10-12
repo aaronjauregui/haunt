@@ -102,7 +102,7 @@ or a persona may name them:
 
 | Line | When |
 |---|---|
-| `kind=boot first_time=true\|false` | the ghost started |
+| `kind=boot first_time=true\|false since=17h last="yesterday evening"` | the ghost started; `since` and `last` only when the last exchange was longer ago than `[initiative] away_hours` (8 by default) |
 | `kind=idle minutes=N last_window="app: title" seen_for=42m` | the person went idle |
 | `kind=session shape=dwell\|alternation\|recurrence\|late\|morning\|returning app="…" title="…" minutes=N count=N` | the shape of the day changed (`window` granted) |
 | `kind=occasion name="morning"` | a manifest trigger without a tool fired |
@@ -112,7 +112,7 @@ or a persona may name them:
 | `kind=told from="Moth" text="…"` | a neighbour addressed this ghost |
 | `kind=help` | the person picked "What can you do?" from the menu |
 | `kind=reflect day=2026-10-11 weekday=Saturday` | a finished day, looked back on while the person is away; offered only the memory tools, `diary` and `stay_silent`, and its words are never shown |
-| `kind=returned since=3d last="Thursday evening"` | the last exchange was longer ago than `[initiative] away_hours` (8 by default): at boot, or when the person is back after going idle; once per gap |
+| `kind=returned since=3d last="Thursday evening"` | the last exchange was longer ago than `[initiative] away_hours` (8 by default) and the person is back after going idle; once per gap, and not for a gap the boot already carried |
 
 The current focused window and the time of day ride on each turn
 separately, as context, along with how long since the last exchange
@@ -158,7 +158,7 @@ ends when it calls `speak` or `stay_silent`.
 | `leave_note` | leave a note on the desktop: `text` (at most 160 characters) and an optional `picture` id from the gallery; at most three up, until the person clicks one away or the ghost resolves it |
 | `mood` | set how it is feeling, in one short line; it rides in later turns and clears overnight |
 | `tell` | address another ghost by name (`tell`) |
-| `remember`, `forget` | keep a line under a topic, with `replaces` naming one it makes false (moved to the topic's Past), or take one back; a line the person stated goes only on the person's own turn |
+| `remember`, `forget` | keep a line under a topic, with `replaces` naming one it makes false (moved to the topic's Past), or take one back; a line the person stated goes only on the person's own turn, or when the ghost looks back on a finished day |
 | `recall` | search what it remembers and what was said before |
 | `rewrite_notes` | replace its notes on itself (`about: self`) or on the person (`about: you`) |
 | `skill_view` | read one of its skills |

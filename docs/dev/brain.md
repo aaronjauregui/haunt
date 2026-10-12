@@ -386,11 +386,11 @@ same way.
 | `leave_note` | `text`, `picture?` | taint on cloud; three up at most; a known picture |
 | `mood` | `text` (one line, under 120 characters) | taint on cloud |
 | `tell` | `ghost`, `text` | `tell`, taint |
-| `remember` | `topic`, `line`, `replaces?` | the echo check on cloud; labelled; `replaces` under the source rule |
-| `forget` | `topic`, `line` | the source rule |
+| `remember` | `topic`, `line`, `replaces?` | the echo check on cloud; labelled; `replaces` under the source rule (a person's line: their own turn, or a reflection turn) |
+| `forget` | `topic`, `line` | the source rule (a person's line: their own turn, or a reflection turn) |
 | `recall` | `query` | none |
 | `rewrite_notes` | `about` (`self` or `you`), `text` | the echo check on cloud; labelled |
-| `diary` | `day`, `text` (under 600 characters) | offered on a reflection turn only (`offeredWhen`); terminal there; written under the day the turn is about whatever `day` says, never over an entry already there; the turn carries the day's web and file reads, so the label says `web` or `file` after one and on cloud the echo check refuses an entry in a read's words |
+| `diary` | `day`, `text` (under 600 characters) | offered on a reflection turn only (`offeredWhen`), where `remember` and `forget` may also retire a person's line; terminal there; written under the day the turn is about whatever `day` says, never over an entry already there; the turn carries the day's web and file reads, so the label says `web` or `file` after one and on cloud the echo check refuses an entry in a read's words |
 | `skill_view` | `name` | none |
 | `skill_write` | `name`, `body` | the echo check on cloud; labelled; the skill host's checks |
 | `<server>__<tool>` | the server's schema | `tools`, per-tool consent, tool budget, the marks, taint |
@@ -432,8 +432,8 @@ only decision is whether this event is worth a word.
 | poke | answered by the driver from a table; not sent |
 | double-click | the driver's menu; not sent |
 | menu "What can you do?" | `kind=help`, as a turn the person is waiting on |
-| boot | `kind=boot first_time=true\|false` |
-| a long gap since the last exchange | `kind=returned since=3d last="Thursday evening"` |
+| boot | `kind=boot first_time=true\|false`, with `since=17h last="yesterday evening"` after a long gap |
+| a long gap since the last exchange, the person back at the desk | `kind=returned since=3d last="Thursday evening"` |
 | idle | `kind=idle minutes=N last_window="app: title" seen_for=42m` (`seen_for` only when watching) |
 | session fact | `kind=session shape=… app=… title=… minutes=N count=N` |
 | occasion | `kind=occasion name="morning"` |
@@ -445,15 +445,17 @@ only decision is whether this event is worth a word.
 | a finished day, while the person is away | `kind=reflect day=2026-10-11 weekday=Saturday`, a turn of its own ([Reflection](#reflection)); not charged |
 | window changed | not sent per change; rides on the next turn's context |
 
-`returned` is sent when the last exchange is at least `[initiative]
-away_hours` (8) old: after the boot turn on a boot with
-`first_time=false` (the gap measured before the greeting, whose words
-would close it), or on the first session fact or window change once the
-person has gone idle since the last exchange, so a long stretch of work
-with nothing said is not taken for a return. On a session fact it takes
-that fact's place. `_haunt/returned_at` holds the exchange it was sent
-for, so a gap is told once, even if the turn is dropped. It is charged
-as `returned` and refunded on silence, like any unprompted turn.
+A gap is told when the last exchange is at least `[initiative]
+away_hours` (8) old. At boot with `first_time=false` it rides on the
+boot envelope as `since` and `last` (measured before the greeting, whose
+words would close it), so a restart gets one greeting, not two.
+Otherwise `returned` is sent on the first session fact or window change
+once the person has gone idle since the last exchange, so a long stretch
+of work with nothing said is not taken for a return; on a session fact
+it takes that fact's place. `_haunt/returned_at` holds the exchange the
+gap was told for, by a boot or a `returned` turn, so a gap is told once,
+even if the turn is dropped. `returned` is charged as `returned` and
+refunded on silence, like any unprompted turn.
 
 `goal_quiet` is its own kind rather than an `intention_due` with prose,
 because a finding sent as prose made the model skip the skill, resolve
@@ -677,9 +679,14 @@ counts and the FTS table never see them, and a topic left with only past
 lines drops out of the index. A file without the heading reads and
 writes as if Past did not exist. `mayRetire` is the gate on `forget` and on `replaces`:
 a line whose source is `person` goes only when `provenance(t)` is
-`person`, the person's turn with nothing read, so an event or a page
-cannot talk the ghost out of what the person said; `Retire` refuses the
-same in the store (`ErrTheirs`). Any other line goes on any turn.
+`person`, the person's turn with nothing read, or on a reflection turn
+(`kind=reflect`, either mode, whatever the day read), so an event or a
+page cannot talk the ghost out of what the person said, while the
+ghost's look back over the whole day they said it in can. `Retire`
+refuses the same in the store (`ErrTheirs`) unless the caller's
+`Provenance` has `Reflection` set; that flag is never written to a file,
+and the new line keeps the turn's own source. Any other line goes on any
+turn.
 `haunt memory show` prints past lines after the facts under `past:`,
 unnumbered, so `haunt memory rm <topic> N` counts facts alone.
 
@@ -869,10 +876,13 @@ mode:
   a turn of kind `reflect` through `callDecision`, the facts, then the
   lines to forget, then the entry, so every gate and label holds and a
   refusal is logged. Only the call is cancellable; once it has answered,
-  the answer is applied. The turn is the ghost's own, so a side call can
-  never retire a line the person stated; that is the mode's cost. A fact
-  whose `replaces` is refused for that is kept without it, beside the old
-  line.
+  the answer is applied. The side call is shown the ghost's lines as
+  `topic: line` and told to name a line's text alone in `replaces` and
+  `forget`, and to reuse a listed topic when one fits.
+
+On a reflection turn, in either mode, `remember` with `replaces` and
+`forget` may retire a line the person stated (`mayRetire`), whatever the
+day read; the new line keeps the turn's own provenance.
 
 Either way the turn's rows go to the transcript, so `haunt history -why`
 shows what reflection kept.

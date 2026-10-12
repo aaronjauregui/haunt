@@ -173,9 +173,8 @@ type MemoryConfig struct {
 	// Reflection is who writes the day's diary entry and keeps the facts
 	// the day left unkept: "character" (the default), a turn of the ghost's
 	// own with its memory decisions, or "side", one call with no tools
-	// whose answer the driver applies through the same gates. A side call
-	// counts as the ghost's own judgment, so it can never retire a line the
-	// person stated.
+	// whose answer the driver applies through the same gates. Either may
+	// retire a line the person stated that the day made false.
 	Reflection string `toml:"reflection"`
 }
 
@@ -459,9 +458,10 @@ func (f *File) ObligationsPerDay() int {
 // turn of its own for time having passed.
 type InitiativeConfig struct {
 	// AwayHours is the gap since the person and the ghost last spoke, in
-	// hours, past which the ghost gets a turn to notice it has been a
-	// while (the returned event). Absent means DefaultAwayHours; 0
-	// switches the event off. The line on every turn saying how long it
+	// hours, past which the ghost is told it has been a while: on the boot
+	// event when it starts after the gap, else as a returned event when
+	// the person is back. Absent means DefaultAwayHours; 0 switches both
+	// off. The line on every turn saying how long it
 	// has been stays either way: it costs no turn.
 	AwayHours *float64 `toml:"away_hours"`
 }

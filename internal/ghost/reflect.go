@@ -43,10 +43,11 @@ import (
 //     if any, are dropped; a diary entry written ends it.
 //   - side: one call with thinking off and no tools, asked for JSON (the
 //     entry, the facts, the lines to forget), which the driver applies
-//     through the same decisions and gates as a turn of kind=reflect. The
-//     turn is the ghost's own, so the source rule holds: a side call can
-//     never retire a line the person stated. That is the mode's cost; a
-//     fact whose replaces is refused for it is kept beside the old line.
+//     through the same decisions and gates as a turn of kind=reflect.
+//
+// In both, the turn may retire a line the person stated (mayRetire): it
+// weighs the whole day the person spoke in, which no page or event turn
+// does. The new line keeps the turn's own provenance.
 //
 // Either way the turn is written to the transcript, so `haunt history`
 // shows what reflection kept, and compacted as it ends, so it is never
@@ -77,8 +78,10 @@ const reflectPrompt = "You are looking back on one day of your own conversation 
 	`{"diary": "...", "facts": [{"topic": "...", "line": "...", "replaces": "..."}], "forget": [{"topic": "...", "line": "..."}]}. ` +
 	"diary is the day's entry in the first person, under 600 characters: what they told you, what you took on, " +
 	"what you talked about. Keep names, dates and numbers exactly. facts are things about them the day told you " +
-	"that you do not remember yet, one short line each under a one-word topic; replaces is a line you remember " +
-	"that the fact makes false, or empty. forget is lines you remember that the day showed are wrong. " +
+	"that you do not remember yet, one short line each under a one-word topic; when one of the topics you " +
+	"remember fits, use it rather than a new one. replaces is a line you remember that the fact makes false, " +
+	"or empty. forget is lines you remember that the day showed are wrong. In replaces and forget, write the " +
+	"line's text only, as it follows its topic and the colon, without the topic. " +
 	"Leave out what you looked up unless they asked you to keep it. No preamble."
 
 // errInterrupted ends a reflection the person's words came in on.
@@ -429,9 +432,8 @@ func parseReflection(text string) (reflection, error) {
 
 // reflectSide is the reflection as one side call whose answer is applied
 // as the ghost's decisions on t: the facts, then what to forget, then the
-// entry, each through callDecision, a refusal logged. A fact refused
-// because its replaces names a line the person stated is kept without
-// replaces, as the refusal says to. Only the call can be interrupted:
+// entry, each through callDecision, a refusal logged. Only the call can be
+// interrupted:
 // once it has answered, applying the answer is local and immediate.
 func (b *modelBrain) reflectSide(ctx context.Context, t *turn, day string, head, lines []string) error {
 	g := b.g
@@ -441,7 +443,7 @@ func (b *modelBrain) reflectSide(ctx context.Context, t *turn, day string, head,
 	user := "The day: " + weekday(day) + " " + day + "\n" +
 		digestWithin(head, lines, (compactBudget(b.cfg.ContextLength)-standing)*4)
 	if kept := b.keptFacts(); kept != "" {
-		user += "\n\nWhat you remember now:\n" + kept
+		user += "\n\nWhat you remember now, as topic: line:\n" + kept
 	}
 	r, err := stream(ctx, b.client, model.Request{
 		Messages: []model.Message{
@@ -465,39 +467,27 @@ func (b *modelBrain) reflectSide(ctx context.Context, t *turn, day string, head,
 		return nil
 	}
 	var calls []model.ToolCall
-	add := func(name string, args any) model.ToolCall {
+	add := func(name string, args any) {
 		raw, _ := json.Marshal(args)
-		c := model.ToolCall{ID: fmt.Sprintf("reflect-%d", len(calls)+1), Name: name, Args: raw}
-		calls = append(calls, c)
-		return c
+		calls = append(calls, model.ToolCall{ID: fmt.Sprintf("reflect-%d", len(calls)+1), Name: name, Args: raw})
 	}
-	var planned []model.ToolCall
 	for _, f := range ans.Facts {
-		planned = append(planned, add("remember", f))
+		add("remember", f)
 	}
 	for _, f := range ans.Forget {
-		planned = append(planned, add("forget", f))
+		add("forget", f)
 	}
 	if strings.TrimSpace(ans.Diary) != "" {
-		planned = append(planned, add(diaryName, map[string]string{"day": day, "text": ans.Diary}))
+		add(diaryName, map[string]string{"day": day, "text": ans.Diary})
 	}
 	ds := b.reflectDecisions()
 	var results []TranscriptRow
-	apply := func(c model.ToolCall) toolResult {
+	for _, c := range calls {
 		res := g.callDecision(ctx, t, ds, c.Name, c.Args)
 		if res.IsError {
 			g.log.Info(hlog.Memory, "reflecting on %s: %s %s: %s", day, c.Name, clip(string(c.Args), 160), res.Text)
 		}
 		results = append(results, TranscriptRow{Kind: rowResult, Tool: c.Name, CallID: c.ID, Text: res.Text})
-		return res
-	}
-	for i, c := range planned {
-		res := apply(c)
-		if c.Name == "remember" && res.IsError && strings.Contains(res.Text, theirs) {
-			f := ans.Facts[i]
-			f.Replaces = ""
-			apply(add("remember", f))
-		}
 	}
 	if len(calls) == 0 {
 		return nil
@@ -513,8 +503,11 @@ func (b *modelBrain) reflectSide(ctx context.Context, t *turn, day string, head,
 	return nil
 }
 
-// keptFacts is the ghost's topics and their lines, for the side call to
-// name a line it replaces or forgets, cut at reflectFacts bytes.
+// keptFacts is the ghost's topics and their lines, "where: lives in
+// Sydney", for the side call to name a line it replaces or forgets and to
+// file a fact under a topic it has, cut at reflectFacts bytes. Nothing
+// that looks like part of the line ("[where] ") is put before it: Gemma
+// copied that into replaces.
 func (b *modelBrain) keptFacts() string {
 	topics, err := memory.Topics(b.memDir)
 	if err != nil {
@@ -527,7 +520,7 @@ func (b *modelBrain) keptFacts() string {
 			continue
 		}
 		for _, f := range facts {
-			line := "- [" + tp.Name + "] " + f.Line + "\n"
+			line := tp.Name + ": " + f.Line + "\n"
 			if s.Len()+len(line) > reflectFacts {
 				return s.String() + "(and more)"
 			}

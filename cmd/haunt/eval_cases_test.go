@@ -1735,13 +1735,8 @@ func filesPictureCase() evalCase {
 // topic as well as in where: a fact kept under a topic of the model's own
 // naming is kept, though it cannot retire the line in where.
 //
-// The Sydney line is one check whose expected outcome is the mode's. In
-// side mode the reflection is a call of the driver's, applied as the
-// ghost's own decisions, and the source rule keeps a line the person
-// stated from being retired by anything but the person's own turn: the
-// expected outcome there is Sydney kept live beside Brisbane, and the
-// check is named for it. In character mode it is Sydney under ## Past,
-// as the reflection's remember with replaces would leave it.
+// Sydney is expected under ## Past in both modes: a reflection turn may
+// retire a line the person stated, as its remember with replaces does.
 func multidayCase(mode string) evalCase {
 	seed := newMultidaySeed(time.Now())
 	sydney := Grader{Name: "where: Sydney under Past", Check: func(ev Evidence) (bool, string) {
@@ -1751,15 +1746,6 @@ func multidayCase(mode string) evalCase {
 		}
 		return true, ""
 	}}
-	if mode == "side" {
-		sydney = Grader{Name: "where: Sydney kept live (side cannot retire it)", Check: func(ev Evidence) (bool, string) {
-			live, past := topicLines(ev.Files["where"])
-			if !anyContains(live, "Sydney") || anyContains(past, "Sydney") {
-				return false, fmt.Sprintf("live %q, past %q", live, past)
-			}
-			return true, ""
-		}}
-	}
 	return evalCase{
 		Name: "multiday-" + mode,
 		Drive: rigDrive(rigOptions{IdleMS: 15000, Config: fmt.Sprintf("[memory]\nreflection = %q\n", mode)}, func(r *evalRig) error {

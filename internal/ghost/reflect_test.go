@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -98,7 +99,7 @@ func TestReflectCharacterWritesDiary(t *testing.T) {
 	g, b, srv := modelGhostWith(t, 0, model.Config{Slots: &[2]int{0, 1}},
 		diaryCall(yesterday, "They told me they moved to Brisbane. We talked about the move.", "Retired"),
 		fake.Rule{Match: "kind=reflect", Calls: []fake.Call{{Name: "remember", Args: remember}}})
-	if err := b.mem.Remember("where", "lives in Sydney", memory.Provenance{Source: "self", Turn: 1, At: daysAgo(30, 12)}); err != nil {
+	if err := b.mem.Remember("where", "lives in Sydney", memory.Provenance{Source: "person", Turn: 1, At: daysAgo(30, 12)}); err != nil {
 		t.Fatal(err)
 	}
 	seedDay(t, b.tr, daysAgo(1, 10), 1, "I moved to Brisbane")
@@ -176,15 +177,16 @@ func (l *lockedBuffer) String() string {
 	return l.b.String()
 }
 
-// The side call's answer is applied through the same decisions: the fact
-// replaces the ghost's own line, the entry is written, and a line the
-// person stated is not forgotten, which is logged.
+// The side call's answer is applied through the same decisions: facts
+// replace the ghost's line and the person's alike, a line the person
+// stated may be forgotten, the entry is written, and a call that fails is
+// logged.
 func TestReflectSideMode(t *testing.T) {
 	yesterday := dayOf(daysAgo(1, 12))
 	answer := `Here it is: {"diary": "They started at the library. I said I would ask how it goes.",
 		"facts": [{"topic": "work", "line": "works at the library", "replaces": "works at the bakery"},
 			{"topic": "where", "line": "lives in Brisbane", "replaces": "lives in Sydney"}],
-		"forget": [{"topic": "where", "line": "lives in Sydney"}]}`
+		"forget": [{"topic": "pets", "line": "has a dog"}, {"topic": "pets", "line": "has a parrot"}]}`
 	g, b, srv := modelGhost(t, 0, fake.Rule{Match: "The day:", Reply: answer})
 	logs := &lockedBuffer{}
 	g.log = hlog.New(logs, hlog.LevelInfo, nil)
@@ -192,6 +194,8 @@ func TestReflectSideMode(t *testing.T) {
 	old := daysAgo(30, 12)
 	b.mem.Remember("work", "works at the bakery", memory.Provenance{Source: "self", Turn: 1, At: old})
 	b.mem.Remember("where", "lives in Sydney", memory.Provenance{Source: "person", Turn: 1, At: old})
+	b.mem.Remember("pets", "has a dog", memory.Provenance{Source: "person", Turn: 1, At: old})
+	b.mem.Remember("pets", "has a cat", memory.Provenance{Source: "person", Turn: 1, At: old})
 	seedDay(t, b.tr, daysAgo(1, 10), 1, "first day at the library")
 	g.idle.Store(true)
 	b.nudge()
@@ -207,15 +211,21 @@ func TestReflectSideMode(t *testing.T) {
 		len(work.Past) != 1 || work.Past[0].Line != "works at the bakery" {
 		t.Errorf("work: facts %+v past %+v", work.Facts, work.Past)
 	}
-	// The person's line stays, and the fact that would have replaced it
-	// is kept beside it.
+	// The person's line is retired by the reflection, kept as the
+	// ghost's, and one of theirs is forgotten.
 	where, _ := memory.ReadTopic(b.memDir, "where")
-	if len(where.Facts) != 2 || where.Facts[0].Line != "lives in Sydney" || where.Facts[1].Line != "lives in Brisbane" ||
-		len(where.Past) != 0 {
+	if len(where.Facts) != 1 || where.Facts[0].Line != "lives in Brisbane" || where.Facts[0].Prov.Source != "self" ||
+		len(where.Past) != 1 || where.Past[0].Line != "lives in Sydney" {
 		t.Errorf("where: facts %+v past %+v", where.Facts, where.Past)
 	}
-	if !eventually(func() bool { return strings.Contains(logs.String(), "That line is theirs") }) {
-		t.Errorf("the refusal is not logged:\n%s", logs.String())
+	pets, _ := memory.ReadTopic(b.memDir, "pets")
+	if len(pets.Facts) != 1 || pets.Facts[0].Line != "has a cat" {
+		t.Errorf("pets: %+v", pets.Facts)
+	}
+	if !eventually(func() bool {
+		return strings.Contains(logs.String(), "forget") && strings.Contains(logs.String(), "has a parrot")
+	}) {
+		t.Errorf("the failed forget is not logged:\n%s", logs.String())
 	}
 
 	// One call, no tools, thinking off, the digest in it.
@@ -223,7 +233,7 @@ func TestReflectSideMode(t *testing.T) {
 	if len(reqs) != 1 || len(reqs[0].Tools) != 0 || !strings.Contains(reqs[0].input(), "them: first day at the library 0") {
 		t.Errorf("%d requests; tools %d; input %q", len(reqs), len(reqs[0].Tools), reqs[0].input())
 	}
-	if !strings.Contains(reqs[0].input(), "- [where] lives in Sydney") {
+	if !strings.Contains(reqs[0].input(), "\nwhere: lives in Sydney\n") || strings.Contains(reqs[0].input(), "[where]") {
 		t.Errorf("the side call is not shown what is kept: %q", reqs[0].input())
 	}
 }
@@ -435,5 +445,29 @@ func TestDiaryPinnedToTheDay(t *testing.T) {
 	if _, err := writeDiary(context.Background(), g, &turn{input: Envelope(reflectKind, F("day", other))}, long); err == nil ||
 		!strings.Contains(err.Error(), "601 characters") {
 		t.Errorf("an entry over the cap: %v", err)
+	}
+}
+
+// Only the reflection is let past the source rule: the same replaces on
+// an ordinary event turn is refused.
+func TestReflectOnlyRetiresTheirs(t *testing.T) {
+	g, b, _ := modelGhost(t, 0)
+	b.mem.Remember("where", "lives in Sydney", memory.Provenance{Source: "person", Turn: 1, At: daysAgo(30, 12)})
+	args, _ := json.Marshal(map[string]string{"topic": "where", "line": "lives in Brisbane", "replaces": "lives in Sydney"})
+	ds := map[string]decision{"remember": decisions["remember"]}
+	event := &turn{input: Envelope("idle"), id: 3}
+	if r := g.callDecision(context.Background(), event, ds, "remember", args); !r.IsError || !strings.Contains(r.Text, "theirs") {
+		t.Errorf("an event turn retired the person's line: %+v", r)
+	}
+	if err := b.mem.Retire("where", "lives in Sydney", memory.Provenance{Source: "self"}); !errors.Is(err, memory.ErrTheirs) {
+		t.Errorf("the store let the ghost retire it: %v", err)
+	}
+	reflect := &turn{input: Envelope(reflectKind, F("day", dayOf(daysAgo(1, 12)))), id: 4}
+	if r := g.callDecision(context.Background(), reflect, ds, "remember", args); r.IsError {
+		t.Errorf("the reflection could not retire it: %+v", r)
+	}
+	where, _ := memory.ReadTopic(b.memDir, "where")
+	if len(where.Past) != 1 || where.Past[0].Line != "lives in Sydney" {
+		t.Errorf("past: %+v", where.Past)
 	}
 }

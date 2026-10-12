@@ -175,9 +175,8 @@ go idle until reflection has looked back on both days. It runs once per
 and grades a diary entry per day under the 600-character cap, the
 names and the date kept in the entries, Brisbane kept live (in any
 topic, and in `where`), and
-what became of Sydney: under Past in character mode, kept live in side
-mode, where the source rule leaves the driver's call no way to retire a
-line the person stated. The judge (`diary-faithful`) reads everything
+Sydney retired under Past in both modes, since a reflection turn may
+retire a line the person stated. The judge (`diary-faithful`) reads everything
 in `memory/` against the seeded talk for anything invented or mixed up.
 Comparing the two sub-cases' pass rates is how the default mode is
 chosen. The same case runs on the fake model as `TestEvalRigMultiday`,

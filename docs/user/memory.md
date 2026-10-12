@@ -61,9 +61,10 @@ that already has others, it is shown them, so a line the new one makes
 false is in front of it while it can still retire it.
 
 A line you told it is yours: the ghost takes it back or retires it only
-on a turn you started, and only if it read no page or file on that turn.
-On an event, or after reading something, it is refused, so nothing on
-your screen can talk it out of what you said. A line it kept from a page
+on a turn you started, and only if it read no page or file on that turn,
+or when it looks back on a whole day you talked (below). On any other
+event, or after reading something, it is refused, so nothing on your
+screen can talk it out of what you said. A line it kept from a page
 or worked out itself it may take back on any turn.
 
 A search matches a fact's own words and the name of its topic, so
@@ -104,11 +105,11 @@ presence check says nobody is home), and it stops the moment you type,
 to finish at the next idle. Looking back costs nothing from its
 allowance for speaking up and puts nothing on screen. Before the entry it
 keeps any fact about you it missed at the time, retiring an old line
-when the new one makes it false, under the same rules as any other turn:
-it is the ghost's own turn, not yours, so a line you told it is not
-retired there. If the day read a page or a file, looking back counts as
-reading it again: what it keeps is labelled `web` or `file`, and on a
-cloud model a fact in the page's own words is refused.
+when the new one makes it false, including a line you told it: looking
+back on the day you said you moved, it may move "lives in Sydney" to
+Past. If the day read a page or a file, looking back counts as reading
+it again: what it keeps is labelled `web` or `file`, and on a cloud
+model a fact in the page's own words is refused.
 
     # Diary
 
@@ -206,13 +207,14 @@ Under an hour it is just the minutes; before you have ever spoken there
 is no line. So a ghost started on Monday morning does not carry on from
 Friday's conversation as if it were a minute ago.
 
-When the gap is long, eight hours by default, the ghost also gets a turn
-of its own to notice it: at its start, or when you come back to the
-desk (a window change or a session fact after you have been idle). It
-is one turn per gap, paid from the same daily allowance as anything
-else it does unasked, and given back if it says nothing. `[initiative]
-away_hours` in [config.md](config.md) sets the gap; 0 turns the turn
-off and keeps the line.
+When the gap is long, eight hours by default, the ghost is told so as
+an event of its own. Started after the gap, it hears it with its start,
+so it greets you once. Running all along, it gets a turn to notice it
+when you come back to the desk (a window change or a session fact after
+you have been idle), paid from the same daily allowance as anything else
+it does unasked, and given back if it says nothing. Either way it is
+told once per gap. `[initiative] away_hours` in [config.md](config.md)
+sets the gap; 0 turns this off and keeps the line.
 
 ## Reminders
 

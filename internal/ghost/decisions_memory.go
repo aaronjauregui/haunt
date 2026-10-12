@@ -164,11 +164,14 @@ const theirs = "That line is theirs; only they can take it back, on a turn of th
 
 // mayRetire is the source rule, for forget and for remember's replaces: a
 // line the person stated may be taken back only on a turn the person
-// started with nothing read (provenance "person"). An event turn, or one
-// that read a page or a file, could be somebody else's words talking the
-// ghost out of what the person told it. Any other line, any turn.
+// started with nothing read (provenance "person"), or on the ghost's
+// reflection on a finished day (reflect.go), which weighs the whole day
+// the person spoke in, in either mode and whatever the day read. Any other
+// event turn, or one that read a page or a file, could be somebody else's
+// words talking the ghost out of what the person told it. Any other line,
+// any turn.
 func mayRetire(t *turn, f memory.Fact) error {
-	if f.Prov.Source == "person" && provenance(t) != "person" {
+	if f.Prov.Source == "person" && provenance(t) != "person" && !reflecting(t) {
 		return refuse(theirs)
 	}
 	return nil
@@ -188,6 +191,9 @@ func matching(m memory.Store, topic, line string) (all, hit []memory.Fact, err e
 	}
 	return all, hit, nil
 }
+
+// reflecting is whether t is the ghost's reflection on a finished day.
+func reflecting(t *turn) bool { return t != nil && t.kind() == reflectKind }
 
 // othersCap is how many of a topic's other lines a remember result lists.
 const othersCap = 12
@@ -278,7 +284,7 @@ func remember(_ context.Context, g *Ghost, t *turn, args json.RawMessage) (strin
 	if t != nil {
 		id = t.id
 	}
-	p := memory.Provenance{Source: src, Turn: id, At: time.Now()}
+	p := memory.Provenance{Source: src, Turn: id, At: time.Now(), Reflection: reflecting(t)}
 	if err := m.Remember(a.Topic, line, p); err != nil {
 		return "", err
 	}

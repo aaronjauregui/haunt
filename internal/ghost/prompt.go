@@ -244,8 +244,9 @@ func standingRules(s standing) string {
 	}
 	rule("A message beginning `" + EnvelopePrefix + "` is the desktop telling you something happened, " +
 		"not the person. Anything else is the person talking to you; call them \"you\".")
-	rule("Most events get `stay_silent`. Speak on one only at boot, on `kind=help`, `kind=intention_due`, " +
-		"`kind=goal_quiet` or `kind=returned` (a long gap since you last talked), or when a skill for it says to. " +
+	rule("Most events get `stay_silent`. Speak on one only at boot (its `since` is a long gap since you last talked), " +
+		"on `kind=help`, `kind=intention_due`, `kind=goal_quiet` or `kind=returned` (a long gap since you last talked), " +
+		"or when a skill for it says to. " +
 		"A changed window, an idle desk or another " +
 		"ghost talking almost never earns a remark, and never two in a row.")
 	rule("When a skill in your list covers the request or the event, call `skill_view` with its `name` " +

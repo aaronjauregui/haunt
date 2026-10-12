@@ -61,25 +61,38 @@ func TestLastExchangeLine(t *testing.T) {
 	}
 }
 
-// A ghost started after a long gap gets a returned turn after its boot
-// turn, once: a second boot the same minute brings none.
+// A ghost started after a long gap carries the gap on its boot envelope
+// and gets no returned turn, then or later for the same gap: one greeting
+// after a restart. A second boot the same minute carries none.
 func TestReturnedEnvelopeOnBoot(t *testing.T) {
-	g, b, srv := modelGhost(t, 5, silent("kind=boot"), silent("kind=returned"))
+	g, b, srv := modelGhost(t, 5, silent("kind=boot"), silent("kind=returned"), silent(""))
 	g.awayAfter = 8 * time.Hour
 	g.store.Set(metKey, "yes")
 	exchangeAt(t, b, time.Now().Add(-72*time.Hour))
 	b.Deliver(proto.Event{Type: proto.EventBoot})
 	waitTurns(t, b, 2)
 	got := sent(t, srv)
-	if len(got) != 2 || got[0] != "[haunt event] kind=boot first_time=false" ||
-		!strings.HasPrefix(got[1], "[haunt event] kind=returned since=3d last=") {
-		t.Fatalf("sent %q, want the boot turn then the returned one", got)
+	if len(got) != 1 || !strings.HasPrefix(got[0], "[haunt event] kind=boot first_time=false since=3d last=") {
+		t.Fatalf("sent %q, want the boot turn carrying the gap, alone", got)
 	}
+	// The person goes idle and comes back: the gap was told already.
+	g.endResponding()
+	b.Deliver(proto.Event{Type: proto.EventIdle})
+	waitTurns(t, b, 3)
+	g.endResponding()
+	b.Deliver(proto.Event{Type: proto.EventSession, Session: &proto.SessionFact{Kind: "returning", Minutes: 600}})
+	waitTurns(t, b, 4)
 	g.endResponding()
 	b.Deliver(proto.Event{Type: proto.EventBoot})
-	waitTurns(t, b, 3)
-	if got := sent(t, srv); len(got) != 3 || EnvelopeKind(got[2]) != "boot" {
-		t.Errorf("sent %q, want one more boot turn and no second returned", got)
+	waitTurns(t, b, 5)
+	got = sent(t, srv)
+	for _, in := range got {
+		if EnvelopeKind(in) == "returned" {
+			t.Errorf("a returned turn for a gap the boot told: %q", got)
+		}
+	}
+	if last := got[len(got)-1]; last != "[haunt event] kind=boot first_time=false" {
+		t.Errorf("the second boot: %q", last)
 	}
 }
 
