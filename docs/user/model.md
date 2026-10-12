@@ -52,7 +52,9 @@ default) and a context of at least 32K:
 
 One server is shared by every ghost; each ghost's character comes from
 its persona, its examples, its prefill and its sampling, all of which
-are per request. The llama.cpp sampling keys (`min_p`, `repeat_penalty`,
+are per request. [A character on a local model](../ghosts/local-models.md)
+is the guide to those levers on llama-server, with the server flags and
+the settings that worked on Gemma 4. The llama.cpp sampling keys (`min_p`, `repeat_penalty`,
 `dry_multiplier`, `xtc_probability`) go under `[model.sampling]`, or a
 ghost's own `[model.ghost.<name>.sampling]`; other providers ignore
 them.

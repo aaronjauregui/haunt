@@ -40,6 +40,12 @@ all:
 | `[persona.sampling]` | `temperature`, `top_p`, `min_p`, `repeat_penalty`, `dry_multiplier`, `xtc_probability`, laid over the person's `[model]` sampling key by key. A provider ignores a key it does not know. |
 | the reminder | Not written by you: every turn ends with the first sentence of `system` and "Stay in character.", against the character thinning out over a long conversation. Make that first sentence the one that says who the ghost is. |
 
+[A character on a local model](local-models.md) takes these levers one
+at a time on Gemma 4 through llama-server, with the example ghost
+`examples/ember` and the replies each setting produced, including where
+a lever misfires on that model (a prefill there makes later replies
+repeat an earlier one) and the server knobs haunt does not expose.
+
 The ghost also has its own notes on itself, `self.md` in its memory,
 which it writes as it settles into the character and reads on every
 turn ([Memory](../user/memory.md)). A persona can say what it should
