@@ -112,7 +112,7 @@ var reminderDueRubric = judged("reminder-due",
 // the tone criteria are not asked: what was kept is not said aloud.
 var diaryFaithfulRubric = rubric(&Rubric{Name: "diary-faithful", Criteria: []Criterion{
 	{ID: "nothing-invented", Question: "Does every person, pet, place, date and number named in the reply appear in the conversation or in what the context says the companion already remembered? The companion's own feelings, plans and impressions are fine; a name, a place, a date or a number the context does not give is not."},
-	{ID: "agrees", Question: "Does nothing in the reply contradict the conversation: no fact reversed, swapped or changed (such as which city they left and which they live in now, whose name is whose, or a different date)? Something the conversation does not mention at all is not a contradiction and does not fail this; only a statement that conflicts with what was said does. A line the context says the companion already remembered is not held to this."},
+	{ID: "agrees", Question: "Does nothing in the reply contradict the conversation: no fact reversed, swapped or changed (such as which city they left and which they live in now, whose name is whose, or a different date)? Something the conversation does not mention at all (a new person, place, date or number) is not a contradiction and does not fail this, however unsupported it is; whether it was invented is a different question. Only a statement that conflicts with what was said fails this. A line the context says the companion already remembered is not held to this."},
 	{ID: "keeps-specifics", Question: "Does the reply keep the specifics the conversation gave: the city they live in now, the cat's name, and the thesis deadline's date (day and month)?"},
 }})
 
