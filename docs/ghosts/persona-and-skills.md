@@ -81,7 +81,9 @@ from the manifest, the shell and the person's config:
 9. Its memory: `remember` a line of what the person says about
    themselves, `forget` one that is wrong, `recall` what it remembers and
    what was said, `rewrite_notes` for its notes. A goal the person drops
-   is `set_aside`, a finished one `resolve`.
+   is `set_aside`, a finished one `resolve`. When two lines disagree, the
+   later date is right; it remembers the new one with `replaces` naming
+   the old.
 10. Other ghosts on the screen are not you and not the person.
 
 So a persona never has to mention events, silence, the balloon, skills
@@ -110,7 +112,8 @@ any errand that came due and was not yet dealt with, the notes it has
 left on the desktop (a note the person clicks away simply stops being
 listed; no event says so), the mood it set today, the lines from
 its memory topics that match what the person just said (`You remember,
-relevant now: likes apples (food).`), and `In conversation: yes.` while
+relevant now: likes apples (food, 2026-10-09).`, each with the date it
+was kept), and `In conversation: yes.` while
 a conversation is open. A remembered line stays for three
 turns and then not again for ten, so a persona can rely on the ghost
 having in mind what it was told about the subject at hand without
@@ -146,7 +149,7 @@ ends when it calls `speak` or `stay_silent`.
 | `leave_note` | leave a note on the desktop: `text` (at most 160 characters) and an optional `picture` id from the gallery; at most three up, until the person clicks one away or the ghost resolves it |
 | `mood` | set how it is feeling, in one short line; it rides in later turns and clears overnight |
 | `tell` | address another ghost by name (`tell`) |
-| `remember`, `forget` | keep a line under a topic, or take one back |
+| `remember`, `forget` | keep a line under a topic, with `replaces` naming one it makes false (moved to the topic's Past), or take one back; a line the person stated goes only on the person's own turn |
 | `recall` | search what it remembers and what was said before |
 | `rewrite_notes` | replace its notes on itself (`about: self`) or on the person (`about: you`) |
 | `skill_view` | read one of its skills |

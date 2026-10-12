@@ -19,6 +19,16 @@
 //	- likes apples <!-- person t=412 2026-10-09 -->
 //	- allergic to cats <!-- person t=98 2026-09-30 -->
 //
+// A line that is no longer true moves under a closing "## Past" heading
+// (Retire), with the date it was retired:
+//
+//	## Past
+//	- lives in Sydney <!-- person t=98 2026-09-30 --> <!-- retired 2026-10-12 -->
+//
+// Past lines are kept for the person to read and are not facts: not
+// counted, not indexed, not recalled. A file without the heading reads
+// and writes as if Past did not exist.
+//
 // The provenance comment is invisible in a Markdown viewer and parsed by
 // the store: the source (person, web, file or self), the turn and the
 // date. A line the person typed without one is read as the person's, turn
@@ -75,6 +85,14 @@ type Store interface {
 	Remember(topic, line string, p Provenance) error
 	// Forget removes a fact from a topic; an empty line removes the topic.
 	Forget(topic, line string) error
+	// Retire moves the facts that read as line (case and spacing aside)
+	// to the topic's ## Past, dated by.At. A line the person stated is
+	// retired only when by.Source is "person" (ErrTheirs otherwise); the
+	// ghost's gate says so first, in words.
+	Retire(topic, line string, by Provenance) error
+	// Facts is a topic's facts, Past left out; none for a topic that does
+	// not exist.
+	Facts(topic string) ([]Fact, error)
 	// SetCore replaces self.md ("self") or you.md ("you").
 	SetCore(which, text string) error // "self" or "you"
 	// Watch follows the directory in the background until ctx is done or

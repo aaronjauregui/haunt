@@ -22,8 +22,9 @@ func init() {
 	register(verb{
 		id: "remember",
 		desc: "Keep one fact they told you about themselves, in your own words, under a topic (food, work…). " +
-			"Not for a goal they drop: that is set_aside.",
-		params: []string{"topic:string", "line:string"},
+			"Not for a goal they drop: that is set_aside. " +
+			"replaces: a line in the topic this one makes false (moved city, new job).",
+		params: []string{"topic:string", "line:string", "replaces?:string"},
 		run:    remember,
 	})
 	register(verb{
@@ -77,6 +78,62 @@ func provenance(t *turn) string {
 	}
 }
 
+// theirs is the refusal to take back a line the person stated on a turn
+// that is not theirs alone.
+// The result wraps it as "That was not allowed: …." so it has no stop.
+const theirs = "That line is theirs; only they can take it back, on a turn of their own"
+
+// mayRetire is the source rule, for forget and for remember's replaces: a
+// line the person stated may be taken back only on a turn the person
+// started with nothing read (provenance "person"). An event turn, or one
+// that read a page or a file, could be somebody else's words talking the
+// ghost out of what the person told it. Any other line, any turn.
+func mayRetire(t *turn, f memory.Fact) error {
+	if f.Prov.Source == "person" && provenance(t) != "person" {
+		return refuse(theirs)
+	}
+	return nil
+}
+
+// matching is the facts in a topic that read as line, the way the store
+// matches it.
+func matching(m memory.Store, topic, line string) (all, hit []memory.Fact, err error) {
+	all, err = m.Facts(topic)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, f := range all {
+		if memory.SameLine(f, line) {
+			hit = append(hit, f)
+		}
+	}
+	return all, hit, nil
+}
+
+// othersCap is how many of a topic's other lines a remember result lists.
+const othersCap = 12
+
+// listLines quotes up to othersCap lines, the ones that are not except.
+func listLines(facts []memory.Fact, except string) string {
+	var q []string
+	more := 0
+	for _, f := range facts {
+		if strings.EqualFold(f.Line, except) {
+			continue
+		}
+		if len(q) == othersCap {
+			more++
+			continue
+		}
+		q = append(q, "'"+f.Line+"'")
+	}
+	s := strings.Join(q, ", ")
+	if more > 0 {
+		s += fmt.Sprintf(" and %d more", more)
+	}
+	return s
+}
+
 // mayRemember is the gate every write passes (remember, rewrite_notes,
 // skill_write), by the trust table (trust.go): on cloud, a write whose words
 // repeat what the turn read is refused, naming what it repeats; on local
@@ -104,8 +161,9 @@ func (g *Ghost) mayRemember(t *turn, text string) error {
 
 func remember(_ context.Context, g *Ghost, t *turn, args json.RawMessage) (string, error) {
 	var a struct {
-		Topic string `json:"topic"`
-		Line  string `json:"line"`
+		Topic    string `json:"topic"`
+		Line     string `json:"line"`
+		Replaces string `json:"replaces"`
 	}
 	if err := decode(args, &a); err != nil {
 		return "", err
@@ -114,26 +172,61 @@ func remember(_ context.Context, g *Ghost, t *turn, args json.RawMessage) (strin
 	if err != nil {
 		return "", err
 	}
-	line := strings.TrimSpace(a.Line)
+	line := strings.Join(strings.Fields(a.Line), " ")
 	if line == "" {
 		return "", fmt.Errorf("remember what?")
+	}
+	replaces := strings.Join(strings.Fields(a.Replaces), " ")
+	if strings.EqualFold(replaces, line) {
+		replaces = "" // the line replacing itself is the line kept
 	}
 	src := provenance(t)
 	if err := g.mayRemember(t, line); err != nil {
 		return "", err
 	}
+	// The topic as it stood, for what replaces names and for the lines
+	// listed back. A topic name the store refuses is Remember's to say.
+	before, old, _ := matching(m, a.Topic, replaces)
+	if replaces == "" {
+		old = nil
+	}
+	for _, f := range old {
+		if mayRetire(t, f) != nil {
+			return "", refuse("%s. Remember the new line without replaces to keep both", theirs)
+		}
+	}
 	var id int64
 	if t != nil {
 		id = t.id
 	}
-	if err := m.Remember(a.Topic, line, memory.Provenance{Source: src, Turn: id, At: time.Now()}); err != nil {
+	p := memory.Provenance{Source: src, Turn: id, At: time.Now()}
+	if err := m.Remember(a.Topic, line, p); err != nil {
 		return "", err
 	}
 	topic, _ := memory.NormalizeTopic(a.Topic)
-	return fmt.Sprintf("Remembered under %s, as from %s.", topic, src), nil
+	switch {
+	case len(old) > 0:
+		if err := m.Retire(topic, replaces, p); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Kept. Retired: %s.", strings.TrimRight(old[0].Line, ".")), nil
+	case replaces != "":
+		others := listLines(before, line)
+		if others == "" {
+			others = "nothing else"
+		}
+		return fmt.Sprintf("Kept. No line '%s' to retire; the topic has: %s", replaces, others), nil
+	}
+	said := fmt.Sprintf("Remembered under %s, as from %s.", topic, src)
+	// The topic's other lines, so a line this one makes false is in front
+	// of the model while it can still retire it.
+	if others := listLines(before, line); others != "" {
+		said += " The topic also has: " + others + ". If one is now false, remember again with replaces naming it."
+	}
+	return said, nil
 }
 
-func forget(_ context.Context, g *Ghost, _ *turn, args json.RawMessage) (string, error) {
+func forget(_ context.Context, g *Ghost, t *turn, args json.RawMessage) (string, error) {
 	var a struct {
 		Topic string `json:"topic"`
 		Line  string `json:"line"`
@@ -147,6 +240,13 @@ func forget(_ context.Context, g *Ghost, _ *turn, args json.RawMessage) (string,
 	}
 	if strings.TrimSpace(a.Line) == "" {
 		return "", fmt.Errorf("forget which line? (a whole topic is the person's to remove)")
+	}
+	if _, hit, err := matching(m, a.Topic, a.Line); err == nil {
+		for _, f := range hit {
+			if err := mayRetire(t, f); err != nil {
+				return "", err
+			}
+		}
 	}
 	if err := m.Forget(a.Topic, a.Line); err != nil {
 		return "", err

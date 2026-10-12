@@ -55,7 +55,10 @@ const (
 // keyedHit is one line that fired, and the turn it fired on.
 type keyedHit struct {
 	topic, line string
-	fired       int
+	// at is the date the line was kept, zero for one the person wrote by
+	// hand without a label.
+	at    time.Time
+	fired int
 	// rank is its place among the lines that fired with it, best first.
 	rank int
 }
@@ -92,7 +95,7 @@ func (s *keyedState) step(hits []memory.Hit) {
 		if _, held := s.seen[k]; held || h.Score < keyedMinScore {
 			continue
 		}
-		s.seen[k] = keyedHit{topic: h.Topic, line: h.Line, fired: s.turn, rank: rank}
+		s.seen[k] = keyedHit{topic: h.Topic, line: h.Line, at: h.Prov.At, fired: s.turn, rank: rank}
 		rank++
 	}
 }
@@ -118,6 +121,9 @@ func (s *keyedState) held() []keyedHit {
 }
 
 // line is the turn context's line for the held lines, empty when none is.
+// Each carries its topic and the date it was kept, so two lines that
+// disagree ("lives in Sydney", "lives in Brisbane") show which is later;
+// the standing rule on memory says the later one is right.
 func (s *keyedState) line() string {
 	held := s.held()
 	if len(held) == 0 {
@@ -125,7 +131,11 @@ func (s *keyedState) line() string {
 	}
 	parts := make([]string, len(held))
 	for i, h := range held {
-		parts[i] = strings.TrimRight(h.line, ". ") + " (" + h.topic + ")"
+		tag := h.topic
+		if !h.at.IsZero() {
+			tag += ", " + h.at.Format("2006-01-02")
+		}
+		parts[i] = strings.TrimRight(h.line, ". ") + " (" + tag + ")"
 	}
 	return "You remember, relevant now: " + strings.Join(parts, "; ") + "."
 }

@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -441,5 +442,135 @@ func TestOpenReindexesOldLayout(t *testing.T) {
 	}
 	if hits, _ := s.Recall(context.Background(), "file", 5); len(hits) != 0 {
 		t.Errorf("a stale row survived the open: %+v", hits)
+	}
+}
+
+// A topic file without a Past heading writes back exactly as it read.
+func TestTopicFileWithoutPast(t *testing.T) {
+	in := "---\ntopic: food\nupdated: 2026-10-10T09:12:00+10:00\n---\n- likes apples <!-- person t=4 2026-10-09 -->\n\n# notes\nhates coriander\n"
+	tf := parseTopicFile(in)
+	if tf.past != nil {
+		t.Errorf("past = %q, want none", tf.past)
+	}
+	if got := tf.String(); got != in {
+		t.Errorf("written back as\n%s\nwant\n%s", got, in)
+	}
+	if n := len(tf.facts()); n != 2 {
+		t.Errorf("%d facts, want 2", n)
+	}
+}
+
+// Retire moves the line under ## Past with the date, keeps its
+// provenance, and takes it out of the facts and the index; a line the
+// person stated is retired only by the person.
+func TestRetireMovesToPast(t *testing.T) {
+	s, dir := openTest(t)
+	if err := s.Remember("where", "lives in Sydney", Provenance{Source: "person", Turn: 3, At: day("2026-09-30")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Remember("where", "lives in Brisbane", Provenance{Source: "person", Turn: 9, At: day("2026-10-12")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Retire("where", "lives in sydney", Provenance{Source: "self", At: day("2026-10-12")}); !errors.Is(err, ErrTheirs) {
+		t.Errorf("the ghost retiring a person's line: %v, want ErrTheirs", err)
+	}
+	if err := s.Retire("where", "  Lives in  Sydney ", Provenance{Source: "person", Turn: 9, At: day("2026-10-12")}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "topics", "where.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "- lives in Brisbane <!-- person t=9 2026-10-12 -->\n\n## Past\n- lives in Sydney <!-- person t=3 2026-09-30 --> <!-- retired 2026-10-12 -->\n"
+	if !strings.HasSuffix(string(b), want) {
+		t.Errorf("the file is\n%s\nwant it to end\n%s", b, want)
+	}
+	tp, err := ReadTopic(dir, "where")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tp.Facts) != 1 || tp.Facts[0].Line != "lives in Brisbane" {
+		t.Errorf("facts = %+v", tp.Facts)
+	}
+	if len(tp.Past) != 1 || tp.Past[0].Line != "lives in Sydney" || tp.Past[0].Prov.Turn != 3 ||
+		!tp.Past[0].Retired.Equal(day("2026-10-12")) {
+		t.Errorf("past = %+v", tp.Past)
+	}
+	if hits, _ := s.Recall(context.Background(), "Sydney", 5); len(hits) != 0 {
+		t.Errorf("a past line is recalled: %+v", hits)
+	}
+	if err := s.Retire("where", "lives in Perth", Provenance{Source: "person"}); err == nil {
+		t.Error("retiring a line the topic does not have succeeded")
+	}
+	// The last fact going leaves the topic for its past.
+	if err := s.Forget("where", "lives in Brisbane"); err != nil {
+		t.Fatal(err)
+	}
+	if tp, err := ReadTopic(dir, "where"); err != nil || len(tp.Facts) != 0 || len(tp.Past) != 1 {
+		t.Errorf("after the last fact: %+v, %v", tp, err)
+	}
+}
+
+// A hand-written file with a Past survives a Remember: the new line goes
+// above the heading and nothing else changes but the updated stamp.
+func TestPastRoundTrip(t *testing.T) {
+	s, dir := openTest(t)
+	head := "---\ntopic: where\nupdated: 2026-10-01T09:00:00+10:00\nmood: settled\n---\n"
+	facts := "- lives in Brisbane <!-- person t=9 2026-10-12 -->\n"
+	past := "\n## Past\n- lives in Sydney <!-- person t=3 2026-09-30 --> <!-- retired 2026-10-12 -->\nused to live in Perth\n"
+	path := filepath.Join(dir, "topics", "where.md")
+	if err := os.WriteFile(path, []byte(head+facts+past), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Remember("where", "works from home", Provenance{Source: "person", Turn: 11, At: day("2026-10-12")}); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(path)
+	got := string(b)
+	added := "- works from home <!-- person t=11 2026-10-12 -->\n"
+	_, rest, _ := strings.Cut(got, "mood: settled\n---\n")
+	if rest != facts+added+past {
+		t.Errorf("the file after a remember:\n%s", got)
+	}
+	tp, _ := ReadTopic(dir, "where")
+	if len(tp.Facts) != 2 || len(tp.Past) != 2 || tp.Past[1].Line != "used to live in Perth" || !tp.Past[1].Retired.IsZero() {
+		t.Errorf("topic = %+v", tp)
+	}
+}
+
+// The index and its line counts leave out the past; a topic with only
+// past lines is not in it, and Reindex counts and indexes facts alone.
+func TestIndexExcludesPast(t *testing.T) {
+	s, dir := openTest(t)
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(dir, "topics", name+".md"), []byte("---\ntopic: "+name+"\n---\n"+body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("where", "- lives in Brisbane\n\n## Past\n- lives in Sydney\n- lives in Perth\n")
+	write("gone", "## Past\n- had a dog\n")
+	db := s.(*fileStore).db
+	topics, lines, err := Reindex(dir, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if topics != 2 || lines != 1 {
+		t.Errorf("reindexed %d topics, %d lines; want 2, 1", topics, lines)
+	}
+	idx, err := s.Index()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if idx != "where (1): lives in Brisbane\n" {
+		t.Errorf("index = %q", idx)
+	}
+	for _, q := range []string{"Sydney", "Perth", "dog"} {
+		if hits, _ := s.Recall(context.Background(), q, 5); len(hits) != 0 {
+			t.Errorf("recall %s found a past line: %+v", q, hits)
+		}
+	}
+	ts, _ := Topics(dir)
+	if len(ts) != 2 || ts[1].Name != "where" || ts[1].Lines != 1 || ts[1].Past != 2 {
+		t.Errorf("topics = %+v", ts)
 	}
 }

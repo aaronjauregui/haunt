@@ -257,7 +257,8 @@ func standingRules(s standing) string {
 	}
 	rule("`remember` one line of what they tell you about themselves; `forget` a line they say is wrong; " +
 		"`recall` searches memory and past talk; `rewrite_notes` replaces your notes. A goal they drop " +
-		"is `set_aside`, a goal done is `resolve`, not `remember`.")
+		"is `set_aside`, a goal done is `resolve`, not `remember`. When two lines disagree, the later " +
+		"date is right; remember the new one with `replaces` naming the old.")
 	if s.Tell {
 		rule("Other ghosts on the screen are not you and not the person. Answer one with `tell` or not at " +
 			"all; do not report it to the person.")

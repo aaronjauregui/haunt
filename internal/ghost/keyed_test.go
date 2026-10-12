@@ -48,7 +48,8 @@ func TestKeyedFiresOnMatch(t *testing.T) {
 	if ctx := contextOf(t, b, "how was your day"); strings.Contains(ctx, "You remember") {
 		t.Errorf("nothing matched and still: %q", ctx)
 	}
-	if ctx := contextOf(t, b, "I bought some apples on the way home!"); !strings.Contains(ctx, applesLine) {
+	want := "You remember, relevant now: likes apples (food, " + time.Now().Format("2006-01-02") + ")."
+	if ctx := contextOf(t, b, "I bought some apples on the way home!"); !strings.Contains(ctx, want) {
 		t.Errorf("the apples line is not in the context: %q", ctx)
 	}
 }
@@ -146,7 +147,23 @@ func TestKeyedTopicWord(t *testing.T) {
 		}
 	}
 	ctx := contextOf(t, b, "what food should we cook")
-	if !strings.Contains(ctx, "likes apples (food)") || !strings.Contains(ctx, "hates the taste of coriander (food)") {
+	today := time.Now().Format("2006-01-02")
+	if !strings.Contains(ctx, "likes apples (food, "+today+")") || !strings.Contains(ctx, "hates the taste of coriander (food, "+today+")") {
 		t.Errorf("a topic word did not key against a dozen lines: %q", ctx)
+	}
+}
+
+// Each keyed line carries the date it was kept, so two that disagree show
+// which is later; a line written by hand without a label has none.
+func TestKeyedDates(t *testing.T) {
+	var s keyedState
+	s.step([]memory.Hit{
+		{Topic: "where", Line: "lives in Sydney", Score: 2, Prov: memory.Provenance{Source: "person", At: time.Date(2026, 9, 30, 0, 0, 0, 0, time.Local)}},
+		{Topic: "where", Line: "lives in Brisbane", Score: 1.9, Prov: memory.Provenance{Source: "person", At: time.Date(2026, 10, 12, 0, 0, 0, 0, time.Local)}},
+		{Topic: "food", Line: "likes apples", Score: 1.8},
+	})
+	want := "You remember, relevant now: lives in Sydney (where, 2026-09-30); lives in Brisbane (where, 2026-10-12); likes apples (food)."
+	if got := s.line(); got != want {
+		t.Errorf("line = %q\nwant   %q", got, want)
 	}
 }

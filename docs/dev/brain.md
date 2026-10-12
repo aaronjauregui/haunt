@@ -147,8 +147,9 @@ mood the ghost set with
 it was set), as `Your mood: …`, only while it was set today, so it
 clears with the day without a timer; it is not shown in the balloon or
 on the face. Then the lines memory brought in on the
-person's words, as `You remember, relevant now: likes apples (food).`
-(`keyed.go`): on a turn whose input is not an envelope, the words less
+person's words, as `You remember, relevant now: likes apples (food,
+2026-10-09).` (`keyed.go`), each with the date the line was kept, which
+rule 9 reads: on a turn whose input is not an envelope, the words less
 stopwords go to `Recall` for three lines, and each scoring at least
 `keyedMinScore` (0.5 BM25) is held for `keyedSticky` (3) turns, then
 cannot fire again for `keyedCooldown` (10). A word that names a topic
@@ -199,7 +200,9 @@ the model is better off knowing why it will be asked or refused.
    so part 1 differs between the two modes and the cached prefix
    changes once when a conversation opens and once when it ends.
 9. Memory: `remember`, `forget`, `recall`, `rewrite_notes`; a dropped
-   goal is `set_aside` and a finished one `resolve`, not a memory.
+   goal is `set_aside` and a finished one `resolve`, not a memory. When
+   two lines disagree the later date is right, and the new one is
+   remembered with `replaces` naming the old.
 10. Other ghosts are not you and not the person; with `tell`, answer one
     with `tell` or not at all.
 
@@ -359,7 +362,8 @@ same way.
 | `leave_note` | `text`, `picture?` | taint on cloud; three up at most; a known picture |
 | `mood` | `text` (one line, under 120 characters) | taint on cloud |
 | `tell` | `ghost`, `text` | `tell`, taint |
-| `remember`, `forget` | `topic`, `line` | the echo check on cloud; labelled |
+| `remember` | `topic`, `line`, `replaces?` | the echo check on cloud; labelled; `replaces` under the source rule |
+| `forget` | `topic`, `line` | the source rule |
 | `recall` | `query` | none |
 | `rewrite_notes` | `about` (`self` or `you`), `text` | the echo check on cloud; labelled |
 | `skill_view` | `name` | none |
@@ -620,6 +624,26 @@ person typed without one is read as theirs. Text kept whole, `self.md`,
 `<!-- src t=N date -->`, as its last line (`labelled` in `trust.go`); a
 label the model wrote itself is dropped first, since the label is the
 driver's.
+
+**Past and the source rule.** A line that stops being true moves under a
+closing `## Past` heading in its topic file (`Retire` in `store.go`),
+with `<!-- retired 2026-10-12 -->` after its provenance. `remember`
+takes `replaces`, matched against the topic's facts as `Forget` matches
+(case and spacing aside); it keeps the new line, retires the match and
+answers `Kept. Retired: <old>.`, or keeps the line and lists the topic
+when nothing matches. Without `replaces`, its result lists the topic's
+other lines, up to twelve, so a contradiction is in front of the model
+while it can still fix it; no side call is made per write. Past lines
+are not facts: `parseTopicFile` splits them off, the index, its line
+counts and the FTS table never see them, and a topic left with only past
+lines drops out of the index. A file without the heading reads and
+writes as if Past did not exist. `mayRetire` is the gate on `forget` and on `replaces`:
+a line whose source is `person` goes only when `provenance(t)` is
+`person`, the person's turn with nothing read, so an event or a page
+cannot talk the ghost out of what the person said; `Retire` refuses the
+same in the store (`ErrTheirs`). Any other line goes on any turn.
+`haunt memory show` prints past lines after the facts under `past:`,
+unnumbered, so `haunt memory rm <topic> N` counts facts alone.
 
 Facts are lines in topics, never a file per fact, so the topic index in
 part 3 of the prompt stays under 1500 bytes. `self.md` and `you.md` are
