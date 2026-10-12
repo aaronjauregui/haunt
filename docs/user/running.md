@@ -60,6 +60,11 @@ resident set is who `haunt run` and the service start.
   a conversation begins ([Talking at length](#talking-at-length)); the
   keyboard is taken only while the line is open, and held keys repeat at
   the compositor's rate (sway's `repeat_rate` and `repeat_delay`).
+  Enter sends what you typed. A backslash typed just before Enter is a
+  new line instead: the backslash goes, the box grows a row (up to six,
+  then it scrolls), and what you send keeps its lines. The arrows, Home,
+  End, Backspace and Delete edit as usual; Up and Down move between the
+  lines.
   A line the ghost opens to ask you something (`ask_text`) closes on
   Enter, and anything it finishes saying meanwhile is shown when the line
   closes.
@@ -75,7 +80,8 @@ resident set is who `haunt run` and the service start.
 - **Click a note** it left on the desktop to take it down, or drag it
   where you want it ([Notes on the desktop](memory.md#notes-on-the-desktop)).
 - **From a script**, `haunt say "text"`. With several ghosts resident and
-  no `-ghost`, it goes to the one you last interacted with.
+  no `-ghost`, it goes to the one you last interacted with. A newline in
+  the text reaches the ghost as one, as a typed one does.
 
 A persona ghost is talked to in plain language. Telling it something
 about yourself is remembered; telling it it has something wrong corrects
@@ -87,8 +93,8 @@ intention ([Memory, reminders and goals](memory.md)).
 When a persona ghost keeps answering in a way you do not want, you can
 give it the opening words of its next reply, and it carries on from
 them. From a script, `haunt say -lead "Well, actually" "what do you
-think?"`. In the conversation's line, type `/lead Well, actually` and
-press Enter: nothing is sent, the line opens again empty with `(lead:
+think?"`. In the conversation's line, type `/lead Well, actually` as
+the whole text and press Enter: nothing is sent, the line opens again empty with `(lead:
 "Well, actually")` beneath the conversation, and the next line you send
 goes with it. Escape, or `/lead` on its own, takes the lead back
 without ending the conversation. A lead applies to that one reply and is
@@ -119,8 +125,13 @@ thumbnails. Your line appears there as soon as you press Enter, with
 `thinking...` ticking beneath it until the ghost's words start to
 stream in below it, or until it ends its turn without a word. The balloon
 grows until it is about 520 pixels tall; past that, the wheel over the
-ghost scrolls back through the earlier lines, three at a step, and
-anything new brings it back to the bottom. What it shows is the last 50
+ghost or over the conversation scrolls back through the earlier lines,
+three at a step, as do Shift+Up and Shift+Down, and PageUp and PageDown
+go a page at a time. Scrolled back, the view stays where it is while the
+ghost goes on talking, with a small mark beneath it while there is more
+below; at the bottom it follows what arrives, and sending a line brings
+it back to the bottom. The conversation takes the pointer: a click on it
+stays on it rather than reaching the window beneath. What it shows is the last 50
 things said this session, the same ones the wheel goes back through
 outside a conversation. The driver's own lines, such as `(looking…)` or
 a question it is putting to you, show beneath the rest until the ghost

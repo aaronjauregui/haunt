@@ -245,3 +245,24 @@ func TestLeadInTheLineAnswersAQuestion(t *testing.T) {
 		t.Errorf("answer = %q", got)
 	}
 }
+
+// TestLeadCommandIsTheWholeText: text of several lines that starts with
+// /lead is a message, not a lead.
+func TestLeadCommandIsTheWholeText(t *testing.T) {
+	g, b := typingGhost(t)
+	g.openInput()
+	typeLine(g, "/lead Well,")
+	g.onKey(textinput.KeyBackslash, true)
+	g.onKey(textinput.KeyBackslash, false)
+	g.onKey(textinput.KeyEnter, true)
+	g.onKey(textinput.KeyEnter, false)
+	typeLine(g, "what now?")
+	g.onKey(textinput.KeyEnter, true)
+	events := drain(b)
+	if len(events) != 1 || events[0].Text != "/lead Well,\nwhat now?" || events[0].Lead != "" {
+		t.Fatalf("published %+v, want the two lines as a message with no lead", events)
+	}
+	if g.input.lead != "" {
+		t.Errorf("lead = %q", g.input.lead)
+	}
+}

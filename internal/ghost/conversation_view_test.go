@@ -7,6 +7,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/aaronjauregui/haunt/internal/balloon"
 	"github.com/aaronjauregui/haunt/internal/proto"
 	"github.com/aaronjauregui/haunt/internal/shell"
 	"github.com/aaronjauregui/haunt/internal/textinput"
@@ -19,8 +20,7 @@ func convOffset(g *Ghost) (offset, lines int) {
 }
 
 // The wheel over the ghost moves the conversation's view back and forth
-// a few lines at a step, clamped at the top; new words bring it back to
-// the bottom.
+// a few lines at a step, clamped at the first line and the last.
 func TestConversationViewScrolls(t *testing.T) {
 	g := pagingGhost(t)
 	g.openInput()
@@ -48,23 +48,150 @@ func TestConversationViewScrolls(t *testing.T) {
 	if o, _ := convOffset(g); o != off-conversationScroll {
 		t.Errorf("forward from the top: offset %d, want %d", o, off-conversationScroll)
 	}
-	g.streamInConversation("And another thing")
-	if off, _ := convOffset(g); off != 0 {
-		t.Errorf("new words left the view %d lines back", off)
+	g.onScroll(1000)
+	if o, _ := convOffset(g); o != 0 {
+		t.Errorf("all the way forward: offset %d, want 0", o)
 	}
-	g.onScroll(-1)
-	g.showPaged("Said.")
-	if off, _ := convOffset(g); off != 0 {
-		t.Errorf("a finished line left the view %d lines back", off)
+	// The wheel over the panel itself does what the wheel over the ghost
+	// does.
+	g.scrollConversationPanel(-2)
+	if o, _ := convOffset(g); o != 2*conversationScroll {
+		t.Errorf("two steps over the panel: offset %d, want %d", o, 2*conversationScroll)
 	}
-	// Outside a conversation the wheel is recall's, as ever.
+	// Outside a conversation the wheel is recall's, as ever, and the
+	// panel's wheel does nothing.
 	g.endConversation("test")
+	g.scrollConversationPanel(-1)
 	g.onScroll(-1)
 	g.recallMu.Lock()
 	browsing := g.recall.gen != 0
 	g.recallMu.Unlock()
 	if !browsing {
 		t.Error("after the conversation the wheel did not go back through what was said")
+	}
+}
+
+// Scrolled back, the view holds its place as the ghost's words arrive
+// and as its finished line is said: the lines on screen stay on screen.
+// At the bottom it follows them, and the person's own line brings it
+// back to the bottom.
+func TestConversationViewHoldsItsPlace(t *testing.T) {
+	g := pagingGhost(t)
+	g.curiosity = newCuriosity(0, &memStore{m: map[string]string{}}, g.log)
+	g.openInput()
+	for range 6 {
+		g.showPaged(longLine[:300])
+	}
+	g.onScroll(-2)
+	off, lines := convOffset(g)
+	fromTop := lines - off
+	g.streamInConversation("And another thing")
+	g.streamInConversation("And another thing, which goes on for a while, " + longLine[:200])
+	o, l := convOffset(g)
+	if l <= lines || l-o != fromTop {
+		t.Errorf("words streamed in: offset %d of %d lines, the top of the view moved from %d to %d", o, l, fromTop, l-o)
+	}
+	g.showPaged("And another thing, which goes on for a while, " + longLine[:200])
+	if o, l := convOffset(g); l-o != fromTop {
+		t.Errorf("the line was said: the top of the view moved from %d to %d", fromTop, l-o)
+	}
+	g.statusInConversation("(looking…)")
+	if o, l := convOffset(g); l-o != fromTop {
+		t.Errorf("a status line: the top of the view moved from %d to %d", fromTop, l-o)
+	}
+	g.statusInConversation("")
+
+	g.onScroll(1000)
+	g.streamInConversation("More")
+	if o, _ := convOffset(g); o != 0 {
+		t.Errorf("at the bottom, new words left the view %d lines back", o)
+	}
+	g.showPaged("More.")
+	g.onScroll(-1)
+	typeString(g, "and you")
+	g.onKey(textinput.KeyEnter, true)
+	if o, _ := convOffset(g); o != 0 {
+		t.Errorf("the person's line left the view %d lines back", o)
+	}
+}
+
+// The keyboard scrolls the view while the box has it: PageUp and PageDown
+// by a page, Shift with Up or Down by a step of the wheel, clamped like
+// the wheel; none of them touch what is being typed.
+func TestConversationViewKeyboardScroll(t *testing.T) {
+	g := pagingGhost(t)
+	g.openInput()
+	for range 15 {
+		g.showPaged(longLine[:300])
+	}
+	typeString(g, "half")
+	key := func(code uint32) {
+		g.onKey(code, true)
+		g.onKey(code, false)
+	}
+	page := g.renderer().ConversationLines() - 1
+	key(textinput.KeyPageUp)
+	if o, _ := convOffset(g); o != page {
+		t.Errorf("PageUp: offset %d, want %d", o, page)
+	}
+	g.onKey(textinput.KeyLeftShift, true)
+	key(textinput.KeyUp)
+	g.onKey(textinput.KeyLeftShift, false)
+	if o, _ := convOffset(g); o != page+conversationScroll {
+		t.Errorf("Shift+Up: offset %d, want %d", o, page+conversationScroll)
+	}
+	g.onKey(textinput.KeyRightShift, true)
+	key(textinput.KeyDown)
+	g.onKey(textinput.KeyRightShift, false)
+	key(textinput.KeyPageDown)
+	if o, _ := convOffset(g); o != 0 {
+		t.Errorf("Shift+Down then PageDown: offset %d, want 0", o)
+	}
+	key(textinput.KeyPageDown)
+	if o, _ := convOffset(g); o != 0 {
+		t.Errorf("PageDown at the bottom: offset %d", o)
+	}
+	for range 50 {
+		key(textinput.KeyPageUp)
+	}
+	if o, l := convOffset(g); o != l-g.renderer().ConversationLines() {
+		t.Errorf("PageUp to the top: offset %d of %d lines", o, l)
+	}
+	g.inputMu.Lock()
+	text := g.input.editor.Text()
+	g.inputMu.Unlock()
+	if text != "half" {
+		t.Errorf("scrolling changed the line to %q", text)
+	}
+}
+
+// The box grows a row for each line typed with backslash-Enter, and the
+// view gives up a row of transcript for each.
+func TestConversationBoxGrows(t *testing.T) {
+	g := pagingGhost(t)
+	g.openInput()
+	for range 6 {
+		g.showPaged(longLine[:300])
+	}
+	_, top := g.conversationView(g.renderer(), balloon.InputBox{}, "")
+	room := func() int {
+		g.convMu.Lock()
+		defer g.convMu.Unlock()
+		return g.conv.room
+	}
+	one := room()
+	typeString(g, "one")
+	g.onKey(textinput.KeyBackslash, true)
+	g.onKey(textinput.KeyEnter, true)
+	typeString(g, "two")
+	if got := room(); got != one-1 || top != 0 {
+		t.Errorf("a two-line box leaves %d lines of room, want %d", got, one-1)
+	}
+	g.inputMu.Lock()
+	text := g.input.editor.Text()
+	g.inputMu.Unlock()
+	if text != "one\ntwo" {
+		t.Errorf("the box holds %q", text)
 	}
 }
 

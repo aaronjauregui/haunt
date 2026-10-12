@@ -240,3 +240,41 @@ func TestLineHeldWhileTyping(t *testing.T) {
 		t.Fatal("the held line was not shown when the input line closed")
 	}
 }
+
+// A backslash and Enter is a new line in the box, the backslash gone;
+// Enter then sends both lines as one message, newline and all, and the
+// conversation's view has it as the person said it. A line the driver
+// opened for its own question takes the newline the same way.
+func TestBackslashEnterIsANewLine(t *testing.T) {
+	g, b := typingGhost(t)
+	g.openInput()
+	typeString(g, "first line")
+	g.onKey(textinput.KeyBackslash, true)
+	g.onKey(textinput.KeyBackslash, false)
+	g.onKey(textinput.KeyEnter, true)
+	g.onKey(textinput.KeyEnter, false)
+	if events := drain(b); len(events) != 0 {
+		t.Fatalf("backslash-Enter sent %+v", events)
+	}
+	typeString(g, "second line")
+	g.onKey(textinput.KeyEnter, true)
+	events := drain(b)
+	if len(events) != 1 || events[0].Type != proto.EventMessage || events[0].Text != "first line\nsecond line" {
+		t.Fatalf("published %+v, want one message of two lines", events)
+	}
+	if got := lastRecalled(g); !got.you || got.text != "first line\nsecond line" {
+		t.Errorf("the view has %+v", got)
+	}
+	g.endConversation("test")
+
+	reply := make(chan string, 1)
+	g.openInputWithReply(reply)
+	typeString(g, "yes")
+	g.onKey(textinput.KeyBackslash, true)
+	g.onKey(textinput.KeyEnter, true)
+	typeString(g, "and no")
+	g.onKey(textinput.KeyEnter, true)
+	if got := <-reply; got != "yes\nand no" {
+		t.Errorf("the question was answered %q", got)
+	}
+}

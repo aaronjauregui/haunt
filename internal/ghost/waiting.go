@@ -312,7 +312,7 @@ func (g *Ghost) waitInConversation(text string, frame int) bool {
 		g.convMu.Unlock()
 		return true
 	}
-	g.conv.status, g.conv.waitStatus, g.conv.offset = line, line, 0
+	g.conv.status, g.conv.waitStatus = line, line
 	g.convMu.Unlock()
 	g.drawInput()
 	return true

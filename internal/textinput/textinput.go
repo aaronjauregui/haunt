@@ -1,4 +1,6 @@
-// Package textinput turns keyboard events into an editable line of text.
+// Package textinput turns keyboard events into editable text: a line, or
+// several when the person asks for a new one with a backslash before
+// Enter.
 //
 // Keys arrive from Wayland as Linux evdev scancodes, and turning those into
 // characters is properly the job of libxkbcommon — which is cgo, and the
@@ -14,6 +16,7 @@ import "strings"
 const (
 	KeyEsc        = 1
 	KeyBackspace  = 14
+	KeyBackslash  = 43
 	KeyEnter      = 28
 	KeyLeftCtrl   = 29
 	KeyLeftShift  = 42
@@ -22,6 +25,15 @@ const (
 	KeySpace      = 57
 	KeyKPEnter    = 96
 	KeyRightCtrl  = 97
+	KeyHome       = 102
+	KeyUp         = 103
+	KeyPageUp     = 104
+	KeyLeft       = 105
+	KeyRight      = 106
+	KeyEnd        = 107
+	KeyDown       = 108
+	KeyPageDown   = 109
+	KeyDelete     = 111
 )
 
 // usLayout maps scancode to its unshifted and shifted characters. Codes not
@@ -100,34 +112,54 @@ func IsShift(code uint32) bool {
 	return code == KeyLeftShift || code == KeyRightShift
 }
 
-// Repeats reports whether holding a key should repeat it: Backspace and
-// every key that types a character. Enter and Escape do not — a held Enter
-// would send one line and then start on the next.
+// Repeats reports whether holding a key should repeat it: Backspace,
+// Delete, the arrows, the page keys and every key that types a character.
+// Enter and Escape do not — a held Enter would send one line and then
+// start on the next.
 func Repeats(code uint32) bool {
-	if code == KeyBackspace {
+	switch code {
+	case KeyBackspace, KeyDelete, KeyLeft, KeyRight, KeyUp, KeyDown, KeyPageUp, KeyPageDown:
 		return true
 	}
 	_, ok := usLayout[code]
 	return ok
 }
 
-// Action is what a key press means to the editor beyond inserting text.
+// Action is what a key press means to the editor beyond editing the text.
 type Action int
 
 const (
 	ActionNone   Action = iota
-	ActionSubmit        // Enter: hand the line to the ghost
-	ActionCancel        // Escape: abandon the line
+	ActionSubmit        // Enter: hand the text to the ghost
+	ActionCancel        // Escape: abandon the text
+	// The keys that move what is shown above the text rather than the
+	// text itself, which the editor has no use for: PageUp and PageDown a
+	// page, Shift+Up and Shift+Down a few lines. Shift because it is the
+	// one modifier the editor tracks, and plain Up and Down are the
+	// editor's own, moving between lines.
+	ActionPageBack
+	ActionPageForward
+	ActionScrollBack
+	ActionScrollForward
 )
 
-// MaxLength bounds a line, so a stuck key cannot grow the buffer without
-// limit or hand a model an enormous prompt.
+// MaxLength bounds the text, so a stuck key cannot grow the buffer without
+// limit or hand a model an enormous prompt. A newline counts as one.
 const MaxLength = 500
 
-// Editor is one line being typed.
+// Editor is text being typed, with a cursor in it.
+//
+// Enter submits, unless the character before the cursor is a backslash:
+// then the backslash goes and a newline takes its place, which is how a
+// person writes more than one line in a box where Enter sends. A
+// backslash anywhere else is a backslash, and one at the end of what is
+// sent is sent.
 type Editor struct {
 	text  []rune
 	shift bool
+	// cursor is the rune index the next character goes in at, from 0 to
+	// len(text).
+	cursor int
 }
 
 // Key applies a key event. down distinguishes press from release; only
@@ -137,6 +169,11 @@ type Editor struct {
 // Shift is tracked from the key events themselves rather than from
 // wl_keyboard's modifier mask, which is expressed in xkb terms this package
 // deliberately does not understand.
+//
+// Left and Right move the cursor a character, Home and End to the ends of
+// its line, and Up and Down to the line above or below at the same column
+// (or the end of a shorter one). On the first line Up, and on the last
+// Down, do nothing, as they do in a single line.
 func (e *Editor) Key(code uint32, down bool) Action {
 	if IsShift(code) {
 		e.shift = down
@@ -145,29 +182,96 @@ func (e *Editor) Key(code uint32, down bool) Action {
 	if !down {
 		return ActionNone
 	}
+	e.cursor = min(max(e.cursor, 0), len(e.text))
 	switch code {
 	case KeyEnter, KeyKPEnter:
+		if e.cursor > 0 && e.text[e.cursor-1] == '\\' {
+			e.text[e.cursor-1] = '\n'
+			return ActionNone
+		}
 		return ActionSubmit
 	case KeyEsc:
 		return ActionCancel
 	case KeyBackspace:
-		if len(e.text) > 0 {
-			e.text = e.text[:len(e.text)-1]
+		if e.cursor > 0 {
+			e.text = append(e.text[:e.cursor-1], e.text[e.cursor:]...)
+			e.cursor--
 		}
 		return ActionNone
+	case KeyDelete:
+		if e.cursor < len(e.text) {
+			e.text = append(e.text[:e.cursor], e.text[e.cursor+1:]...)
+		}
+		return ActionNone
+	case KeyLeft:
+		e.cursor = max(e.cursor-1, 0)
+		return ActionNone
+	case KeyRight:
+		e.cursor = min(e.cursor+1, len(e.text))
+		return ActionNone
+	case KeyHome:
+		e.cursor = e.lineStart(e.cursor)
+		return ActionNone
+	case KeyEnd:
+		e.cursor = e.lineEnd(e.cursor)
+		return ActionNone
+	case KeyUp:
+		if e.shift {
+			return ActionScrollBack
+		}
+		if start := e.lineStart(e.cursor); start > 0 {
+			col := e.cursor - start
+			prev := e.lineStart(start - 1)
+			e.cursor = min(prev+col, start-1)
+		}
+		return ActionNone
+	case KeyDown:
+		if e.shift {
+			return ActionScrollForward
+		}
+		if end := e.lineEnd(e.cursor); end < len(e.text) {
+			col := e.cursor - e.lineStart(e.cursor)
+			e.cursor = min(end+1+col, e.lineEnd(end+1))
+		}
+		return ActionNone
+	case KeyPageUp:
+		return ActionPageBack
+	case KeyPageDown:
+		return ActionPageForward
 	}
 	if r, ok := Rune(code, e.shift); ok && len(e.text) < MaxLength {
-		e.text = append(e.text, r)
+		e.text = append(e.text[:e.cursor], append([]rune{r}, e.text[e.cursor:]...)...)
+		e.cursor++
 	}
 	return ActionNone
 }
 
-// Text is the line as typed.
+// lineStart is the index of the first rune of the line holding i.
+func (e *Editor) lineStart(i int) int {
+	for i > 0 && e.text[i-1] != '\n' {
+		i--
+	}
+	return i
+}
+
+// lineEnd is the index of the newline ending the line holding i, or the
+// end of the text on the last line.
+func (e *Editor) lineEnd(i int) int {
+	for i < len(e.text) && e.text[i] != '\n' {
+		i++
+	}
+	return i
+}
+
+// Text is the text as typed, newlines and all.
 func (e *Editor) Text() string { return string(e.text) }
+
+// Cursor is the cursor's rune index into Text.
+func (e *Editor) Cursor() int { return min(max(e.cursor, 0), len(e.text)) }
 
 // Empty reports whether anything has been typed.
 func (e *Editor) Empty() bool { return len(strings.TrimSpace(string(e.text))) == 0 }
 
-// Reset clears the line, keeping modifier state — releasing shift after a
+// Reset clears the text, keeping modifier state — releasing shift after a
 // submit must not leave the next line stuck in capitals.
-func (e *Editor) Reset() { e.text = e.text[:0] }
+func (e *Editor) Reset() { e.text, e.cursor = e.text[:0], 0 }

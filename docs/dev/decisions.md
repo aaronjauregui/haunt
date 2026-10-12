@@ -180,9 +180,13 @@ constraint on changes, not a history.
   its own line would hide the reply that arrived meanwhile.
 - **A conversation is a mode of the balloon, not a panel.** Typing at a
   ghost widens the balloon and keeps the line open between messages; it
-  stays an image on a pass-through surface, with no input region,
-  selection or scrollbar of its own, and the wheel over the ghost is
-  what scrolls it. Nothing in it expires while it is open: a reply that
+  stays an image, with no selection or scrollbar of its own. It is the
+  one balloon with an input region, so the wheel over it scrolls it as
+  the wheel over the ghost does: a person reading back looks at the
+  words, not at the ghost. The cost is that a click on it stays on it
+  instead of reaching the window beneath, which while a conversation
+  holds the keyboard is no loss. Scrolled back, it holds its place as
+  the ghost talks; only the person's own line brings it to the bottom. Nothing in it expires while it is open: a reply that
   went away while the person was still reading it would be the driver
   taking the conversation back mid-sentence. A click on the ghost during
   one is a poke, not a closing; clicking away is the keyboard leaving.

@@ -1448,6 +1448,17 @@ func (g *Ghost) showLine(text string, words bool) {
 // asks no questions about quiet hours or input state — callers decide that,
 // because the input line itself must appear regardless of both.
 func (g *Ghost) showBalloonSprite(sp *sprite.Sprite) {
+	g.showBalloonSpriteScroll(sp, nil)
+}
+
+// showBalloonSpriteScroll is showBalloonSprite for a panel the wheel
+// scrolls: with onScroll set the panel takes the pointer, so the wheel
+// over it reaches onScroll, and a click on it stays on it rather than
+// falling through to the window beneath; it never moves. The
+// conversation panel is the one, since a person reading back looks at
+// the words, not at the ghost beside them. Every other balloon passes
+// the pointer through.
+func (g *Ghost) showBalloonSpriteScroll(sp *sprite.Sprite, onScroll func(steps int)) {
 	g.hideBalloon()
 	// Counted before the surface exists: this is "which line is current",
 	// which is a fact about the conversation rather than about Wayland.
@@ -1464,7 +1475,8 @@ func (g *Ghost) showBalloonSprite(sp *sprite.Sprite) {
 	// on depends on how wide it is.
 	x, y := g.balloonPos(int32(lw))
 	bln, err := g.app.CreateSpriteOpts(sp, x, y, wlclient.SurfaceOptions{
-		PassThrough: true,
+		PassThrough: onScroll == nil,
+		Fixed:       onScroll != nil,
 		LogicalW:    int32(lw),
 		LogicalH:    int32(lh),
 	})
@@ -1472,6 +1484,7 @@ func (g *Ghost) showBalloonSprite(sp *sprite.Sprite) {
 		g.log.Warn(hlog.Balloon, "balloon failed: %v", err)
 		return
 	}
+	bln.OnScroll = onScroll
 	g.blnMu.Lock()
 	g.bln = bln
 	g.blnWaiting = false
