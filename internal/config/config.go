@@ -537,5 +537,9 @@ func checkModel(path, section string, c model.Config) error {
 			return fmt.Errorf("parsing %s: %s %s %d: use a number above 0, or leave it out", path, section, n.key, n.v)
 		}
 	}
+	if s := c.Slots; s != nil && (s[0] < 0 || s[1] < 0 || s[0] == s[1]) {
+		return fmt.Errorf("parsing %s: %s slots [%d, %d]: use two different slot numbers from 0, such as [0, 1], or leave it out",
+			path, section, s[0], s[1])
+	}
 	return nil
 }

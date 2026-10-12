@@ -260,7 +260,7 @@ func retryAfter(h string, now time.Time) time.Duration {
 }
 
 // body is the request as JSON: the messages, a trailing assistant message
-// for the prefill, the tools, sampling and thinking.
+// for the prefill, the tools, the slot, sampling and thinking.
 func (c *Chat) body(r Request) map[string]any {
 	msgs := make([]wireMessage, 0, len(r.Messages)+1)
 	for _, m := range r.Messages {
@@ -298,6 +298,9 @@ func (c *Chat) body(r Request) map[string]any {
 	}
 	if len(r.Stop) > 0 {
 		b["stop"] = r.Stop
+	}
+	if r.Slot != nil {
+		b["id_slot"] = *r.Slot
 	}
 	s := c.Config.Sampling.Over(r.Sampling)
 	for key, v := range map[string]*float64{

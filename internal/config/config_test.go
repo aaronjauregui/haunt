@@ -369,6 +369,29 @@ temperature = 1.1
 	}
 }
 
+// slots reads as a pair, a ghost's own replacing the troupe's, and unset
+// is nil.
+func TestSlotsLoad(t *testing.T) {
+	write(t, "[model]\nslots = [0, 1]\n\n[model.ghost.wisp]\nslots = [2, 3]\n")
+	f, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := f.ModelFor("ember").Slots; s == nil || *s != [2]int{0, 1} {
+		t.Errorf("ember's slots = %v, want [0 1]", s)
+	}
+	if s := f.ModelFor("wisp").Slots; s == nil || *s != [2]int{2, 3} {
+		t.Errorf("wisp's slots = %v, want [2 3]", s)
+	}
+	write(t, "[model]\nname = \"x\"\n")
+	if f, err = Load(); err != nil {
+		t.Fatal(err)
+	}
+	if s := f.ModelFor("wisp").Slots; s != nil {
+		t.Errorf("slots unset = %v, want nil", s)
+	}
+}
+
 // A missing [model] is the zero config: nothing to reach, nothing assumed.
 func TestNoModelIsEmpty(t *testing.T) {
 	write(t, "[quiet]\nhours = []\n")
@@ -387,6 +410,10 @@ func TestABadModelSectionNamesItself(t *testing.T) {
 		{"[model]\nthinking = \"lots\"\n", `[model] thinking "lots"`},
 		{"[model]\nbase_url = \"127.0.0.1:8080\"\n", `[model] base_url "127.0.0.1:8080"`},
 		{"[model]\nstall_timeout = -1\n", `[model] stall_timeout -1`},
+		{"[model]\nslots = [1, 1]\n", `[model] slots [1, 1]`},
+		{"[model]\nslots = [0, -1]\n", `[model] slots [0, -1]`},
+		{"[model]\nslots = [0, 1, 2]\n", `slots`},
+		{"[model.ghost.wisp]\nslots = [2, 2]\n", `[model.ghost.wisp] slots [2, 2]`},
 		{"[model.ghost.\"my ghost\"]\ntrust = \"x\"\n", `[model.ghost."my ghost"] trust "x"`},
 	} {
 		write(t, tc.body)

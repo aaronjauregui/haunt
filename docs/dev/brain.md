@@ -289,7 +289,12 @@ renders the tool declarations into the first system message (Gemma's
 does) makes the decide prompt and the speak prompt diverge there, and
 declaring the tools on the speak call too, declined with `tool_choice`,
 makes Gemma open a malformed thought channel after a tool result when
-thinking is off, so the split is accepted.
+thinking is off, so the split is accepted. Unpinned, llama-server puts both
+kinds on the slot sharing the longest prefix, so each call reprocesses
+everything after part 1. With `[model] slots` the decide rounds go to
+one slot and every call without tools to another (`id_slot`), each slot
+keeps one kind's prompt, and a call can reuse its prompt up to this
+turn's new rows, which makes the split cost little.
 
 ## The registry
 

@@ -83,3 +83,17 @@ func TestDeadlineDefaults(t *testing.T) {
 		t.Errorf("set = %v, %v", c.FirstToken(), c.Stall())
 	}
 }
+
+// A per-ghost slots replaces the troupe's pair whole; unset keeps it.
+func TestSlotsOver(t *testing.T) {
+	base := Config{Name: "gemma", Slots: &[2]int{0, 1}}
+	if got := base.Over(Config{Slots: &[2]int{2, 3}}).Slots; got == nil || *got != [2]int{2, 3} {
+		t.Errorf("Over slots = %v, want [2 3]", got)
+	}
+	if got := base.Over(Config{Name: "qwen"}).Slots; got == nil || *got != [2]int{0, 1} {
+		t.Errorf("Over without slots = %v, want the troupe's [0 1]", got)
+	}
+	if got := (Config{}).Over(Config{Name: "qwen"}).Slots; got != nil {
+		t.Errorf("Over with slots nowhere = %v, want nil", got)
+	}
+}
