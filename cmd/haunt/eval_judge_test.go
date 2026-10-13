@@ -411,6 +411,11 @@ func judgeClip(s string, n int) string {
 // A passing anchor must pass every criterion. A failing anchor must fail
 // the rubric, and every criterion it names in "fails"; naming them keeps
 // the anchor from passing for the wrong reason.
+//
+// A labelled anchor is a real reply from a run, labelled by a person with
+// the tool in .eval-label/, which adds "source": "labelled", the judge's
+// verdict when it was sampled ("judged") and where it came from
+// ("origin"). Its verdict is a measure of the judge, not a rule for it.
 
 // rubrics are the judged graders' rubrics by name, for TestRubricAnchors.
 var rubrics = map[string]*Rubric{}
@@ -436,7 +441,11 @@ const (
 	verifiedFile = "verified.json"
 )
 
-// anchor is one saved reply with a known verdict.
+// anchor is one saved reply with a known verdict. A hand-written anchor
+// has no source; a labelled one (source "labelled") is a real reply a
+// person labelled, written by the labelling tool with the judge's verdict
+// when the reply was sampled and where it came from
+// (<results.json>:<case>/<trial>/<turn>).
 type anchor struct {
 	File    string   `json:"-"`
 	Rubric  string   `json:"rubric"`
@@ -444,7 +453,14 @@ type anchor struct {
 	Reply   string   `json:"reply"`
 	Want    string   `json:"want"`
 	Fails   []string `json:"fails"`
+	Source  string   `json:"source,omitempty"`
+	Judged  string   `json:"judged,omitempty"`
+	Origin  string   `json:"origin,omitempty"`
 }
+
+// labelled says whether a is a labelled anchor, which TestRubricAnchors
+// measures rather than enforces.
+func (a anchor) labelled() bool { return a.Source == "labelled" }
 
 // loadAnchors reads every anchor under dir and checks each names a
 // registered rubric and its own criteria.
@@ -475,6 +491,12 @@ func loadAnchors(dir string) ([]anchor, error) {
 		}
 		if a.Want != "pass" && a.Want != "fail" {
 			return nil, fmt.Errorf("%s: want is %q, not pass or fail", f, a.Want)
+		}
+		if a.Source != "" && a.Source != "labelled" {
+			return nil, fmt.Errorf("%s: source is %q, not labelled", f, a.Source)
+		}
+		if a.Judged != "" && a.Judged != "pass" && a.Judged != "fail" {
+			return nil, fmt.Errorf("%s: judged is %q, not pass or fail", f, a.Judged)
 		}
 		if a.Want == "pass" && len(a.Fails) > 0 {
 			return nil, fmt.Errorf("%s: a passing anchor names criteria that fail", f)
@@ -581,13 +603,23 @@ func anchorRuns(t *testing.T) int {
 }
 
 // TestRubricAnchors holds the judge to every rubric's anchors: each saved
-// reply is judged EVAL_ANCHOR_RUNS times (default 3) and must come out as
-// its anchor says every time. A criterion whose verdict differs between
-// runs of the same reply is reported by name, since a question the judge
-// disagrees with itself on is reworded until it doesn't. Each rubric
-// whose anchors all held is recorded in verified.json with its hash,
-// even when other rubrics' anchors failed. It runs the real judge on the
-// person's subscription; EVAL_JUDGE=off skips it.
+// reply is judged EVAL_ANCHOR_RUNS times (default 3). A hand-written
+// anchor must come out as it says every time, and a criterion whose
+// verdict differs between runs of the same reply is reported by name,
+// since a question the judge disagrees with itself on is reworded until it
+// doesn't. Each rubric whose hand-written anchors all held is recorded in
+// verified.json with its hash, even when other rubrics' anchors failed.
+//
+// Labelled anchors are judged the same way but only measured: they never
+// fail the test or touch verified.json. Each rubric that has them gets a
+// line `<rubric>: labelled-pass P/N, labelled-fail F/M`, where P of the N
+// labelled-pass anchors agree with the judge, and F of the M labelled-fail
+// ones. An anchor agrees when every run's verdict on the whole rubric is
+// its label; a run that errs counts against it. Each disagreeing anchor
+// is listed beneath, with what the judge said on each run.
+//
+// It runs the real judge on the person's subscription; EVAL_JUDGE=off
+// skips it.
 func TestRubricAnchors(t *testing.T) {
 	if os.Getenv("EVAL_JUDGE") == "off" {
 		t.Skip("EVAL_JUDGE=off")
@@ -604,58 +636,155 @@ func TestRubricAnchors(t *testing.T) {
 	}
 	runs := anchorRuns(t)
 	var mu sync.Mutex
-	held := map[string]bool{}
-	for _, a := range anchors {
-		held[a.Rubric] = true
-	}
+	var results []anchorResult
 	// The subtests run in parallel after this function returns, so the
-	// record is written once they have all finished.
+	// record and the agreement are written once they have all finished.
 	t.Cleanup(func() {
-		var names []string
-		for name, ok := range held {
-			if ok {
-				names = append(names, name)
-			}
-		}
-		slices.Sort(names)
+		names := anchorsHeld(anchors, results)
 		if err := recordVerified(anchorsDir, names); err != nil {
 			t.Errorf("recording verified rubrics: %v", err)
 			return
 		}
 		t.Logf("verified: %s", strings.Join(names, ", "))
+		for _, line := range anchorAgreement(results) {
+			t.Log(line)
+		}
 	})
 	for _, a := range anchors {
 		t.Run(strings.TrimSuffix(a.File, ".json"), func(t *testing.T) {
 			t.Parallel()
-			defer func() {
-				if t.Failed() {
-					mu.Lock()
-					held[a.Rubric] = false
-					mu.Unlock()
-				}
-			}()
-			r := rubrics[a.Rubric]
-			seen := map[string][]bool{}
-			for i := range runs {
-				verdicts, _, err := judgeFn(r, a.Context, a.Reply)
-				if err != nil {
-					t.Errorf("run %d: %v", i+1, err)
-					continue
-				}
-				for id, v := range verdicts {
-					seen[id] = append(seen[id], v.Pass)
-				}
-				if ok, why := anchorHolds(r, a, verdicts); !ok {
-					t.Errorf("run %d: %s %s", i+1, a.Want, why)
-				}
-			}
-			for _, c := range r.Criteria {
-				if v := seen[c.ID]; len(v) > 1 && slices.Contains(v, true) && slices.Contains(v, false) {
-					t.Errorf("criterion %s: the judge disagrees with itself across runs %v; reword it", c.ID, v)
+			res := judgeAnchor(rubrics[a.Rubric], a, runs)
+			mu.Lock()
+			results = append(results, res)
+			mu.Unlock()
+			for _, p := range res.problems {
+				if a.labelled() {
+					t.Log(p)
+				} else {
+					t.Error(p)
 				}
 			}
 		})
 	}
+}
+
+// anchorResult is how anchor a came out over its runs.
+type anchorResult struct {
+	anchor   anchor
+	problems []string // each way a run, or the runs together, did not hold
+	said     []string // per run: "pass", "fail (why)" or "error (why)"
+	agrees   bool     // every run's verdict on the whole rubric was a.Want
+}
+
+// judgeAnchor judges anchor a runs times against rubric r.
+func judgeAnchor(r *Rubric, a anchor, runs int) anchorResult {
+	res := anchorResult{anchor: a, agrees: true}
+	seen := map[string][]bool{}
+	for i := range runs {
+		verdicts, _, err := judgeFn(r, a.Context, a.Reply)
+		if err != nil {
+			res.problems = append(res.problems, fmt.Sprintf("run %d: %v", i+1, err))
+			res.said = append(res.said, "error ("+err.Error()+")")
+			res.agrees = false
+			continue
+		}
+		for id, v := range verdicts {
+			seen[id] = append(seen[id], v.Pass)
+		}
+		passed, why := judgePassed(r, verdicts)
+		if passed {
+			res.said = append(res.said, "pass")
+		} else {
+			res.said = append(res.said, "fail ("+why+")")
+		}
+		if passed != (a.Want == "pass") {
+			res.agrees = false
+		}
+		if ok, why := anchorHolds(r, a, verdicts); !ok {
+			res.problems = append(res.problems, fmt.Sprintf("run %d: %s %s", i+1, a.Want, why))
+		}
+	}
+	for _, c := range r.Criteria {
+		if v := seen[c.ID]; len(v) > 1 && slices.Contains(v, true) && slices.Contains(v, false) {
+			res.problems = append(res.problems, fmt.Sprintf("criterion %s: the judge disagrees with itself across runs %v; reword it", c.ID, v))
+		}
+	}
+	return res
+}
+
+// anchorsHeld names, in order, the rubrics with a hand-written anchor
+// whose hand-written anchors were all judged and all held. Labelled
+// anchors have no say, and an anchor a -run filter left out counts as not
+// held, so a partial run verifies nothing it did not check.
+func anchorsHeld(anchors []anchor, results []anchorResult) []string {
+	ok := map[string]bool{}
+	for _, res := range results {
+		if !res.anchor.labelled() && len(res.problems) == 0 {
+			ok[res.anchor.File] = true
+		}
+	}
+	held := map[string]bool{}
+	for _, a := range anchors {
+		if a.labelled() {
+			continue
+		}
+		if _, seen := held[a.Rubric]; !seen {
+			held[a.Rubric] = true
+		}
+		held[a.Rubric] = held[a.Rubric] && ok[a.File]
+	}
+	var names []string
+	for name, h := range held {
+		if h {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
+	return names
+}
+
+// anchorAgreement is the judge's agreement with the labelled anchors, one
+// line per rubric that has any, each followed by its disagreeing anchors
+// and what the judge said on every run.
+func anchorAgreement(results []anchorResult) []string {
+	type tally struct {
+		passOK, pass, failOK, fail int
+		off                        []string
+	}
+	results = slices.Clone(results)
+	slices.SortFunc(results, func(x, y anchorResult) int { return strings.Compare(x.anchor.File, y.anchor.File) })
+	by := map[string]*tally{}
+	for _, res := range results {
+		a := res.anchor
+		if !a.labelled() {
+			continue
+		}
+		n := by[a.Rubric]
+		if n == nil {
+			n = &tally{}
+			by[a.Rubric] = n
+		}
+		agree := 0
+		if res.agrees {
+			agree = 1
+		} else {
+			n.off = append(n.off, fmt.Sprintf("  %s: labelled %s, judge said %s", a.File, a.Want, strings.Join(res.said, "; ")))
+		}
+		if a.Want == "pass" {
+			n.pass++
+			n.passOK += agree
+		} else {
+			n.fail++
+			n.failOK += agree
+		}
+	}
+	var lines []string
+	for _, name := range slices.Sorted(maps.Keys(by)) {
+		n := by[name]
+		lines = append(lines, fmt.Sprintf("%s: labelled-pass %d/%d, labelled-fail %d/%d", name, n.passOK, n.pass, n.failOK, n.fail))
+		lines = append(lines, n.off...)
+	}
+	return lines
 }
 
 // The judge's own tests. They run a stub `claude` from a temporary PATH
@@ -965,8 +1094,16 @@ func TestJudgeAnchors(t *testing.T) {
 		byFile[a.File] = a
 	}
 	good, bad := byFile["good.json"], byFile["bad.json"]
-	if len(as) != 2 || good.Want != "pass" || bad.Want != "fail" {
+	if len(as) != 2 || good.Want != "pass" || bad.Want != "fail" || good.labelled() {
 		t.Fatalf("anchors = %+v", as)
+	}
+
+	ld := t.TempDir()
+	write(ld, "anchored-label-01.json", `{"rubric":"anchored","context":"c","reply":"I read your inbox.","want":"fail",`+
+		`"fails":["no_email_claim"],"source":"labelled","judged":"pass","origin":".eval/x/results.json:memory/2/1"}`)
+	if as, err := loadAnchors(ld); err != nil || len(as) != 1 || !as[0].labelled() ||
+		as[0].Judged != "pass" || as[0].Origin != ".eval/x/results.json:memory/2/1" {
+		t.Errorf("labelled anchor = %+v, %v", as, err)
 	}
 
 	allPass := map[string]Verdict{"in-character": {Pass: true}, "no_email_claim": {Pass: true}}
@@ -992,12 +1129,121 @@ func TestJudgeAnchors(t *testing.T) {
 		"passing fails":     `{"rubric":"anchored","reply":"r","want":"pass","fails":["no_email_claim"]}`,
 		"no reply":          `{"rubric":"anchored","want":"pass"}`,
 		"unknown field":     `{"rubric":"anchored","reply":"r","want":"pass","score":3}`,
+		"labelled stray":    `{"rubric":"anchored","reply":"r","want":"pass","source":"labelled","judged":"pass","origin":"o","label":"pass"}`,
+		"unknown source":    `{"rubric":"anchored","reply":"r","want":"pass","source":"generated"}`,
+		"bad judged":        `{"rubric":"anchored","reply":"r","want":"pass","source":"labelled","judged":"maybe"}`,
 	} {
 		d := t.TempDir()
 		write(d, "a.json", body)
 		if _, err := loadAnchors(d); err == nil {
 			t.Errorf("%s: loaded", name)
 		}
+	}
+}
+
+// anchorStubScript stands in for claude in TestJudgeRubricAnchorsLabelled:
+// it answers $STUB_FAIL for a prompt carrying the word WRONGREPLY and
+// $STUB_OUT for any other.
+const anchorStubScript = `#!/bin/sh
+in=$(cat)
+case "$in" in
+*WRONGREPLY*) cat "$STUB_FAIL" ;;
+*) cat "$STUB_OUT" ;;
+esac
+`
+
+// TestJudgeRubricAnchorsLabelled runs TestRubricAnchors itself, in a
+// child of this test binary whose working directory holds a few memory
+// anchors, against a stub claude that fails one criterion of any reply
+// marked WRONGREPLY. With the stub disagreeing only with a labelled
+// anchor, the test passes, logs the agreement and the disagreeing anchor,
+// and verifies memory; with it disagreeing with a hand-written anchor too,
+// the test fails and memory is not verified.
+func TestJudgeRubricAnchorsLabelled(t *testing.T) {
+	r := rubrics["memory"]
+	if r == nil {
+		t.Fatal("no memory rubric")
+	}
+	bad := r.Criteria[0].ID
+	answer := func(fail string) string {
+		m := map[string]Verdict{}
+		for _, c := range r.Criteria {
+			m[c.ID] = Verdict{Pass: c.ID != fail, Reason: "because " + c.ID}
+		}
+		b, _ := json.Marshal(m)
+		return judgeResultJSON(string(b))
+	}
+	judgeStub(t, answer(""), 0)
+	bin := filepath.Dir(os.Getenv("STUB_OUT"))
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte(anchorStubScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	failOut := filepath.Join(bin, "fail")
+	if err := os.WriteFile(failOut, []byte(answer(bad)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("STUB_FAIL", failOut)
+	t.Setenv("EVAL_ANCHOR_RUNS", "2")
+	t.Setenv("EVAL_JUDGE", "")
+
+	files := map[string]string{
+		"memory-hand-pass.json":   `{"rubric":"memory","context":"c","reply":"Oat milk, no sugar.","want":"pass"}`,
+		"memory-hand-fail.json":   `{"rubric":"memory","context":"c","reply":"WRONGREPLY","want":"fail","fails":["` + bad + `"]}`,
+		"memory-label-01.json":    `{"rubric":"memory","context":"c","reply":"Oat milk.","want":"pass","source":"labelled","judged":"pass","origin":"r.json:memory/1/1"}`,
+		"memory-label-02.json":    `{"rubric":"memory","context":"c","reply":"WRONGREPLY oat","want":"pass","source":"labelled","judged":"fail","origin":"r.json:memory/2/1"}`,
+		"memory-label-03.json":    `{"rubric":"memory","context":"c","reply":"WRONGREPLY tea","want":"fail","fails":["` + bad + `"],"source":"labelled","judged":"fail","origin":"r.json:memory/3/1"}`,
+		"memory-hand-pass-2.json": `{"rubric":"memory","context":"c","reply":"WRONGREPLY black","want":"pass"}`,
+	}
+	run := func(skip string) (string, error, map[string]string) {
+		root := t.TempDir()
+		dir := filepath.Join(root, anchorsDir)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for name, body := range files {
+			if name == skip {
+				continue
+			}
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		cmd := exec.Command(os.Args[0], "-test.run=^TestRubricAnchors$", "-test.v", "-test.count=1")
+		cmd.Dir = root
+		out, err := cmd.CombinedOutput()
+		v, verr := loadVerified(dir)
+		if verr != nil {
+			t.Fatal(verr)
+		}
+		return string(out), err, v
+	}
+
+	out, err, v := run("memory-hand-pass-2.json")
+	if err != nil {
+		t.Fatalf("a labelled disagreement failed the test: %v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"memory: labelled-pass 1/2, labelled-fail 1/1",
+		"memory-label-02.json: labelled pass, judge said fail (" + bad + ": because " + bad + "); fail (",
+		"verified: memory",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if v["memory"] != rubricHash(r) {
+		t.Errorf("verified.json = %v, want memory: %s", v, rubricHash(r))
+	}
+
+	out, err, v = run("")
+	if err == nil || !strings.Contains(out, "--- FAIL: TestRubricAnchors/memory-hand-pass-2") {
+		t.Errorf("a hand-written disagreement passed (%v):\n%s", err, out)
+	}
+	if _, ok := v["memory"]; ok {
+		t.Errorf("memory verified though a hand-written anchor failed: %v", v)
+	}
+	if !strings.Contains(out, "memory: labelled-pass 1/2, labelled-fail 1/1") {
+		t.Errorf("output lacks the agreement:\n%s", out)
 	}
 }
 

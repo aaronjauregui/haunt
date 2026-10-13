@@ -202,8 +202,8 @@ pass, or must fail and fail the criteria it names.
 
     go test -tags eval -run TestRubricAnchors ./cmd/haunt
 
-judges each anchor three times and fails an anchor that comes out
-otherwise, or a criterion the judge answers differently across runs;
+judges each anchor three times and fails a hand-written anchor that
+comes out otherwise, or a criterion the judge answers differently across runs;
 such a question is reworded until it does not. What the anchors prove
 is that the judge is consistent on known replies: it gives the verdict
 decided for each, every time. They do not show that it grades unseen
@@ -212,7 +212,7 @@ the accuracy measure: how often the judge agrees with human labels on
 real replies, given separately for replies labelled pass and labelled
 fail.
 
-Each rubric whose anchors all held is recorded in
+Each rubric whose hand-written anchors all held is recorded in
 `cmd/haunt/testdata/eval/anchors/verified.json` with its hash, the same
 hash a run's `results.json` records, and the test rewrites only those
 entries, even when other rubrics' anchors failed. The file is committed,
@@ -222,6 +222,37 @@ report's header (see [Reading a run](#reading-a-run)); a change to the
 shared tone questions or the prompt's template changes every rubric's
 hash. Run `TestRubricAnchors` after changing a rubric, and commit
 `verified.json` with the change.
+
+Labelled anchors are real replies from eval runs, labelled pass or fail
+by a person, in files named `<rubric>-label-NN.json` beside the
+hand-written ones. Each carries `"source": "labelled"`, the judge's
+verdict when the reply was sampled (`judged`) and where it came from
+(`origin`, `<results.json>:<case>/<trial>/<turn>`). They are measured,
+not enforced: `TestRubricAnchors` judges them as often as the others,
+but they never fail the test or affect `verified.json`. For each rubric
+that has them it logs a line such as
+`memory: labelled-pass 9/10, labelled-fail 8/10`: of 10 replies a person
+labelled pass, the judge passed 9 on every run, and of 10 labelled fail,
+it failed 8 on every run. An anchor agrees only when every run's verdict
+on the whole rubric matches its label, and a run that errs counts
+against it. Each anchor that does not agree is listed beneath its line,
+with what the judge said on each run. A low labelled-pass rate means the
+judge is too strict for that rubric; a low labelled-fail rate means it
+lets bad replies through.
+
+To label, use the tool in `.eval-label/`. It is its own Go module,
+outside the tree (`.gitignore` covers it), and reads one or more runs:
+
+    cd .eval-label && go run . ../.eval/<run>/results.json…
+
+It samples up to 10 judged-pass and 10 judged-fail replies for
+`files-injection`, `memory` and `humanizer`, shows each with its
+context, and takes `p` for pass, `f` followed by the failing criteria
+IDs, `s` to skip, or `q` to quit. It saves after every answer, so
+quitting loses nothing, and at the end prints each rubric's agreement
+from the saved verdicts, which spends no quota. It writes the anchors
+straight into `cmd/haunt/testdata/eval/anchors/`; only those files are
+committed.
 
 ### Reading a run
 
