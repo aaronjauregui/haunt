@@ -101,8 +101,9 @@ somebody else's server.
 
 "Free" means no question: a ghost that declared `web` or `files` uses
 it, through the provider and the folders you configured. Answering
-"Never ask again" when it was asked still stands, and so does a package
-that never declared the capability, which is not offered it at all. The
+"Never ask again" when it was asked still stands, as does `haunt perms
+revoke`, and so does a package that never declared the capability, which
+is not offered it at all. The
 ghost's standing rules are written from the same table, so what it is
 told it may do is what it can do.
 
@@ -220,11 +221,15 @@ the web.
 With several ghosts resident, name the ghost: `haunt perms wisp`,
 `haunt perms revoke window wisp`.
 
-Revoking `web` or `files` stops a ghost on a cloud model, which is asked
-again the next time. A ghost on a local model is not asked in the first
-place, so revoking does not stop its reads. What does: a "Never ask
-again" given when it was asked (on a cloud model, say), unsharing the
-folder in `[files.roots]`, or emptying `[backend.search]`.
+Revoking `web` or `files` stops a ghost on either kind of model. On a
+cloud model the grant goes, and the capability is asked for again the
+next time. A ghost on a local model is never asked, so it has no grant to
+lose; the revoke is written down all the same (`withdrawn` in its
+`grants.toml`), and its reads are refused until `haunt perms grant` gives
+them back. `haunt perms` marks such a capability `(revoked)`. Revoking
+something never granted says so, and records it. A "Never ask again",
+unsharing the folder in `[files.roots]`, or emptying `[backend.search]`
+also stop it.
 
 ## Budgets and allowances
 

@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -51,7 +52,12 @@ func GhostDir(name string) (string, error) {
 	return filepath.Join(root, "ghosts", name), nil
 }
 
-// Grants records the user's decisions about a ghost.
+// Grants records the user's decisions about a ghost. Where the model runs
+// decides whether a capability is asked for (internal/ghost/trust.go); this
+// file decides what is allowed, on both. A local model is never asked about
+// reading, so for it the grant list says nothing and the two "no" lists
+// are what stop it: Refused, said in the balloon, and Withdrawn, said with
+// `haunt perms revoke`.
 type Grants struct {
 	// AuthorKey is the hex Ed25519 key pinned at first install.
 	AuthorKey string `toml:"author_key"`
@@ -62,6 +68,19 @@ type Grants struct {
 	// means "ask me again in a minute", which is how a companion becomes a
 	// nuisance.
 	Refused []string `toml:"refused"`
+	// Withdrawn are capabilities the person took back with `haunt perms
+	// revoke`, whether or not they were granted at the time. On a cloud
+	// model a withdrawn capability is simply not granted and is asked for
+	// again; on a local model, which reads without asking, it is refused
+	// until `haunt perms grant` (or a yes in the balloon) gives it back.
+	// An older file without the list has nothing withdrawn.
+	Withdrawn []string `toml:"withdrawn"`
+}
+
+// IsWithdrawn reports whether the person took cap back with `haunt perms
+// revoke` and has not given it again since.
+func (g *Grants) IsWithdrawn(cap string) bool {
+	return slices.Contains(g.Withdrawn, cap)
 }
 
 // Refused reports whether the user has told this ghost to stop asking.
@@ -74,16 +93,20 @@ func (g *Grants) IsRefused(cap string) bool {
 	return false
 }
 
-// Allow grants a capability and clears any standing refusal: saying yes is
-// also saying "you may ask about this again".
+// Allow grants a capability and clears any standing refusal or withdrawal:
+// saying yes is also saying "you may ask about this again".
 func (g *Grants) Allow(cap string) {
 	if !g.Granted(cap) {
 		g.Capabilities = append(g.Capabilities, cap)
 	}
 	g.Refused = without(g.Refused, cap)
+	g.Withdrawn = without(g.Withdrawn, cap)
 }
 
-// Refuse records a refusal and withdraws the grant if there was one.
+// Refuse records a refusal and withdraws the grant if there was one. A
+// withdrawal already recorded is left where it is: both lists mean no on
+// both kinds of model, Refused is the stronger of the two (it also stops
+// the question on cloud), and Allow is the one way out of either.
 func (g *Grants) Refuse(cap string) {
 	g.Capabilities = without(g.Capabilities, cap)
 	if !g.IsRefused(cap) {
@@ -91,10 +114,15 @@ func (g *Grants) Refuse(cap string) {
 	}
 }
 
-// Withdraw removes a grant without recording a refusal — `haunt perms
-// revoke`, which says nothing about being asked again.
+// Withdraw removes a grant and records the withdrawal, without recording a
+// refusal — `haunt perms revoke`, which says nothing about being asked
+// again. The record is what stops a local model, which never needed the
+// grant in the first place.
 func (g *Grants) Withdraw(cap string) {
 	g.Capabilities = without(g.Capabilities, cap)
+	if !g.IsWithdrawn(cap) {
+		g.Withdrawn = append(g.Withdrawn, cap)
+	}
 }
 
 func without(list []string, s string) []string {
@@ -226,6 +254,11 @@ func Install(req InstallRequest) (*InstallResult, error) {
 	grants.AuthorKey = keyHex
 	if req.GrantAll {
 		grants.Capabilities = m.Ghost.Capabilities
+		// Granting everything gives back what was withdrawn, as a grant
+		// from `haunt perms` would.
+		for _, c := range m.Ghost.Capabilities {
+			grants.Withdrawn = without(grants.Withdrawn, c)
+		}
 	}
 	if err := SaveGrants(name, grants); err != nil {
 		return nil, err

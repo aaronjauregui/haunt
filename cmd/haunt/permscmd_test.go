@@ -101,8 +101,24 @@ wasm = "brain.wasm"
 		t.Errorf("second grant: %s", out)
 	}
 	run("perms", "revoke", "llm")
-	if out := run("perms", "revoke", "llm"); !strings.Contains(out, "does not have") {
+	if out := run("perms", "revoke", "llm"); !strings.Contains(out, "already revoked") {
 		t.Errorf("second revoke: %s", out)
+	}
+
+	// Revoking what was never granted is recorded, not waved off: a local
+	// model reads without a grant, and the record is what stops it. The
+	// listing says so, and a grant clears it.
+	if out := run("perms", "revoke", "window"); !strings.Contains(out, "revoked window") || !strings.Contains(out, "held no grant") {
+		t.Errorf("revoking an ungranted capability: %s", out)
+	}
+	if out := run("perms"); !strings.Contains(out, "[no ] window") || !strings.Contains(out, "(revoked") {
+		t.Errorf("listing after revoking an ungranted capability:\n%s", out)
+	}
+	if out := run("perms", "grant", "window"); !strings.Contains(out, "granted window") {
+		t.Errorf("granting a revoked capability: %s", out)
+	}
+	if out := run("perms"); !strings.Contains(out, "[yes] window") || strings.Contains(out, "its title  (revoked") {
+		t.Errorf("listing after granting a revoked capability:\n%s", out)
 	}
 
 	// Granting something the ghost never asked for would be theatre: the

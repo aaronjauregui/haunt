@@ -141,6 +141,11 @@ type Options struct {
 	// Refused reports a standing "never ask me about this again", so the
 	// question is not raised a second time. Nil means nothing was refused.
 	Refused func(cap string) bool
+	// Withdrawn reports a capability taken back with `haunt perms revoke`.
+	// It matters only where nothing is asked (reading on a local model):
+	// elsewhere the revoke removed the grant, and the grant is what is
+	// checked. Nil means nothing was withdrawn.
+	Withdrawn func(cap string) bool
 	// Spots, when set, keeps this ghost from opening on top of another
 	// one. Nil means nothing else is on screen to avoid.
 	Spots Spots

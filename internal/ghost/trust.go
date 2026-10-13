@@ -100,7 +100,8 @@ type need uint8
 const (
 	// needConsent is the capability, asked for in the balloon the first
 	// time it is used. Without it the verb runs once the package declared
-	// the capability, unless the person refused it for good.
+	// the capability, unless the person refused it for good or took it
+	// back with `haunt perms revoke`.
 	needConsent need = 1 << iota
 	// needPolicy is the config's unprompted policy for a turn nobody
 	// started ([backend.search] unprompted, [files] unprompted).
@@ -191,6 +192,10 @@ func (g *Ghost) readGate(cap, mode string, spend func() error) error {
 		// Free is free of the question, not of the answer: "never ask
 		// again" still means no.
 		return refuse("the %s capability was refused", cap)
+	} else if g.opts.Withdrawn != nil && g.opts.Withdrawn(cap) {
+		// Nor of `haunt perms revoke`: the grants file says what is
+		// allowed on both, and trust only decides whether to ask.
+		return refuse("the %s capability was revoked", cap)
 	}
 	if person {
 		return nil

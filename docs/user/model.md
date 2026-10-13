@@ -112,8 +112,9 @@ model on your network reached by name is cloud until you say
 On a local model, nothing the ghost reads leaves the machine through
 the model, so reading is loose. A ghost whose package declared `web` or
 `files` reads with no question asked, on your turns and on its own,
-within quiet hours and the hourly ration; a "never ask again" you gave
-still holds, but `haunt perms revoke` does not stop it. What it keeps (a
+within quiet hours and the hourly ration. A "never ask again" you gave
+still holds, and `haunt perms revoke web` or `revoke files` switches that
+reading off until `haunt perms grant` turns it back on. What it keeps (a
 remembered line, its notes, a skill it writes) is labelled with where
 the words came from.
 

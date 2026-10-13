@@ -73,6 +73,42 @@ func TestWatchSeesAGrant(t *testing.T) {
 	}
 }
 
+// A revoke of something never granted changes only the withdrawn list. The
+// running ghost still sees it within the poll, and it is logged as a
+// revocation, since it explains the refusals that follow on a local model.
+func TestWatchSeesAWithdrawal(t *testing.T) {
+	t.Setenv("HAUNT_DATA_DIR", t.TempDir())
+	if err := SaveGrants("wisp", &Grants{Capabilities: []string{"llm"}}); err != nil {
+		t.Fatal(err)
+	}
+	w, err := Watch("wisp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var revoked []string
+	w.OnChange = func(_, r []string) { revoked = r }
+	if w.Withdrawn("files") {
+		t.Fatal("files was withdrawn before anyone said so")
+	}
+	if err := SaveGrants("wisp", &Grants{Capabilities: []string{"llm"}, Withdrawn: []string{"files"}}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return w.Withdrawn("files") })
+	if len(revoked) != 1 || revoked[0] != "files" {
+		t.Errorf("OnChange reported revoked = %v", revoked)
+	}
+
+	// A revoke of a held grant changes both lists and is reported once.
+	revoked = nil
+	if err := SaveGrants("wisp", &Grants{Withdrawn: []string{"files", "llm"}}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return w.Withdrawn("llm") })
+	if len(revoked) != 1 || revoked[0] != "llm" {
+		t.Errorf("OnChange reported revoked = %v, want llm once", revoked)
+	}
+}
+
 // A ghost installed with nothing granted has no grants file at all, which
 // must read as "nothing granted" rather than as an error.
 func TestWatchWithNoGrantsFile(t *testing.T) {

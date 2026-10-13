@@ -671,9 +671,14 @@ read it (`readGate`, `gateAfterReading`, `mayRemember`, `labelled`):
 "Nothing" is nothing from trust; a decision's own gates (its capability
 declared, its budget, quiet hours at the screen, the fullscreen rule)
 still apply. A local read asks no question, but the package must still
-declare `web` or `files`, and a "never ask again" the person gave stands
-(`opts.Refused`). The grant itself is not consulted, so `haunt perms
-revoke web` does not stop a local ghost reading; refusing for good does.
+declare `web` or `files`, and the grants file still says no: a "never
+ask again" the person gave stands (`opts.Refused`), and so does `haunt
+perms revoke` (`opts.Withdrawn`, the `withdrawn` list in `grants.toml`,
+recorded whether or not there was a grant to take). The grant list itself
+is not consulted, since a local read never asks for one. Trust decides
+whether to ask; the grants file decides what is allowed. On cloud the
+withdrawn list is not read: the revoke removed the grant, and the read
+is asked for again.
 A decision whose capability the package did not declare is hidden on
 both. A decision added later and left out of `verbClasses` is a reach,
 the strictest class that still lets it run. Standing rule 5 is rendered

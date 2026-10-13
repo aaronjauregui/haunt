@@ -246,6 +246,7 @@ func resolve(ctx context.Context, target string, base ghost.Options, tag *hlog.L
 	}
 	opts.Granted = watch.Granted
 	opts.Refused = watch.Refused
+	opts.Withdrawn = watch.Withdrawn
 	// Consent asked for in the balloon is written where `haunt perms`
 	// reads it: one place records what this ghost may do, however the
 	// question was put.

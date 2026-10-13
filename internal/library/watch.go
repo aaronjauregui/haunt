@@ -3,6 +3,7 @@ package library
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -94,6 +95,16 @@ func (w *GrantWatch) Refused(cap string) bool {
 	return w.grants.IsRefused(cap)
 }
 
+// Withdrawn reports a capability taken back with `haunt perms revoke`,
+// reloading like Granted does. It is how a revoke reaches a local model,
+// which reads without a grant and so loses nothing when one is removed.
+func (w *GrantWatch) Withdrawn(cap string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.refreshLocked()
+	return w.grants.IsWithdrawn(cap)
+}
+
 // Grants returns the capabilities currently granted.
 func (w *GrantWatch) Grants() []string {
 	w.mu.Lock()
@@ -121,6 +132,11 @@ func (w *GrantWatch) refreshLocked() {
 		return
 	}
 	granted, revoked := diff(w.grants.Capabilities, next.Capabilities)
+	// A revoke of something that was never granted (a local model's
+	// reading) changes no grant, only the withdrawn list, and is logged as
+	// a revocation all the same: it explains the refusals that follow.
+	withdrawn, _ := diff(w.grants.Withdrawn, next.Withdrawn)
+	revoked = union(revoked, withdrawn)
 	w.grants = next
 	w.modTime, w.size = mod, size
 	if (len(granted) > 0 || len(revoked) > 0) && w.OnChange != nil {
@@ -154,6 +170,13 @@ func diff(before, next []string) (granted, revoked []string) {
 	sort.Strings(granted)
 	sort.Strings(revoked)
 	return granted, revoked
+}
+
+// union is a and b together, sorted, each once.
+func union(a, b []string) []string {
+	out := append(append([]string(nil), a...), b...)
+	sort.Strings(out)
+	return slices.Compact(out)
 }
 
 // stat is os.Stat reduced to what identifies a version of the file, and

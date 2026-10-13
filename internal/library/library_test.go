@@ -120,3 +120,68 @@ func TestGrantsSurviveUngrantedUpdate(t *testing.T) {
 		t.Error("grants lost on update")
 	}
 }
+
+// `haunt perms revoke` is recorded whether or not there was a grant to
+// take, since a local model reads without one; a yes, from `perms grant`
+// or the balloon, is the way back.
+func TestWithdrawRecordsAndAllowClears(t *testing.T) {
+	g := &Grants{Capabilities: []string{"files"}}
+	g.Withdraw("files")
+	g.Withdraw("web") // never granted
+	g.Withdraw("web") // and recorded once
+	if g.Granted("files") {
+		t.Error("withdrawing left the grant")
+	}
+	if !g.IsWithdrawn("files") || !g.IsWithdrawn("web") || len(g.Withdrawn) != 2 {
+		t.Errorf("withdrawn = %v, want files and web once each", g.Withdrawn)
+	}
+	g.Refuse("web")
+	if !g.IsRefused("web") || !g.IsWithdrawn("web") {
+		t.Errorf("refusing a withdrawn capability: refused %v, withdrawn %v", g.Refused, g.Withdrawn)
+	}
+	g.Allow("files")
+	g.Allow("web")
+	if !g.Granted("files") || !g.Granted("web") {
+		t.Error("allowing did not grant")
+	}
+	if len(g.Withdrawn) != 0 || len(g.Refused) != 0 {
+		t.Errorf("allowing left withdrawn %v, refused %v", g.Withdrawn, g.Refused)
+	}
+}
+
+// The withdrawn list survives a save, and a grants file written before it
+// existed reads as nothing withdrawn.
+func TestWithdrawnRoundTrip(t *testing.T) {
+	t.Setenv("HAUNT_DATA_DIR", t.TempDir())
+	g := &Grants{AuthorKey: "ab", Capabilities: []string{"llm"}}
+	g.Withdraw("files")
+	if err := SaveGrants("wisp", g); err != nil {
+		t.Fatal(err)
+	}
+	back, err := LoadGrants("wisp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !back.IsWithdrawn("files") || !back.Granted("llm") || back.IsWithdrawn("llm") {
+		t.Errorf("round trip = %+v", back)
+	}
+
+	dir, err := GhostDir("spook")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := "author_key = \"ab\"\ncapabilities = [\"llm\"]\nrefused = [\"web\"]\n"
+	if err := os.WriteFile(filepath.Join(dir, "grants.toml"), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	older, err := LoadGrants("spook")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(older.Withdrawn) != 0 || !older.IsRefused("web") || !older.Granted("llm") {
+		t.Errorf("a file without the list read as %+v", older)
+	}
+}

@@ -76,13 +76,7 @@ func permsList(name string) error {
 		if grants.Granted(c) {
 			mark = "yes"
 		}
-		note := ""
-		if grants.IsRefused(c) {
-			// Worth saying: this is the difference between "not yet" and
-			// "the ghost has been told to stop asking".
-			note = "  (refused — it will not ask again)"
-		}
-		fmt.Printf("  [%s] %-13s %s%s\n", mark, c, ghost.KnownCapabilities[c], note)
+		fmt.Printf("  [%s] %-13s %s%s\n", mark, c, ghost.KnownCapabilities[c], permsNote(grants, c))
 	}
 
 	servers := permsListTools(name, grants)
@@ -166,12 +160,12 @@ func permsSet(args []string, grant bool) error {
 		return err
 	}
 	had := grants.Granted(cap)
-	if grant && had && !grants.IsRefused(cap) {
+	if grant && had && !grants.IsRefused(cap) && !grants.IsWithdrawn(cap) {
 		fmt.Printf("%s already has %s\n", name, cap)
 		return nil
 	}
-	if !grant && !had {
-		fmt.Printf("%s does not have %s\n", name, cap)
+	if !grant && !had && grants.IsWithdrawn(cap) {
+		fmt.Printf("%s was already revoked from %s\n", cap, name)
 		return nil
 	}
 	if grant {
@@ -180,17 +174,24 @@ func permsSet(args []string, grant bool) error {
 		grants.Allow(cap)
 	} else {
 		// Revoking is not the same as "never ask me again" — that answer
-		// belongs to the person being asked, in the balloon.
+		// belongs to the person being asked, in the balloon. It is
+		// recorded even when nothing was granted: a local model reads
+		// without asking, and the record is what stops it.
 		grants.Withdraw(cap)
 	}
 	if err := library.SaveGrants(name, grants); err != nil {
 		return err
 	}
 
-	if grant {
+	switch {
+	case grant:
 		fmt.Printf("granted %s to %s\n", cap, name)
-	} else {
+	case had:
 		fmt.Printf("revoked %s from %s\n", cap, name)
+	default:
+		// Nothing was granted, so say what the record does: on a local
+		// model it switches off reading, which never needed a grant.
+		fmt.Printf("revoked %s from %s (it held no grant; recorded, so it stays off until granted again)\n", cap, name)
 	}
 	// Said plainly, because "will apply on restart" is what people expect
 	// of a permission change and is not what happens here.
@@ -275,11 +276,7 @@ func permsListTools(name string, grants *library.Grants) []string {
 			if grants.Granted(c) {
 				mark = "yes"
 			}
-			note := ""
-			if grants.IsRefused(c) {
-				note = "  (refused — it will not ask again)"
-			}
-			fmt.Printf("      [%s] %s%s\n", mark, strings.TrimPrefix(c, "tool:"), note)
+			fmt.Printf("      [%s] %s%s\n", mark, strings.TrimPrefix(c, "tool:"), permsNote(grants, c))
 		}
 	}
 	fmt.Println("  (each tool is asked about the first time it is used;")
@@ -322,13 +319,29 @@ func permsListPolls(name string, grants *library.Grants) {
 			// all, it decides whether the ghost talks.
 			what += " (keeps quiet when the answer says " + tr.QuietWhen + ")"
 		}
-		if grants.IsRefused(key) {
-			what += "  (refused — it will not ask again)"
-		}
+		what += permsNote(grants, key)
 		fmt.Printf("    [%s] %-13s %-15s %s\n", mark, tr.Name, tr.Cron, what)
 	}
 	fmt.Println("  (asked about in the balloon while you are there; grant one here")
 	fmt.Println("   to settle it in advance, and see haunt perms grant tool:<server>.<tool>)")
+}
+
+// permsNote is what the listing adds after a capability that is not just
+// "not yet": refused in the balloon, or revoked here. Refused is said first
+// when both hold, since it is the one that also stops the question.
+func permsNote(grants *library.Grants, c string) string {
+	switch {
+	case grants.IsRefused(c):
+		// The difference between "not yet" and "the ghost has been told
+		// to stop asking".
+		return "  (refused — it will not ask again)"
+	case grants.IsWithdrawn(c):
+		// The difference between "never granted" and "taken back", which
+		// on a local model, where reading is not asked for, is the
+		// difference between reading and not.
+		return "  (revoked — off until granted again)"
+	}
+	return ""
 }
 
 // decidedTools returns the tool grant keys for one server that the user has
@@ -336,7 +349,7 @@ func permsListPolls(name string, grants *library.Grants) {
 func decidedTools(grants *library.Grants, server string) []string {
 	seen := map[string]bool{}
 	var out []string
-	for _, list := range [][]string{grants.Capabilities, grants.Refused} {
+	for _, list := range [][]string{grants.Capabilities, grants.Refused, grants.Withdrawn} {
 		for _, c := range list {
 			if s, ok := ghost.ToolGrantServer(c); !ok || s != server || seen[c] {
 				continue

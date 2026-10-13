@@ -11,6 +11,7 @@ import (
 	"github.com/aaronjauregui/haunt/internal/backend"
 	"github.com/aaronjauregui/haunt/internal/config"
 	"github.com/aaronjauregui/haunt/internal/model"
+	"github.com/aaronjauregui/haunt/internal/wlclient"
 )
 
 // Endpoints the trust is derived from: a llama-server on this machine, and
@@ -117,6 +118,48 @@ func TestTrustLocalReads(t *testing.T) {
 	w.startTurn(false, "idle")
 	if err := w.allowWeb(); err != nil {
 		t.Errorf("a local search on an idle turn was refused: %v", err)
+	}
+}
+
+// `haunt perms revoke` reaches both kinds of model. On local, where a read
+// is never asked for, the withdrawal is what refuses it; on cloud the
+// revoke took the grant away, the withdrawal itself is not consulted, and
+// the read is asked for again as if it had never been granted.
+func TestTrustWithdrawnReads(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		model     model.Config
+		withdrawn bool
+		want      string // "" for a read that goes through
+		asked     bool
+	}{
+		{"local", localModel, false, "", false},
+		{"local withdrawn", localModel, true, "the files capability was revoked", false},
+		{"cloud withdrawn", cloudModel, true, "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g, _ := readingGhost(t, "", backend.BudgetConfig{}, "")
+			g.modelCfg = tc.model
+			rec := &recorder{}
+			g.opts.Granted = rec.granted
+			g.opts.Refused = rec.refusedCap
+			g.opts.Consent = rec.record
+			g.opts.Withdrawn = func(string) bool { return tc.withdrawn }
+			g.surface = &wlclient.SpriteSurface{}
+			if tc.asked {
+				answer(t, g, consentAllow)
+			}
+			res := call(t, g, "list_files", `{}`)
+			switch {
+			case tc.want == "" && res.IsError:
+				t.Errorf("the read was refused: %q", res.Text)
+			case tc.want != "" && (!res.IsError || !strings.Contains(res.Text, tc.want)):
+				t.Errorf("the read answered %q, want %q", res.Text, tc.want)
+			}
+			if asked := rec.calls > 0; asked != tc.asked {
+				t.Errorf("asked = %v, want %v", asked, tc.asked)
+			}
+		})
 	}
 }
 

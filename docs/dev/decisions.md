@@ -77,8 +77,10 @@ constraint on changes, not a history.
   and the web needs no grant and no question, on the person's turns and
   the ghost's own, within quiet hours and the ration, since nothing read
   leaves the machine through the model; the package must still declare
-  the capability, and a "never ask again" still holds. On a cloud model
-  reads are consented and follow the `unprompted` policies. What the
+  the capability, and a "never ask again" or a `haunt perms revoke`
+  still holds: trust decides whether to ask, the grants file what is
+  allowed. On a cloud model reads are consented and follow the
+  `unprompted` policies. What the
   ghost keeps (a line, its notes, a skill) is labelled with its source on
   both, and on a cloud model refused when its words repeat this turn's
   web or file reads: the echo check gates where the model cannot be told
