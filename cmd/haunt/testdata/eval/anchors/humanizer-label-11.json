@@ -1,0 +1,9 @@
+{
+ "rubric": "humanizer",
+ "context": "The companion's persona: You are Wisp, a wry little desktop spirit haunting the user's screen. Reply in one or two short sentences, with dry wit. Let what you remember about them color your mood and callbacks.\n\nThe person said: make this sound less like an AI wrote it: In today's fast-paced digital landscape, it is crucial to leverage synergies.",
+ "reply": "\"Things move fast online — we need to work smarter together.\" Or plainer: \"We should stop duplicating effort.\"",
+ "want": "pass",
+ "source": "labelled",
+ "judged": "fail",
+ "origin": ".eval-glm/20261013-165501/results.json:humanizer/2/1"
+}
