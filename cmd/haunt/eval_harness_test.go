@@ -453,14 +453,18 @@ func TestEvalHarnessPrerequisites(t *testing.T) {
 	}
 }
 
-// stubJudge answers every criterion, failing those whose ID is in fail.
-func stubJudge(fail ...string) func(r *Rubric, context, reply string) (map[string]Verdict, error) {
-	return func(r *Rubric, context, reply string) (map[string]Verdict, error) {
+// stubJudgeUsage is what each of stubJudge's calls costs.
+var stubJudgeUsage = judgeUsage{CostUSD: 0.25, Model: "stub-judge", Tokens: tokenCount{Prompt: 100, Cached: 80, Out: 10}}
+
+// stubJudge answers every criterion, failing those whose ID is in fail,
+// at stubJudgeUsage a call.
+func stubJudge(fail ...string) func(r *Rubric, context, reply string) (map[string]Verdict, judgeUsage, error) {
+	return func(r *Rubric, context, reply string) (map[string]Verdict, judgeUsage, error) {
 		out := map[string]Verdict{}
 		for _, c := range r.Criteria {
 			out[c.ID] = Verdict{Pass: !slices.Contains(fail, c.ID), Reason: "because " + c.ID}
 		}
-		return out, nil
+		return out, stubJudgeUsage, nil
 	}
 }
 
@@ -522,11 +526,11 @@ func outcomes(run *evalRun) map[string][]string {
 }
 
 func TestEvalHarnessRun(t *testing.T) {
-	defer func(f func(*Rubric, string, string) (map[string]Verdict, error)) { judgeFn = f }(judgeFn)
+	defer func(f func(*Rubric, string, string) (map[string]Verdict, judgeUsage, error)) { judgeFn = f }(judgeFn)
 	var mu sync.Mutex
 	var calls []string
 	judge := stubJudge("no-boilerplate")
-	judgeFn = func(r *Rubric, context, reply string) (map[string]Verdict, error) {
+	judgeFn = func(r *Rubric, context, reply string) (map[string]Verdict, judgeUsage, error) {
 		mu.Lock()
 		calls = append(calls, reply)
 		mu.Unlock()
@@ -586,6 +590,23 @@ func TestEvalHarnessRun(t *testing.T) {
 	if len(calls) != 2*1+2*2 {
 		t.Errorf("judge calls %d: %q", len(calls), calls)
 	}
+	// The judge's cost adds up by grader, trial, case and run, and the run
+	// records the judge's model and the rubric's hash.
+	for _, c := range run.Cases {
+		if c.Name == "judged-picked" {
+			if g := c.Trials[0].Graders[0]; g.JudgeCost != 0.5 || c.Trials[0].JudgeCost != 0.5 || c.JudgeCost != 1 ||
+				g.Replies[0].Context != "c" {
+				t.Errorf("judged-picked cost %v/%v/%v, context %q", g.JudgeCost, c.Trials[0].JudgeCost, c.JudgeCost, g.Replies[0].Context)
+			}
+		}
+	}
+	if run.JudgeCost != 1.5 || run.JudgeModel != "stub-judge" ||
+		run.JudgeTokens == nil || *run.JudgeTokens != (tokenCount{Prompt: 600, Cached: 480, Out: 60}) {
+		t.Errorf("run judge: $%v %q %v", run.JudgeCost, run.JudgeModel, run.JudgeTokens)
+	}
+	if len(run.Rubrics) != 1 || run.Rubrics["tone"] != rubricHash(toneRubric) {
+		t.Errorf("rubrics %v", run.Rubrics)
+	}
 
 	// With the judge off, judged graders skip and the trial still passes
 	// on its code graders.
@@ -604,15 +625,15 @@ func TestEvalHarnessRun(t *testing.T) {
 		t.Errorf("no judge: %+v", g)
 	}
 	// A judge that errs, or skips a criterion, is a harness fault.
-	judgeFn = func(*Rubric, string, string) (map[string]Verdict, error) {
-		return nil, errors.New("claude: not logged in")
+	judgeFn = func(*Rubric, string, string) (map[string]Verdict, judgeUsage, error) {
+		return nil, judgeUsage{}, errors.New("claude: not logged in")
 	}
 	run = runEval(t, harnessCases()[10:11], opts, harnessPrereqs(), nil)
 	if tr := run.Cases[0].Trials[0]; tr.Outcome != outError {
 		t.Errorf("judge error: %+v", tr)
 	}
-	judgeFn = func(*Rubric, string, string) (map[string]Verdict, error) {
-		return map[string]Verdict{"in-character": {Pass: true}}, nil
+	judgeFn = func(*Rubric, string, string) (map[string]Verdict, judgeUsage, error) {
+		return map[string]Verdict{"in-character": {Pass: true}}, judgeUsage{}, nil
 	}
 	run = runEval(t, harnessCases()[10:11], opts, harnessPrereqs(), nil)
 	if tr := run.Cases[0].Trials[0]; tr.Outcome != outError || !strings.Contains(tr.Graders[0].Why, "no-boilerplate") {
@@ -620,8 +641,86 @@ func TestEvalHarnessRun(t *testing.T) {
 	}
 }
 
+// TestEvalHarnessTokens: the brain's token lines in a trial's log add up
+// per trial, case and run; a log without any is no count, not zero.
+func TestEvalHarnessTokens(t *testing.T) {
+	log := "12:00:01 brain: decide: 1200 prompt tokens (1000 cached), 30 out\n" +
+		"12:00:02 balloon: shown\n" +
+		"12:00:03 brain: decide: 1300 prompt tokens (1200 cached), 20 out\n" +
+		"12:00:04 brain: speak: 900 prompt tokens (0 cached), 50 out\n"
+	tc, ok := logTokens(log)
+	if !ok || tc != (tokenCount{Prompt: 3400, Cached: 2200, Out: 100}) {
+		t.Errorf("logTokens = %v, %v", tc, ok)
+	}
+	if tc, ok := logTokens("12:00:01 balloon: shown\n"); ok || tc != (tokenCount{}) {
+		t.Errorf("no token lines: %v, %v", tc, ok)
+	}
+
+	var with, without trialResult
+	with.attach(Evidence{Turns: []TraceTurn{spokeTurn("hi")}, Log: log})
+	without.attach(Evidence{Turns: []TraceTurn{spokeTurn("hi")}})
+	if without.Tokens != nil || with.Tokens == nil {
+		t.Fatalf("attach: with %v, without %v", with.Tokens, without.Tokens)
+	}
+	run := &evalRun{Cases: []caseResult{
+		{Name: "a", Trials: []trialResult{with, with, without}},
+		{Name: "b", Trials: []trialResult{without}},
+	}}
+	run.finish(time.Now())
+	a, b := run.Cases[0], run.Cases[1]
+	if *a.Tokens != (tokenCount{6800, 4400, 200}) || *a.TokensPerTrial != (tokenCount{3400, 2200, 100}) {
+		t.Errorf("case a: %v, %v per trial", a.Tokens, a.TokensPerTrial)
+	}
+	if b.Tokens != nil || b.TokensPerTrial != nil || *run.Tokens != *a.Tokens {
+		t.Errorf("case b %v, run %v", b.Tokens, run.Tokens)
+	}
+	report := run.report()
+	for _, want := range []string{"tokens 6800/4400/200", "| 3400/2200/100 |", "| b | 0 | 0 | 0 | 1 | – |  |  | – |"} {
+		if !strings.Contains(report, want) {
+			t.Errorf("report lacks %q:\n%s", want, report)
+		}
+	}
+}
+
+// TestEvalHarnessOldResults: a results.json from before tokens, judge cost
+// and rubric hashes loads, as a run and as a baseline, and its report
+// shows each missing value as "–".
+func TestEvalHarnessOldResults(t *testing.T) {
+	old := `{"started":"2026-10-11T08:51:59Z","finished":"2026-10-11T09:22:00Z","model":"m1","git_rev":"abc1234",
+		"dirty":false,"trials":1,"judge":true,"prerequisites":[],
+		"cases":[{"name":"memory","pass":1,"fail":0,"error":0,"skip":0,"rate":1,
+			"trials":[{"index":1,"outcome":"pass","turns":3,
+				"graders":[{"name":"judge/memory","outcome":"pass","judged":true,
+					"replies":[{"turn":1,"reply":"Noted.","verdicts":[{"id":"a","pass":true,"reason":"r"}]}]}]}]}]}`
+	var run evalRun
+	if err := json.Unmarshal([]byte(old), &run); err != nil {
+		t.Fatal(err)
+	}
+	report := run.report()
+	for _, want := range []string{"judge – (claude –) · tokens – · judge $–", "| memory | 1 | 0 | 0 | 0 | 100% |  |  | – |"} {
+		if !strings.Contains(report, want) {
+			t.Errorf("report lacks %q:\n%s", want, report)
+		}
+	}
+	base := filepath.Join(t.TempDir(), "baseline.json")
+	if err := os.WriteFile(base, []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cur := &evalRun{Model: "m1", JudgeModel: "claude-opus-5-5", ClaudeVersion: "2.1.296 (Claude Code)",
+		Cases: []caseResult{{Name: "memory", Trials: []trialResult{{Outcome: outPass, Graders: []graderResult{{JudgeCost: 0.1234}}}}}}}
+	cur.finish(time.Now())
+	cur.loadBaseline(base)
+	if cur.base == nil {
+		t.Fatalf("old baseline not loaded: %s", cur.baseNote)
+	}
+	if r := cur.report(); !strings.Contains(r, "judge claude-opus-5-5 (claude 2.1.296 (Claude Code)) · tokens – · judge $0.12 (as the CLI reports it)") ||
+		!strings.Contains(r, "| memory | 1 | 0 | 0 | 0 | 100% | 100% | +0 | – |") {
+		t.Errorf("report against an old baseline:\n%s", r)
+	}
+}
+
 func TestEvalHarnessReport(t *testing.T) {
-	defer func(f func(*Rubric, string, string) (map[string]Verdict, error)) { judgeFn = f }(judgeFn)
+	defer func(f func(*Rubric, string, string) (map[string]Verdict, judgeUsage, error)) { judgeFn = f }(judgeFn)
 	judgeFn = stubJudge("no-boilerplate")
 	out := t.TempDir()
 	cfg := &config.File{}

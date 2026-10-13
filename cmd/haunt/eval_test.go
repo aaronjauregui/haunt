@@ -91,10 +91,10 @@ type judgeItem struct {
 }
 
 // judgeFn is the judge: it holds one reply to a rubric and answers every
-// criterion. eval_judge_test.go sets it. While it is nil, or EVAL_JUDGE=off,
-// judged graders are skipped, which the report shows as skipped rather
-// than passed.
-var judgeFn func(r *Rubric, context, reply string) (map[string]Verdict, error)
+// criterion, with what the call cost. eval_judge_test.go sets it. While it
+// is nil, or EVAL_JUDGE=off, judged graders are skipped, which the report
+// shows as skipped rather than passed.
+var judgeFn func(r *Rubric, context, reply string) (map[string]Verdict, judgeUsage, error)
 
 // errSkipTrial wraps the reason a Drive gives for skipping its trial
 // (something only known once the trial started, like a tool the stack
@@ -210,12 +210,15 @@ func TestEval(t *testing.T) {
 	started := time.Now()
 	var run *evalRun
 	if missing := pre.missing(); len(missing) > 0 {
-		run = newEvalRun(opts, pre, user, started)
+		run = newEvalRun(opts, pre, user, cases, started)
 		for _, c := range cases {
 			run.Cases = append(run.Cases, skippedCase(c, opts.Trials, "prerequisites missing"))
 		}
 	} else {
 		run = runEval(t, cases, opts, pre, user)
+	}
+	if run.Judge {
+		run.ClaudeVersion = claudeVersion()
 	}
 	run.finish(time.Now())
 
@@ -245,7 +248,7 @@ func TestEval(t *testing.T) {
 // outcomes. It is TestEval without the environment, so the harness's own
 // tests can run it over canned Drives.
 func runEval(t *testing.T, cases []evalCase, opts evalOptions, pre prereqs, user *config.File) *evalRun {
-	run := newEvalRun(opts, pre, user, time.Now())
+	run := newEvalRun(opts, pre, user, cases, time.Now())
 	results := make([]caseResult, len(cases))
 	t.Run("cases", func(t *testing.T) {
 		for ci := range cases {
@@ -377,12 +380,17 @@ func runGrader(c *evalCase, g Grader, ev Evidence, judgeOn bool) (res graderResu
 	res.Outcome = outPass
 	var failed []string
 	for _, it := range items {
-		verdicts, err := judgeFn(g.Judge, it.Context, it.Reply)
+		verdicts, usage, err := judgeFn(g.Judge, it.Context, it.Reply)
+		res.JudgeCost += usage.CostUSD
+		res.judgeTokens.add(usage.Tokens)
+		if res.judgeModel == "" {
+			res.judgeModel = usage.Model
+		}
 		if err != nil {
 			res.Outcome, res.Why = outError, fmt.Sprintf("judge: %v", err)
 			return res
 		}
-		jr := judgedReply{Turn: it.Turn, Reply: it.Reply}
+		jr := judgedReply{Turn: it.Turn, Context: it.Context, Reply: it.Reply}
 		for _, cr := range g.Judge.Criteria {
 			v, ok := verdicts[cr.ID]
 			if !ok {

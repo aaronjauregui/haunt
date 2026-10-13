@@ -218,6 +218,26 @@ intentions. An **error** is the harness's fault (the model never
 answered, an event the case waited for never arrived) and is counted
 apart from a **fail**, which is the ghost's.
 
+The report's header has two lines. The first names the model and its
+host, the revision, k, whether the judge was on, and how long the run
+took. The second is what the run cost:
+
+    judge claude-opus-5-5 (claude 2.1.296 (Claude Code)) · tokens 412000/380000/9100 · judge $1.84 (as the CLI reports it)
+
+that is, the model the judge ran on and what `claude --version`
+printed, the model's tokens over every trial as prompt/cached/out, and
+the judge's cost in dollars as the CLI reports it, which on a
+subscription is notional. The tokens are read from the brain's
+`decide:`, `speak:` and `reflect:` lines in each trial's log. The case
+table's last column is a case's mean tokens per trial, over the trials
+that logged any. A value that is absent, from a trial whose log has no
+token line, a run with the judge off, or a `results.json` older than
+these fields, shows as `–`, never `0`. `results.json` also keeps the
+tokens and judge cost per trial and per case, the judge's own tokens,
+and `rubrics`: each rubric the selected cases use, with the first 12
+hex digits of the sha256 of its prompt and schema, so two runs show
+whether a rubric's wording changed between them.
+
 **Face and pace** is read from the line that ends every turn in the
 ghost's log (`turn over: person took=4.2s face=happy by=speak`), and sits
 beside the baseline's (`eval_face_test.go`). It splits the spoken turns

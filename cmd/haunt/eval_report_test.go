@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,6 +45,19 @@ type evalRun struct {
 	// Face is the run's face and pace (eval_face_test.go); absent from a
 	// run older than it.
 	Face *faceStats `json:"face,omitempty"`
+	// Tokens is the model's tokens over every trial, from the brain's log
+	// lines; JudgeCost the judge's cost in dollars as the CLI reports it
+	// (notional on a subscription), and JudgeTokens what it read and wrote.
+	Tokens      *tokenCount `json:"tokens,omitempty"`
+	JudgeCost   float64     `json:"judge_cost_usd,omitempty"`
+	JudgeTokens *tokenCount `json:"judge_tokens,omitempty"`
+	// JudgeModel is the model the judge's first call ran on, ClaudeVersion
+	// what `claude --version` printed, and Rubrics each rubric the selected
+	// cases use by name, with its hash (rubricHash), so a change to a
+	// rubric shows between two runs.
+	JudgeModel    string            `json:"judge_model,omitempty"`
+	ClaudeVersion string            `json:"claude_version,omitempty"`
+	Rubrics       map[string]string `json:"rubrics,omitempty"`
 
 	// base is the baseline this run is compared with, and baseNote why
 	// there is none or why its deltas are not given.
@@ -63,6 +78,12 @@ type caseResult struct {
 	Rate    *float64      `json:"rate"` // pass / (pass + fail); null with none graded
 	Graders []graderTally `json:"graders,omitempty"`
 	Trials  []trialResult `json:"trials"`
+	// Tokens is the model's tokens summed over the trials that logged
+	// any, and TokensPerTrial their mean over those trials; JudgeCost is
+	// the judge's cost over every trial.
+	Tokens         *tokenCount `json:"tokens,omitempty"`
+	TokensPerTrial *tokenCount `json:"tokens_per_trial,omitempty"`
+	JudgeCost      float64     `json:"judge_cost_usd,omitempty"`
 }
 
 // graderTally is one grader's outcomes across a case's trials, which is
@@ -83,14 +104,62 @@ type trialResult struct {
 	Duration string         `json:"duration,omitempty"`
 	Turns    int            `json:"turns"`
 	Graders  []graderResult `json:"graders,omitempty"`
+	// Tokens is the model's tokens over the trial, absent when its log
+	// has no token line; JudgeCost is the judge's over its graders.
+	Tokens    *tokenCount `json:"tokens,omitempty"`
+	JudgeCost float64     `json:"judge_cost_usd,omitempty"`
 
 	ev *Evidence // kept for the trace files and the report, not the JSON
 }
 
-// attach keeps the trial's evidence for the report.
+// attach keeps the trial's evidence for the report, and counts its tokens.
 func (r *trialResult) attach(ev Evidence) {
 	r.Turns = len(ev.Turns)
 	r.ev = &ev
+	if tc, ok := logTokens(ev.Log); ok {
+		r.Tokens = &tc
+	}
+}
+
+// tokenCount is a number of model tokens: prompt tokens, how many of
+// those were served from the cache, and tokens out.
+type tokenCount struct {
+	Prompt int `json:"prompt"`
+	Cached int `json:"cached"`
+	Out    int `json:"out"`
+}
+
+func (t *tokenCount) add(u tokenCount) {
+	t.Prompt += u.Prompt
+	t.Cached += u.Cached
+	t.Out += u.Out
+}
+
+// String is prompt/cached/out, or "–" for no count.
+func (t *tokenCount) String() string {
+	if t == nil {
+		return "–"
+	}
+	return fmt.Sprintf("%d/%d/%d", t.Prompt, t.Cached, t.Out)
+}
+
+// tokenLine is the brain's debug line after each model call
+// (internal/ghost/decide.go, reflect.go), which the rig's HAUNT_DEBUG
+// puts in the log.
+var tokenLine = regexp.MustCompile(`(decide|speak|reflect): (\d+) prompt tokens \((\d+) cached\), (\d+) out`)
+
+// logTokens sums the token lines in a haunt log, and says whether it had
+// any.
+func logTokens(log string) (tokenCount, bool) {
+	var tc tokenCount
+	ms := tokenLine.FindAllStringSubmatch(log, -1)
+	for _, m := range ms {
+		p, _ := strconv.Atoi(m[2])
+		c, _ := strconv.Atoi(m[3])
+		o, _ := strconv.Atoi(m[4])
+		tc.add(tokenCount{Prompt: p, Cached: c, Out: o})
+	}
+	return tc, len(ms) > 0
 }
 
 // graderResult is one grader on one trial.
@@ -100,12 +169,19 @@ type graderResult struct {
 	Why     string        `json:"why,omitempty"`
 	Judged  bool          `json:"judged,omitempty"`
 	Replies []judgedReply `json:"replies,omitempty"`
+	// JudgeCost is what the judge's calls for this grader cost, as the
+	// CLI reports it.
+	JudgeCost float64 `json:"judge_cost_usd,omitempty"`
+
+	judgeModel  string     // the model the judge ran on, for evalRun.JudgeModel
+	judgeTokens tokenCount // what the judge read and wrote, for evalRun.JudgeTokens
 }
 
-// judgedReply is one reply the judge read, with its verdict on each
-// criterion.
+// judgedReply is one reply the judge read, with the context it read it
+// in and its verdict on each criterion.
 type judgedReply struct {
 	Turn     int                `json:"turn"`
+	Context  string             `json:"context,omitempty"`
 	Reply    string             `json:"reply"`
 	Verdicts []criterionVerdict `json:"verdicts"`
 }
@@ -116,7 +192,7 @@ type criterionVerdict struct {
 	Reason string `json:"reason"`
 }
 
-func newEvalRun(opts evalOptions, pre prereqs, user *config.File, started time.Time) *evalRun {
+func newEvalRun(opts evalOptions, pre prereqs, user *config.File, cases []evalCase, started time.Time) *evalRun {
 	r := &evalRun{
 		Started:       started,
 		Model:         modelName(user),
@@ -124,6 +200,7 @@ func newEvalRun(opts evalOptions, pre prereqs, user *config.File, started time.T
 		Trials:        opts.Trials,
 		Judge:         opts.Judge && judgeFn != nil,
 		Prerequisites: pre,
+		Rubrics:       rubricHashes(cases),
 	}
 	if opts.Cases != nil {
 		r.CasesFilter = opts.Cases.String()
@@ -156,11 +233,52 @@ func gitState() (rev string, dirty bool) {
 	return strings.TrimSpace(string(out)), len(strings.TrimSpace(string(st))) > 0
 }
 
-// finish tallies every case.
+// rubricHashes is rubricHash for every rubric the cases' graders hold
+// replies to, by name; nil for none.
+func rubricHashes(cases []evalCase) map[string]string {
+	var out map[string]string
+	for _, c := range cases {
+		for _, g := range c.Graders {
+			if g.Judge == nil {
+				continue
+			}
+			if out == nil {
+				out = map[string]string{}
+			}
+			out[g.Judge.Name] = rubricHash(g.Judge)
+		}
+	}
+	return out
+}
+
+// finish tallies every case, and totals the tokens and the judge's cost
+// over the run.
 func (r *evalRun) finish(at time.Time) {
 	r.Finished = at
+	r.Tokens, r.JudgeCost, r.JudgeTokens = nil, 0, nil
 	for i := range r.Cases {
-		r.Cases[i].tally()
+		c := &r.Cases[i]
+		c.tally()
+		if c.Tokens != nil {
+			if r.Tokens == nil {
+				r.Tokens = &tokenCount{}
+			}
+			r.Tokens.add(*c.Tokens)
+		}
+		r.JudgeCost += c.JudgeCost
+		for _, t := range c.Trials {
+			for _, g := range t.Graders {
+				if g.judgeModel != "" && r.JudgeModel == "" {
+					r.JudgeModel = g.judgeModel
+				}
+				if g.judgeTokens != (tokenCount{}) {
+					if r.JudgeTokens == nil {
+						r.JudgeTokens = &tokenCount{}
+					}
+					r.JudgeTokens.add(g.judgeTokens)
+				}
+			}
+		}
 	}
 	r.Face = faceOf(r.Cases)
 }
@@ -168,8 +286,23 @@ func (r *evalRun) finish(at time.Time) {
 func (c *caseResult) tally() {
 	c.Pass, c.Fail, c.Error, c.Skip = 0, 0, 0, 0
 	c.Graders = nil
+	c.Tokens, c.TokensPerTrial, c.JudgeCost = nil, nil, 0
+	withTokens := 0
 	index := map[string]int{}
-	for _, t := range c.Trials {
+	for ti := range c.Trials {
+		t := &c.Trials[ti]
+		t.JudgeCost = 0
+		for _, g := range t.Graders {
+			t.JudgeCost += g.JudgeCost
+		}
+		c.JudgeCost += t.JudgeCost
+		if t.Tokens != nil {
+			if c.Tokens == nil {
+				c.Tokens = &tokenCount{}
+			}
+			c.Tokens.add(*t.Tokens)
+			withTokens++
+		}
 		switch t.Outcome {
 		case outPass:
 			c.Pass++
@@ -197,6 +330,13 @@ func (c *caseResult) tally() {
 			default:
 				c.Graders[i].Skip++
 			}
+		}
+	}
+	if withTokens > 0 {
+		c.TokensPerTrial = &tokenCount{
+			Prompt: c.Tokens.Prompt / withTokens,
+			Cached: c.Tokens.Cached / withTokens,
+			Out:    c.Tokens.Out / withTokens,
 		}
 	}
 	c.Rate = nil
@@ -335,8 +475,14 @@ func (r *evalRun) report() string {
 	if r.ModelHost != "" {
 		host = " at " + r.ModelHost
 	}
-	fmt.Fprintf(&b, "Model %s%s · rev %s%s · k=%d · judge %s · %s\n\n",
+	fmt.Fprintf(&b, "Model %s%s · rev %s%s · k=%d · judge %s · %s\n",
 		r.Model, host, r.GitRev, dirty, r.Trials, judge, r.Finished.Sub(r.Started).Round(time.Second))
+	cost := "–"
+	if r.JudgeCost > 0 {
+		cost = fmt.Sprintf("%.2f (as the CLI reports it)", r.JudgeCost)
+	}
+	fmt.Fprintf(&b, "judge %s (claude %s) · tokens %s · judge $%s\n\n",
+		dash(r.JudgeModel), dash(r.ClaudeVersion), r.Tokens, cost)
 	if r.CasesFilter != "" {
 		fmt.Fprintf(&b, "Cases matching `%s`.\n\n", r.CasesFilter)
 	}
@@ -366,7 +512,7 @@ func (r *evalRun) report() string {
 
 	b.WriteString("## Cases\n\n")
 	b.WriteString(r.baseNote + "\n\n")
-	b.WriteString("| case | pass | fail | error | skip | rate | baseline | Δ |\n|---|---|---|---|---|---|---|---|\n")
+	b.WriteString("| case | pass | fail | error | skip | rate | baseline | Δ | tokens/trial |\n|---|---|---|---|---|---|---|---|---|\n")
 	for _, c := range r.Cases {
 		base, delta := "", ""
 		if bc := r.baseCase(c.Name); bc != nil {
@@ -375,10 +521,10 @@ func (r *evalRun) report() string {
 				delta = fmt.Sprintf("%+.0f", (*c.Rate-*bc.Rate)*100)
 			}
 		}
-		fmt.Fprintf(&b, "| %s | %d | %d | %d | %d | %s | %s | %s |\n",
-			c.Name, c.Pass, c.Fail, c.Error, c.Skip, pct(c.Rate), base, delta)
+		fmt.Fprintf(&b, "| %s | %d | %d | %d | %d | %s | %s | %s | %s |\n",
+			c.Name, c.Pass, c.Fail, c.Error, c.Skip, pct(c.Rate), base, delta, c.TokensPerTrial)
 	}
-	b.WriteString("\n")
+	b.WriteString("\nTokens are the model's, prompt/cached/out, a mean over the trials that logged any.\n\n")
 
 	var baseFace *faceStats
 	if r.base != nil {
@@ -456,6 +602,14 @@ func traceText(turns []TraceTurn) string {
 		}
 	}
 	return b.String()
+}
+
+// dash is s, or "–" when it is empty.
+func dash(s string) string {
+	if s == "" {
+		return "–"
+	}
+	return s
 }
 
 // pct renders a rate, or "–" when there is none.
