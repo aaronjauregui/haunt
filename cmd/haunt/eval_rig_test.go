@@ -503,6 +503,18 @@ func (r *evalRig) snapMemories(name string) error {
 	return nil
 }
 
+// snapSkills keeps the skills wisp has written itself so far (its state's
+// skills directory, where skill_write puts them) as Evidence.Files[name],
+// the same way snapMemories keeps memory.
+func (r *evalRig) snapSkills(name string) error {
+	text, err := rigMemoryFiles(filepath.Join(r.State, "skills"))
+	if err != nil {
+		return err
+	}
+	r.files[name] = text
+	return nil
+}
+
 // rigMemoryFiles is every file under dir, each headed by its path relative
 // to dir, in path order; "" when dir does not exist yet.
 func rigMemoryFiles(dir string) (string, error) {

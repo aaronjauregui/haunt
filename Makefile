@@ -49,12 +49,10 @@ eval-baseline:
 # against a stub `claude`, and the rig on the fake model in a headless
 # sway. No real model, no judge, nothing off the machine, so CI runs them.
 # TestEval and TestRubricAnchors spend quota, and are left out.
-# TestEvalHarnessMemoryWrite is skipped: ghost.MemoryWrite counts
-# skill_write as a write, for the echo check, and the graders do not.
 EVAL_TEST_RUN = ^(TestEvalHarness.*|TestEvalFaceAndPace|TestTurnsOfKind|TestTraceRecordIsTraceTurn|TestJudge.*|TestRig.*|TestEvalRigMultiday|TestMultidayAnchors)$$
 
 eval-test:
-	$(GO) test -tags eval -count=1 -run '$(EVAL_TEST_RUN)' -skip '^TestEvalHarnessMemoryWrite$$' -timeout 10m ./cmd/haunt
+	$(GO) test -tags eval -count=1 -run '$(EVAL_TEST_RUN)' -timeout 10m ./cmd/haunt
 
 # Opens a nested sway window in your current session with the whisper
 # ghost inside it. Close the window (or Ctrl-C) to stop.
