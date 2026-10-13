@@ -187,6 +187,16 @@ func (t *transcript) add(r TranscriptRow) error {
 	}
 	args := ""
 	if len(r.Calls) > 0 {
+		// A call whose arguments are not JSON is kept, its arguments as a
+		// JSON string of what the model wrote: the row would otherwise
+		// fail to marshal and be lost, leaving its result row answering a
+		// call the transcript never had.
+		for i, c := range r.Calls {
+			if !json.Valid(c.Args) {
+				quoted, _ := json.Marshal(string(c.Args))
+				r.Calls[i].Args = quoted
+			}
+		}
 		b, err := json.Marshal(r.Calls)
 		if err != nil {
 			return err
