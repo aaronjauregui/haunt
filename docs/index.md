@@ -60,6 +60,8 @@ of what exists and why; these pages are the map across packages.
   trust, memory, skills, the transcript, and the fake model server.
 - [Hacking](dev/hacking.md): building, the headless-sway tests, the fake
   model server, demos, the evals on a real model, logging.
+- [Eval reports](dev/eval-reports/): two full eval runs, one on GLM 5.3
+  and one on Gemma 4 31B on a local llama.cpp server.
 
 Reference for a package is `go doc ./internal/<name>`, or the module on
 pkg.go.dev.

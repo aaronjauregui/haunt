@@ -224,6 +224,13 @@ trial.
 The baseline is local and per model: a run against a different model
 from the baseline's is shown without deltas.
 
+Two full runs are kept in `docs/dev/eval-reports/`, each a run's
+`report.md` with its local endpoints replaced by placeholders:
+[GLM 5.3 on z.ai's API](eval-reports/2026-10-11-glm-5.3.md) and
+[Gemma 4 31B (QAT, Q4) on a local llama.cpp server](eval-reports/2026-10-11-gemma-4.md).
+The draw and change-picture cases fail in both because the image
+backend was not running.
+
 ## Logging
 
 The log is leveled and divided by topic (`internal/hlog`). Default is
