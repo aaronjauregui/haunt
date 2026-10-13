@@ -4,13 +4,6 @@
 
 A desktop companion for Wayland inspired by the venerable Ukagaka. A ghost lives on your screen: a character with a personality, a shell of layered art that blinks and changes expression, and a balloon it speaks in.
 
-For devs: a change to how a ghost behaves comes with an eval case. Add one to
-[eval_cases_test.go](cmd/haunt/eval_cases_test.go), run `make eval`, and compare
-against your baseline ([how](docs/dev/hacking.md#evals), [sample runs](docs/dev/eval-reports/)).
-Every action a ghost takes goes through `runTool` in [act.go](internal/ghost/act.go);
-the reasons for the consent and taint rules are in [decisions.md](docs/dev/decisions.md#effects).
-Read them before loosening one.
-
 ![A ghost dragged across the screen, asked "what are you?" by typing at it, and answering in its balloon](docs/media/demo.gif)
 
 It remembers you across sessions, takes on reminders, paints a picture when you ask for one, looks things up on the web if you let it, can act through the tool servers you give it, and speaks first now and then, within a daily allowance you set.
@@ -20,6 +13,14 @@ Note that this is not intended to be compatible with Ukagaka, it's a ground-up r
 Haunt controls the body and the conscience: the screen, consent, budgets, quiet hours, and consent gates. A ghost is art plus a persona, with no code to write. One that wants scripted logic ships a sandboxed WASM brain; one that wants to think does so with the model you choose, local or cloud, over any OpenAI-compatible endpoint, while haunt keeps its conversation, its memory as plain Markdown files, and its skills.
 
 Most of the code here was written by an LLM, under my direction and review.
+
+> [!IMPORTANT]
+> **For devs:** a change to how a ghost behaves comes with an eval case. Add one to
+> [eval_cases_test.go](cmd/haunt/eval_cases_test.go), run `make eval`, and compare
+> against your baseline ([how](docs/dev/hacking.md#evals), [sample runs](docs/dev/eval-reports/)).
+> Every action a ghost takes goes through `runTool` in [act.go](internal/ghost/act.go);
+> the reasons for the consent and taint rules are in [decisions.md](docs/dev/decisions.md#effects).
+> Read them before loosening one.
 
 ## Try it
 
