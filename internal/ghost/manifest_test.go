@@ -277,6 +277,27 @@ ghost = "Late, by the look of you."
 	}
 }
 
+// A [persona] key after a [[persona.example]] header is, in TOML, a key
+// of that example, and would vanish; the manifest is refused and the
+// message says where the key belongs.
+func TestManifestPersonaKeyAfterAnExample(t *testing.T) {
+	_, err := LoadManifest(writeManifest(t, `[ghost]
+name = "wisp"
+capabilities = ["message", "llm"]
+
+[persona]
+system = "You are Wisp."
+
+[[persona.example]]
+user = "hello"
+ghost = "Oh. You again."
+prefill = "Hm. "
+`))
+	if err == nil || !strings.Contains(err.Error(), `"prefill"`) || !strings.Contains(err.Error(), "before the first [[persona.example]]") {
+		t.Fatalf("err = %v, want prefill named and where it belongs", err)
+	}
+}
+
 // A section ghost.toml does not have is refused, by name: a manifest
 // written for another driver would otherwise run without what it asked
 // for there.

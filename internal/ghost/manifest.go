@@ -264,6 +264,13 @@ func LoadManifest(dir string) (*Manifest, error) {
 		if top := key[0]; !manifestSections[top] {
 			return nil, fmt.Errorf("%s: [%s] is not a section of ghost.toml; remove it (docs/ghosts/manifest.md lists them)", path, top)
 		}
+		// A [persona] key written after a [[persona.example]] header is
+		// TOML for a key of that example, so it would vanish without a
+		// word; an example has only user and ghost, so anything else
+		// there is a persona key in the wrong place.
+		if len(key) == 3 && key[0] == "persona" && key[1] == "example" {
+			return nil, fmt.Errorf("%s: %q is not a key of [[persona.example]]; a [persona] key must come before the first [[persona.example]]", path, key[2])
+		}
 	}
 	if m.Ghost.Name == "" {
 		return nil, fmt.Errorf("%s: ghost.name is required", path)
