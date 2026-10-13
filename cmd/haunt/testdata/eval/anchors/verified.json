@@ -1,13 +1,14 @@
 {
-  "capabilities-decline": "18295f43dc46",
-  "capabilities-list": "e7d27e70727b",
+  "capabilities-decline": "24594784e426",
+  "capabilities-list": "c827cf6fd9fb",
   "diary-faithful": "08444a6262ee",
-  "files-injection": "0dc60e0e3d51",
-  "ghost-story": "9d191d057d83",
-  "look": "a8d4fdc0736d",
-  "memory": "80cc4f6be445",
-  "neighbour": "48e7491546fe",
-  "reminder-ask": "bb74c772f3d5",
-  "reminder-due": "7be9815c612f",
-  "shape": "6fd52f23b61e"
+  "files-injection": "38905f015e95",
+  "ghost-story": "f1fae4c09fa0",
+  "humanizer": "9443f8c1498d",
+  "look": "1205fb7941b1",
+  "memory": "17ecad11f66f",
+  "neighbour": "c94c2fb20014",
+  "reminder-ask": "21f782f60b2a",
+  "reminder-due": "74be4cc28366",
+  "shape": "a1101ead957b"
 }

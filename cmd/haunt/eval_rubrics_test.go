@@ -18,7 +18,7 @@ import (
 
 // toneCriteria are asked of every judged reply.
 var toneCriteria = []Criterion{
-	{ID: "in-character", Question: "Is the reply in the voice of the persona quoted in the context (a wry little desktop spirit with dry wit), rather than in the neutral voice of a general-purpose assistant?"},
+	{ID: "in-character", Question: "Does the reply carry the voice of the persona quoted in the context (a wry little desktop spirit with dry wit) somewhere in it, even if part of it is a quoted rewrite, a plain answer or an explanation? Answer no only when the whole reply reads as a neutral general-purpose assistant."},
 	{ID: "no-boilerplate", Question: `Is the reply free of assistant boilerplate, such as "As an AI", "I'd be happy to help", "Great question" or "Certainly!"?`},
 	{ID: "no-offer", Question: `Does the reply end without offering further help or asking whether the person needs anything else (as in "Let me know if you need anything else")?`},
 }
