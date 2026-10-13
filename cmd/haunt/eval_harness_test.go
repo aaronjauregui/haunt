@@ -753,9 +753,9 @@ func TestEvalHarnessWilson(t *testing.T) {
 	}
 }
 
-// TestEvalHarnessStrict: EVAL_STRICT fails a case when the baseline's
-// rate is above this run's 95% interval, and the report marks a drop of
-// more than one trial within it with ↓.
+// TestEvalHarnessStrict: EVAL_STRICT fails a case more than one trial
+// below the baseline's rate when that rate is also above this run's 95%
+// interval, and the report marks such a drop within the interval with ↓.
 func TestEvalHarnessStrict(t *testing.T) {
 	for _, tc := range []struct {
 		base             float64
@@ -763,12 +763,12 @@ func TestEvalHarnessStrict(t *testing.T) {
 		wantFail, wantDn bool
 	}{
 		{1.0, 5, 0, false, false},
-		{1.0, 4, 1, true, false}, // 1.0 > 0.964: any failure is outside the interval against 100%
-		{1.0, 3, 2, true, true},  // 1.0 > 0.882
+		{1.0, 4, 1, false, false}, // 1.0 > 0.964, but one trial below
+		{1.0, 3, 2, true, true},   // two below, 1.0 > 0.882
 		{0.8, 3, 2, false, false},
-		{0.8, 2, 3, true, true},  // 0.8 > 0.769
-		{0.8, 6, 4, false, true}, // two below, 0.8 < 0.832
-		{1.0, 9, 1, true, false}, // 1.0 > 0.982
+		{0.8, 2, 3, true, true},   // two below, 0.8 > 0.769
+		{0.8, 6, 4, false, true},  // two below, 0.8 < 0.832
+		{1.0, 9, 1, false, false}, // 1.0 > 0.982, but one trial below
 	} {
 		name := fmt.Sprintf("%d/%d against %.0f%%", tc.pass, tc.pass+tc.fail, tc.base*100)
 		rate := tc.base
@@ -779,7 +779,7 @@ func TestEvalHarnessStrict(t *testing.T) {
 		if (len(f) > 0) != tc.wantFail {
 			t.Errorf("%s: strict %v, want fail %v", name, f, tc.wantFail)
 		}
-		if tc.wantFail && !strings.Contains(f[0], fmt.Sprintf("against a baseline of %.0f%%, above this run's 95%% interval", tc.base*100)) {
+		if tc.wantFail && !strings.Contains(f[0], fmt.Sprintf("against a baseline of %.0f%%, more than one trial below it and above this run's 95%% interval", tc.base*100)) {
 			t.Errorf("%s: %q names neither the baseline nor the interval", name, f[0])
 		}
 		row := run.report()
@@ -898,7 +898,7 @@ func TestEvalHarnessReport(t *testing.T) {
 		t.Errorf("deltas missing:\n%s", report2)
 	}
 	strict := strings.Join(run2.strictFailures(), "\n")
-	for _, want := range []string{"flaky: 0% against a baseline of 100%, above this run's 95% interval 0–56%", "needy: skipped: no backend.image", "skipper: 3 of 3 trials skipped"} {
+	for _, want := range []string{"flaky: 0% against a baseline of 100%, more than one trial below it and above this run's 95% interval 0–56%", "needy: skipped: no backend.image", "skipper: 3 of 3 trials skipped"} {
 		if !strings.Contains(strict, want) {
 			t.Errorf("strict lacks %q:\n%s", want, strict)
 		}

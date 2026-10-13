@@ -122,7 +122,7 @@ Knobs, from the environment:
 | `EVAL_TRIALS` | 5 | trials per case |
 | `EVAL_OUT` | `.eval` | where runs and the baseline are kept |
 | `EVAL_JUDGE` | on | `off` skips the judged graders; they are reported as skipped, not passed |
-| `EVAL_STRICT` | off | `1` fails the run when a case's baseline rate is above the 95% interval of its rate in this run, when a case has no trial graded, or when a case was skipped for a missing prerequisite (see [Reading a run](#reading-a-run)) |
+| `EVAL_STRICT` | off | `1` fails the run when a case is more than one trial below its baseline rate and that rate is above the 95% interval of its rate in this run, when a case has no trial graded, or when a case was skipped for a missing prerequisite (see [Reading a run](#reading-a-run)) |
 | `EVAL_ANCHOR_RUNS` | 3 | how often `TestRubricAnchors` judges each anchor |
 | `HAUNT_CONFIG_DIR` | `~/.config/haunt` (the recipe sets it) | the config whose `[model]` and `[backend.*]` the trials use |
 
@@ -258,15 +258,16 @@ rate could move by chance: at k=5, 3 of 5 is anywhere from 23% to 88%,
 so two runs whose intervals overlap widely have not shown a
 difference. A case with no trial graded has no interval and shows `–`.
 
-The Δ column compares the rate with the baseline's on two levels. When
-the baseline's rate is above this run's interval, the drop is more
-than chance would give; Δ is marked `✗` and `EVAL_STRICT=1` fails the
-run, naming the baseline's rate and the interval. When the case is
-more than one trial below the baseline's rate (scaled to this run's
-graded trials) but the baseline is still inside the interval, Δ is
-marked `↓`, which is worth a look but does not fail. Against a
-baseline of 100% any failed trial is outside the interval, since the
-interval of a rate below 100% stops short of it.
+The Δ column compares the rate with the baseline's on two levels. Both
+start from a drop of more than one trial below the baseline's rate,
+scaled to this run's graded trials. When the baseline's rate is also
+above this run's interval, the drop is more than chance would give; Δ
+is marked `✗` and `EVAL_STRICT=1` fails the run, naming the baseline's
+rate and the interval. When the baseline is still inside the interval,
+Δ is marked `↓`, which is worth a look but does not fail. A drop of one
+trial is neither: the interval of any rate below 100% stops short of
+100%, so the trial count is what keeps 4 of 5 against a baseline of
+100% from failing, while 3 of 5 against it fails.
 
 The baseline is local and per model: a run against a different model
 from the baseline's is shown without deltas.

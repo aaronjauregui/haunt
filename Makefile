@@ -21,8 +21,9 @@ fmt:
 # `claude -p` on a Claude subscription. Spends quota; not part of `test`.
 # Results and report.md go to .eval/<timestamp>/ (EVAL_OUT moves .eval).
 # EVAL_CASES=focus|reminder picks cases, EVAL_JUDGE=off skips the judge,
-# EVAL_STRICT=1 fails when the baseline's rate is above the run's 95% interval
-# or on a case skipped for a missing prerequisite. -count=1 because a
+# EVAL_STRICT=1 fails when a case is more than one trial below the baseline's
+# rate and that rate is above the run's 95% interval, or on a case skipped
+# for a missing prerequisite. -count=1 because a
 # cached eval would be no eval at all. The test binary gives every test
 # an empty config unless HAUNT_CONFIG_DIR is set, and the evals run on the
 # person's own, so the recipe sets it (to the person's, unless given).
