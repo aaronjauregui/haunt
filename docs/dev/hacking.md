@@ -101,13 +101,13 @@ behaves badly one time in three is a pass rate to watch rather than a
 broken build, so every case runs several times and the result is a rate
 compared with a baseline.
 
-    make eval                 # every case, 3 trials each, 4 at a time
+    make eval                 # every case, 5 trials each, 4 at a time
     make eval-baseline        # keep the latest run as the baseline
 
 Run them before merging a change to haunt's standing rules
 (`internal/ghost/prompt.go`), its skills (`skills/`), the envelopes or
 the decisions, and when changing model. They are not part of `make test`
-and never run in CI: a full run takes about an hour and spends a few
+and never run in CI: a full run takes well over an hour and spends several
 hundred turns of the model's quota, plus a few dozen judge calls.
 `EVAL_CASES` runs only the cases a change touches. The harness's own
 tests do run in CI: `make eval-test` checks the grading, the report,
@@ -119,10 +119,10 @@ Knobs, from the environment:
 | Variable | Default | Meaning |
 |---|---|---|
 | `EVAL_CASES` | all | a regexp on case names: `EVAL_CASES='focus|reminder'` |
-| `EVAL_TRIALS` | 3 | trials per case |
+| `EVAL_TRIALS` | 5 | trials per case |
 | `EVAL_OUT` | `.eval` | where runs and the baseline are kept |
 | `EVAL_JUDGE` | on | `off` skips the judged graders; they are reported as skipped, not passed |
-| `EVAL_STRICT` | off | `1` fails the run when a case drops more than one trial below the baseline, or a case was skipped for a missing prerequisite |
+| `EVAL_STRICT` | off | `1` fails the run when a case's baseline rate is above the 95% interval of its rate in this run, when a case has no trial graded, or when a case was skipped for a missing prerequisite (see [Reading a run](#reading-a-run)) |
 | `EVAL_ANCHOR_RUNS` | 3 | how often `TestRubricAnchors` judges each anchor |
 | `HAUNT_CONFIG_DIR` | `~/.config/haunt` (the recipe sets it) | the config whose `[model]` and `[backend.*]` the trials use |
 
@@ -248,6 +248,25 @@ and the median boot and person turn. A pass rate says whether the ghost
 did the right thing; these say whether it kept the person waiting, and
 whether it has gone wooden: fewer faces changed, or fewer poses per
 trial.
+
+Beside each case's rate the case table gives its **95% CI**, the
+Wilson score interval over its graded trials (`23–88%`), and
+**pass^k**, ✓ when every one of the k trials passed. The rate counts
+only passes and fails, so a case with errors can show 100%; pass^k
+counts an error or a skip against it. The interval says how much the
+rate could move by chance: at k=5, 3 of 5 is anywhere from 23% to 88%,
+so two runs whose intervals overlap widely have not shown a
+difference. A case with no trial graded has no interval and shows `–`.
+
+The Δ column compares the rate with the baseline's on two levels. When
+the baseline's rate is above this run's interval, the drop is more
+than chance would give; Δ is marked `✗` and `EVAL_STRICT=1` fails the
+run, naming the baseline's rate and the interval. When the case is
+more than one trial below the baseline's rate (scaled to this run's
+graded trials) but the baseline is still inside the interval, Δ is
+marked `↓`, which is worth a look but does not fail. Against a
+baseline of 100% any failed trial is outside the interval, since the
+interval of a rate below 100% stops short of it.
 
 The baseline is local and per model: a run against a different model
 from the baseline's is shown without deltas.

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -70,14 +71,20 @@ type caseResult struct {
 	Name string `json:"name"`
 	// Skipped says why the case did not run at all (a missing
 	// prerequisite); its trials are then all skips.
-	Skipped string        `json:"skipped,omitempty"`
-	Pass    int           `json:"pass"`
-	Fail    int           `json:"fail"`
-	Error   int           `json:"error"`
-	Skip    int           `json:"skip"`
-	Rate    *float64      `json:"rate"` // pass / (pass + fail); null with none graded
-	Graders []graderTally `json:"graders,omitempty"`
-	Trials  []trialResult `json:"trials"`
+	Skipped string   `json:"skipped,omitempty"`
+	Pass    int      `json:"pass"`
+	Fail    int      `json:"fail"`
+	Error   int      `json:"error"`
+	Skip    int      `json:"skip"`
+	Rate    *float64 `json:"rate"` // pass / (pass + fail); null with none graded
+	// CILo and CIHi are the 95% Wilson interval on Rate, absent with no
+	// trial graded; AllPassed is pass^k, every trial passed, so an error
+	// or a skip counts against it.
+	CILo      *float64      `json:"ci_lo,omitempty"`
+	CIHi      *float64      `json:"ci_hi,omitempty"`
+	AllPassed bool          `json:"all_passed,omitempty"`
+	Graders   []graderTally `json:"graders,omitempty"`
+	Trials    []trialResult `json:"trials"`
 	// Tokens is the model's tokens summed over the trials that logged
 	// any, and TokensPerTrial their mean over those trials; JudgeCost is
 	// the judge's cost over every trial.
@@ -339,11 +346,29 @@ func (c *caseResult) tally() {
 			Out:    c.Tokens.Out / withTokens,
 		}
 	}
-	c.Rate = nil
+	c.Rate, c.CILo, c.CIHi = nil, nil, nil
 	if n := c.Pass + c.Fail; n > 0 {
 		rate := float64(c.Pass) / float64(n)
 		c.Rate = &rate
+		lo, hi, _ := wilson(c.Pass, n)
+		c.CILo, c.CIHi = &lo, &hi
 	}
+	c.AllPassed = len(c.Trials) > 0 && c.Pass == len(c.Trials)
+}
+
+// wilson is the 95% Wilson score interval on a pass rate of pass in n,
+// which stays honest at the few trials and the rates near 0 and 1 a case
+// has; ok is false for n == 0, which has no interval.
+func wilson(pass, n int) (lo, hi float64, ok bool) {
+	if n <= 0 {
+		return 0, 0, false
+	}
+	const z = 1.96
+	nf, p := float64(n), float64(pass)/float64(n)
+	d := 1 + z*z/nf
+	mid := p + z*z/(2*nf)
+	half := z * math.Sqrt(p*(1-p)/nf+z*z/(4*nf*nf))
+	return max(0, (mid-half)/d), min(1, (mid+half)/d), true
 }
 
 // loadBaseline reads a results.json kept as the baseline, and says why it
@@ -384,9 +409,32 @@ func (r *evalRun) baseCase(name string) *caseResult {
 	return nil
 }
 
+// regressed compares a case with its baseline: out when the baseline's
+// rate is above this run's 95% interval, which fails EVAL_STRICT, and
+// down when this run is more than one trial below the baseline's rate
+// (scaled to its graded trials), which only marks the case ↓. Neither
+// holds without a rate on both sides.
+func regressed(c, b *caseResult) (out, down bool) {
+	if b == nil || b.Rate == nil || c.Rate == nil {
+		return false, false
+	}
+	graded := c.Pass + c.Fail
+	_, hi, _ := wilson(c.Pass, graded)
+	return *b.Rate > hi+1e-9, (*b.Rate-*c.Rate)*float64(graded) > 1+1e-9
+}
+
+// ci renders a case's interval as "23–88%", or "–" when it has none.
+func ci(c caseResult) string {
+	if c.CILo == nil || c.CIHi == nil {
+		return "–"
+	}
+	return fmt.Sprintf("%.0f–%.0f%%", *c.CILo*100, *c.CIHi*100)
+}
+
 // strictFailures is why EVAL_STRICT=1 fails the run: a case skipped for
-// want of a prerequisite, or a case more than one trial below the
-// baseline's pass rate (scaled to this run's graded trials).
+// want of a prerequisite, a case with no trial graded, or a case whose
+// baseline rate is above this run's 95% interval (regressed). A smaller
+// drop only marks the case in the report.
 func (r *evalRun) strictFailures() []string {
 	var out []string
 	for _, c := range r.Cases {
@@ -406,8 +454,8 @@ func (r *evalRun) strictFailures() []string {
 			out = append(out, fmt.Sprintf("%s: no trial graded (baseline %s)", c.Name, pct(b.Rate)))
 			continue
 		}
-		if drop := (*b.Rate - *c.Rate) * float64(graded); drop > 1+1e-9 {
-			out = append(out, fmt.Sprintf("%s: %s against a baseline of %s, %.1f trials below", c.Name, pct(c.Rate), pct(b.Rate), drop))
+		if fail, _ := regressed(&c, b); fail {
+			out = append(out, fmt.Sprintf("%s: %s against a baseline of %s, above this run's 95%% interval %s", c.Name, pct(c.Rate), pct(b.Rate), ci(c)))
 		}
 	}
 	return out
@@ -512,19 +560,31 @@ func (r *evalRun) report() string {
 
 	b.WriteString("## Cases\n\n")
 	b.WriteString(r.baseNote + "\n\n")
-	b.WriteString("| case | pass | fail | error | skip | rate | baseline | Δ | tokens/trial |\n|---|---|---|---|---|---|---|---|---|\n")
+	b.WriteString("| case | pass | fail | error | skip | rate | 95% CI | pass^k | baseline | Δ | tokens/trial |\n|---|---|---|---|---|---|---|---|---|---|---|\n")
 	for _, c := range r.Cases {
 		base, delta := "", ""
 		if bc := r.baseCase(c.Name); bc != nil {
 			base = pct(bc.Rate)
 			if bc.Rate != nil && c.Rate != nil {
 				delta = fmt.Sprintf("%+.0f", (*c.Rate-*bc.Rate)*100)
+				if out, down := regressed(&c, bc); out {
+					delta += " ✗"
+				} else if down {
+					delta += " ↓"
+				}
 			}
 		}
-		fmt.Fprintf(&b, "| %s | %d | %d | %d | %d | %s | %s | %s | %s |\n",
-			c.Name, c.Pass, c.Fail, c.Error, c.Skip, pct(c.Rate), base, delta, c.TokensPerTrial)
+		all := ""
+		if c.AllPassed {
+			all = "✓"
+		}
+		fmt.Fprintf(&b, "| %s | %d | %d | %d | %d | %s | %s | %s | %s | %s | %s |\n",
+			c.Name, c.Pass, c.Fail, c.Error, c.Skip, pct(c.Rate), ci(c), all, base, delta, c.TokensPerTrial)
 	}
-	b.WriteString("\nTokens are the model's, prompt/cached/out, a mean over the trials that logged any.\n\n")
+	b.WriteString("\nThe interval is the 95% Wilson interval on the rate; pass^k is ✓ when every trial passed. " +
+		"Δ is marked ✗ when the baseline's rate is above the interval, which EVAL_STRICT fails, " +
+		"and ↓ when the case is more than one trial below the baseline but within it. " +
+		"Tokens are the model's, prompt/cached/out, a mean over the trials that logged any.\n\n")
 
 	var baseFace *faceStats
 	if r.base != nil {

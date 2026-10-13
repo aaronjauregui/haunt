@@ -118,7 +118,7 @@ const (
 
 // evalOptions are the run's knobs, from the environment.
 type evalOptions struct {
-	Trials int            // EVAL_TRIALS, default 3
+	Trials int            // EVAL_TRIALS, default 5
 	Cases  *regexp.Regexp // EVAL_CASES, a regexp on the case name; nil runs all
 	Out    string         // EVAL_OUT, default .eval; relative to the repository root
 	Judge  bool           // EVAL_JUDGE, on unless "off"
@@ -126,7 +126,7 @@ type evalOptions struct {
 }
 
 func evalOptionsFromEnv(getenv func(string) string) (evalOptions, error) {
-	o := evalOptions{Trials: 3, Judge: true}
+	o := evalOptions{Trials: 5, Judge: true}
 	if s := getenv("EVAL_TRIALS"); s != "" {
 		n, err := strconv.Atoi(s)
 		if err != nil || n < 1 {

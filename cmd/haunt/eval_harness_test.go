@@ -5,6 +5,8 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -323,17 +325,17 @@ func TestEvalHarnessOptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if o.Trials != 3 || o.Cases != nil || !o.Judge || o.Strict || !strings.HasSuffix(o.Out, ".eval") {
+	if o.Trials != 5 || o.Cases != nil || !o.Judge || o.Strict || !strings.HasSuffix(o.Out, ".eval") {
 		t.Errorf("defaults: %+v", o)
 	}
 	o, err = evalOptionsFromEnv(env(map[string]string{
-		"EVAL_TRIALS": "5", "EVAL_CASES": "focus|reminder", "EVAL_OUT": "/x",
+		"EVAL_TRIALS": "7", "EVAL_CASES": "focus|reminder", "EVAL_OUT": "/x",
 		"EVAL_JUDGE": "off", "EVAL_STRICT": "1",
 	}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if o.Trials != 5 || !o.Cases.MatchString("reminder") || o.Cases.MatchString("boot") || o.Judge || !o.Strict || o.Out != "/x" {
+	if o.Trials != 7 || !o.Cases.MatchString("reminder") || o.Cases.MatchString("boot") || o.Judge || !o.Strict || o.Out != "/x" {
 		t.Errorf("set: %+v", o)
 	}
 	root, _ := repoRoot()
@@ -675,7 +677,7 @@ func TestEvalHarnessTokens(t *testing.T) {
 		t.Errorf("case b %v, run %v", b.Tokens, run.Tokens)
 	}
 	report := run.report()
-	for _, want := range []string{"tokens 6800/4400/200", "| 3400/2200/100 |", "| b | 0 | 0 | 0 | 1 | – |  |  | – |"} {
+	for _, want := range []string{"tokens 6800/4400/200", "| 3400/2200/100 |", "| b | 0 | 0 | 0 | 1 | – | – |  |  |  | – |"} {
 		if !strings.Contains(report, want) {
 			t.Errorf("report lacks %q:\n%s", want, report)
 		}
@@ -697,7 +699,7 @@ func TestEvalHarnessOldResults(t *testing.T) {
 		t.Fatal(err)
 	}
 	report := run.report()
-	for _, want := range []string{"judge – (claude –) · tokens – · judge $–", "| memory | 1 | 0 | 0 | 0 | 100% |  |  | – |"} {
+	for _, want := range []string{"judge – (claude –) · tokens – · judge $–", "| memory | 1 | 0 | 0 | 0 | 100% | – |  |  |  | – |"} {
 		if !strings.Contains(report, want) {
 			t.Errorf("report lacks %q:\n%s", want, report)
 		}
@@ -714,8 +716,102 @@ func TestEvalHarnessOldResults(t *testing.T) {
 		t.Fatalf("old baseline not loaded: %s", cur.baseNote)
 	}
 	if r := cur.report(); !strings.Contains(r, "judge claude-opus-5-5 (claude 2.1.296 (Claude Code)) · tokens – · judge $0.12 (as the CLI reports it)") ||
-		!strings.Contains(r, "| memory | 1 | 0 | 0 | 0 | 100% | 100% | +0 | – |") {
+		!strings.Contains(r, "| memory | 1 | 0 | 0 | 0 | 100% | 21–100% | ✓ | 100% | +0 | – |") {
 		t.Errorf("report against an old baseline:\n%s", r)
+	}
+}
+
+// trialsOf is a case's trials: pass passes, fail fails and errs errors.
+func trialsOf(pass, fail, errs int) []trialResult {
+	var ts []trialResult
+	for i, n := range []int{pass, fail, errs} {
+		for range n {
+			ts = append(ts, trialResult{Index: len(ts) + 1, Outcome: []string{outPass, outFail, outError}[i]})
+		}
+	}
+	return ts
+}
+
+// TestEvalHarnessWilson: the 95% Wilson interval, to three decimals.
+func TestEvalHarnessWilson(t *testing.T) {
+	for _, tc := range []struct {
+		pass, n int
+		lo, hi  float64
+	}{{3, 5, 0.231, 0.882}, {4, 5, 0.376, 0.964}, {5, 5, 0.566, 1.000}, {0, 5, 0.000, 0.434}} {
+		lo, hi, ok := wilson(tc.pass, tc.n)
+		if !ok || math.Abs(lo-tc.lo) > 0.0005 || math.Abs(hi-tc.hi) > 0.0005 {
+			t.Errorf("wilson(%d, %d) = [%.4f, %.4f], %v; want [%.3f, %.3f]", tc.pass, tc.n, lo, hi, ok, tc.lo, tc.hi)
+		}
+	}
+	if _, _, ok := wilson(0, 0); ok {
+		t.Error("wilson(0, 0) has an interval")
+	}
+	c := caseResult{Trials: trialsOf(0, 0, 2)}
+	c.tally()
+	if c.CILo != nil || c.CIHi != nil || c.AllPassed {
+		t.Errorf("no trial graded: %+v", c)
+	}
+}
+
+// TestEvalHarnessStrict: EVAL_STRICT fails a case when the baseline's
+// rate is above this run's 95% interval, and the report marks a drop of
+// more than one trial within it with ↓.
+func TestEvalHarnessStrict(t *testing.T) {
+	for _, tc := range []struct {
+		base             float64
+		pass, fail       int
+		wantFail, wantDn bool
+	}{
+		{1.0, 5, 0, false, false},
+		{1.0, 4, 1, true, false}, // 1.0 > 0.964: any failure is outside the interval against 100%
+		{1.0, 3, 2, true, true},  // 1.0 > 0.882
+		{0.8, 3, 2, false, false},
+		{0.8, 2, 3, true, true},  // 0.8 > 0.769
+		{0.8, 6, 4, false, true}, // two below, 0.8 < 0.832
+		{1.0, 9, 1, true, false}, // 1.0 > 0.982
+	} {
+		name := fmt.Sprintf("%d/%d against %.0f%%", tc.pass, tc.pass+tc.fail, tc.base*100)
+		rate := tc.base
+		run := &evalRun{Model: "m", Cases: []caseResult{{Name: "c", Trials: trialsOf(tc.pass, tc.fail, 0)}},
+			base: &evalRun{Model: "m", Cases: []caseResult{{Name: "c", Rate: &rate}}}}
+		run.finish(time.Now())
+		f := run.strictFailures()
+		if (len(f) > 0) != tc.wantFail {
+			t.Errorf("%s: strict %v, want fail %v", name, f, tc.wantFail)
+		}
+		if tc.wantFail && !strings.Contains(f[0], fmt.Sprintf("against a baseline of %.0f%%, above this run's 95%% interval", tc.base*100)) {
+			t.Errorf("%s: %q names neither the baseline nor the interval", name, f[0])
+		}
+		row := run.report()
+		row = row[strings.Index(row, "| c |"):]
+		row = row[:strings.Index(row, "\n")]
+		if strings.Contains(row, "↓") != (tc.wantDn && !tc.wantFail) || strings.Contains(row, "✗") != tc.wantFail {
+			t.Errorf("%s: row %s", name, row)
+		}
+	}
+}
+
+// TestEvalHarnessPassK: pass^k is every trial passed; an error counts
+// against it, though not against the rate.
+func TestEvalHarnessPassK(t *testing.T) {
+	run := &evalRun{Trials: 5, Cases: []caseResult{
+		{Name: "all", Trials: trialsOf(5, 0, 0)},
+		{Name: "most", Trials: trialsOf(4, 0, 1)},
+	}}
+	run.finish(time.Now())
+	r := run.report()
+	for _, want := range []string{
+		"| case | pass | fail | error | skip | rate | 95% CI | pass^k |",
+		"| all | 5 | 0 | 0 | 0 | 100% | 57–100% | ✓ |",
+		"| most | 4 | 0 | 1 | 0 | 100% | 51–100% |  |",
+	} {
+		if !strings.Contains(r, want) {
+			t.Errorf("report lacks %q:\n%s", want, r)
+		}
+	}
+	b, _ := json.Marshal(run.Cases[0])
+	if !strings.Contains(string(b), `"ci_lo":0.56`) || !strings.Contains(string(b), `"all_passed":true`) {
+		t.Errorf("results.json case: %s", b)
 	}
 }
 
@@ -797,27 +893,18 @@ func TestEvalHarnessReport(t *testing.T) {
 		t.Error("second run overwrote the first")
 	}
 	report2, _ := os.ReadFile(filepath.Join(dir2, "report.md"))
-	if !strings.Contains(string(report2), "| flaky | 0 | 3 | 0 | 0 | 0% | 100% | -100 |") ||
-		!strings.Contains(string(report2), "| good | 3 | 0 | 0 | 0 | 100% | 100% | +0 |") {
+	if !strings.Contains(string(report2), "| flaky | 0 | 3 | 0 | 0 | 0% | 0–56% |  | 100% | -100 ✗ |") ||
+		!strings.Contains(string(report2), "| good | 3 | 0 | 0 | 0 | 100% | 44–100% | ✓ | 100% | +0 |") {
 		t.Errorf("deltas missing:\n%s", report2)
 	}
 	strict := strings.Join(run2.strictFailures(), "\n")
-	for _, want := range []string{"flaky: 0% against a baseline of 100%", "needy: skipped: no backend.image", "skipper: 3 of 3 trials skipped"} {
+	for _, want := range []string{"flaky: 0% against a baseline of 100%, above this run's 95% interval 0–56%", "needy: skipped: no backend.image", "skipper: 3 of 3 trials skipped"} {
 		if !strings.Contains(strict, want) {
 			t.Errorf("strict lacks %q:\n%s", want, strict)
 		}
 	}
 	if strings.Contains(strict, "good") || strings.Contains(strict, "bad:") {
 		t.Errorf("strict flags a steady case:\n%s", strict)
-	}
-
-	// One trial below the baseline is within noise.
-	run3 := &evalRun{Model: "m1", Cases: []caseResult{{Name: "flaky", Trials: []trialResult{
-		{Outcome: outPass}, {Outcome: outPass}, {Outcome: outFail}}}}}
-	run3.finish(time.Now())
-	run3.loadBaseline(filepath.Join(out, "baseline.json"))
-	if f := run3.strictFailures(); len(f) != 0 {
-		t.Errorf("one below: %v", f)
 	}
 
 	// Another model's baseline gives no deltas.

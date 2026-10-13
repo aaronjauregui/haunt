@@ -17,11 +17,11 @@ fmt:
 	gofmt -l -w .
 
 # The evals: wisp on the real model in the config's [model], each case
-# run EVAL_TRIALS times (default 3) four at a time, graded by code and by
+# run EVAL_TRIALS times (default 5) four at a time, graded by code and by
 # `claude -p` on a Claude subscription. Spends quota; not part of `test`.
 # Results and report.md go to .eval/<timestamp>/ (EVAL_OUT moves .eval).
 # EVAL_CASES=focus|reminder picks cases, EVAL_JUDGE=off skips the judge,
-# EVAL_STRICT=1 fails on a drop of more than one trial below the baseline
+# EVAL_STRICT=1 fails when the baseline's rate is above the run's 95% interval
 # or on a case skipped for a missing prerequisite. -count=1 because a
 # cached eval would be no eval at all. The test binary gives every test
 # an empty config unless HAUNT_CONFIG_DIR is set, and the evals run on the
