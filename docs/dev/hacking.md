@@ -202,9 +202,9 @@ pass, or must fail and fail the criteria it names.
 
     go test -tags eval -run TestRubricAnchors ./cmd/haunt
 
-judges each anchor three times and fails a hand-written anchor that
-comes out otherwise, or a criterion the judge answers differently across runs;
-such a question is reworded until it does not. What the anchors prove
+judges each anchor three times and fails on a hand-written anchor that
+comes out otherwise, or whose criteria the judge answers differently
+across runs; such a question is reworded until it does not. What the anchors prove
 is that the judge is consistent on known replies: it gives the verdict
 decided for each, every time. They do not show that it grades unseen
 replies as a person would. The agreement rates on labelled anchors are
