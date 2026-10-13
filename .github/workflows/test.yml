@@ -34,3 +34,4 @@ jobs:
       - name: gofmt
         run: test -z "$(gofmt -l $(git ls-files '*.go' | grep -v '^third_party/'))"
       - run: make test
+      - run: make eval-test

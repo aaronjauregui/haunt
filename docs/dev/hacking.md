@@ -109,7 +109,10 @@ Run them before merging a change to haunt's standing rules
 the decisions, and when changing model. They are not part of `make test`
 and never run in CI: a full run takes about an hour and spends a few
 hundred turns of the model's quota, plus a few dozen judge calls.
-`EVAL_CASES` runs only the cases a change touches.
+`EVAL_CASES` runs only the cases a change touches. The harness's own
+tests do run in CI: `make eval-test` checks the grading, the report,
+the judge's call against a stub `claude` and the rig on the fake model,
+and spends nothing.
 
 Knobs, from the environment:
 

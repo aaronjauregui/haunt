@@ -1,6 +1,6 @@
 GO ?= go
 
-.PHONY: build test vet fmt eval eval-baseline demo demo-ai demo-ember demo-troupe demo-seriko demo-headless demo-record install-user clean
+.PHONY: build test vet fmt eval eval-baseline eval-test demo demo-ai demo-ember demo-troupe demo-seriko demo-headless demo-record install-user clean
 
 build:
 	$(GO) build ./...
@@ -44,6 +44,17 @@ eval-baseline:
 	if [ -z "$$latest" ]; then echo "no run under $(EVAL_OUT)/: make eval first"; exit 2; fi; \
 	cp "$(EVAL_OUT)/$$latest/results.json" "$(EVAL_OUT)/baseline.json"; \
 	echo "baseline: $(EVAL_OUT)/$$latest/results.json"
+
+# The eval harness's own tests: the grading, the report, the judge's call
+# against a stub `claude`, and the rig on the fake model in a headless
+# sway. No real model, no judge, nothing off the machine, so CI runs them.
+# TestEval and TestRubricAnchors spend quota, and are left out.
+# TestEvalHarnessMemoryWrite is skipped: ghost.MemoryWrite counts
+# skill_write as a write, for the echo check, and the graders do not.
+EVAL_TEST_RUN = ^(TestEvalHarness.*|TestEvalFaceAndPace|TestTurnsOfKind|TestTraceRecordIsTraceTurn|TestJudge.*|TestRig.*|TestEvalRigMultiday|TestMultidayAnchors)$$
+
+eval-test:
+	$(GO) test -tags eval -count=1 -run '$(EVAL_TEST_RUN)' -skip '^TestEvalHarnessMemoryWrite$$' -timeout 10m ./cmd/haunt
 
 # Opens a nested sway window in your current session with the whisper
 # ghost inside it. Close the window (or Ctrl-C) to stop.
