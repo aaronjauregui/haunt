@@ -4,6 +4,13 @@
 
 A desktop companion for Wayland inspired by the venerable Ukagaka. A ghost lives on your screen: a character with a personality, a shell of layered art that blinks and changes expression, and a balloon it speaks in.
 
+For devs: a change to how a ghost behaves comes with an eval case. Add one to
+[eval_cases_test.go](cmd/haunt/eval_cases_test.go), run `make eval`, and compare
+against your baseline ([how](docs/dev/hacking.md#evals), [sample runs](docs/dev/eval-reports/)).
+Every action a ghost takes goes through `runTool` in [act.go](internal/ghost/act.go);
+the reasons for the consent and taint rules are in [decisions.md](docs/dev/decisions.md#effects).
+Read them before loosening one.
+
 ![A ghost dragged across the screen, asked "what are you?" by typing at it, and answering in its balloon](docs/media/demo.gif)
 
 It remembers you across sessions, takes on reminders, paints a picture when you ask for one, looks things up on the web if you let it, can act through the tool servers you give it, and speaks first now and then, within a daily allowance you set.
