@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -64,6 +65,12 @@ type evalRun struct {
 	// there is none or why its deltas are not given.
 	base     *evalRun
 	baseNote string
+	// verified is verified.json, the hash each rubric had when its
+	// anchors last all held, and anchored the rubrics that have anchors;
+	// verifiedErr says why verified.json could not be read.
+	verified    map[string]string
+	anchored    map[string]bool
+	verifiedErr error
 }
 
 // caseResult is one case's trials and the tallies over them.
@@ -465,10 +472,47 @@ func (r *evalRun) strictFailures() []string {
 	return out
 }
 
+// loadVerified reads the anchors' record from dir, for the report's
+// warnings. A dir that is not there gives no anchored rubrics, so no
+// warnings.
+func (r *evalRun) loadVerified(dir string) {
+	r.anchored = anchoredRubrics(dir)
+	r.verified, r.verifiedErr = loadVerified(dir)
+}
+
+// rubricWarnings are the report's warnings on the run's rubrics: one
+// whose hash differs from the one its anchors last all held at, or that
+// has never held. A rubric with no anchors has nothing to be verified
+// against and is not warned about.
+func (r *evalRun) rubricWarnings() []string {
+	var out []string
+	if r.verifiedErr != nil && len(r.anchored) > 0 {
+		out = append(out, fmt.Sprintf("warning: %s unreadable: %v", verifiedFile, r.verifiedErr))
+	}
+	names := make([]string, 0, len(r.Rubrics))
+	for name := range r.Rubrics {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if !r.anchored[name] {
+			continue
+		}
+		switch v, ok := r.verified[name]; {
+		case !ok:
+			out = append(out, fmt.Sprintf("warning: rubric %s never verified against its anchors", name))
+		case v != r.Rubrics[name]:
+			out = append(out, fmt.Sprintf("warning: rubric %s changed since its anchors last passed", name))
+		}
+	}
+	return out
+}
+
 // write makes the run's directory under root and fills it: results.json,
 // report.md and the graded trials' traces. It returns the directory.
 func (r *evalRun) write(root string) (string, error) {
 	r.loadBaseline(filepath.Join(root, "baseline.json"))
+	r.loadVerified(anchorsDir)
 	dir := filepath.Join(root, r.Started.Format("20060102-150405"))
 	for n := 2; ; n++ {
 		if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) {
@@ -535,6 +579,9 @@ func (r *evalRun) report() string {
 	}
 	fmt.Fprintf(&b, "judge %s (claude %s) · tokens %s · judge $%s\n\n",
 		dash(r.JudgeModel), dash(r.ClaudeVersion), r.Tokens, cost)
+	if w := r.rubricWarnings(); len(w) > 0 {
+		b.WriteString("- " + strings.Join(w, "\n- ") + "\n\n")
+	}
 	if r.CasesFilter != "" {
 		fmt.Fprintf(&b, "Cases matching `%s`.\n\n", r.CasesFilter)
 	}

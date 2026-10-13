@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"os"
 	"os/exec"
@@ -18,6 +19,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -426,8 +428,13 @@ func rubric(r *Rubric) *Rubric {
 	return r
 }
 
-// anchorsDir holds the rubric anchors.
-const anchorsDir = "testdata/eval/anchors"
+// anchorsDir holds the rubric anchors, and verifiedFile beside them
+// records, for each rubric whose anchors last all held, the hash it had
+// then (rubricHash), so a run's report can say which rubrics changed since.
+const (
+	anchorsDir   = "testdata/eval/anchors"
+	verifiedFile = "verified.json"
+)
 
 // anchor is one saved reply with a known verdict.
 type anchor struct {
@@ -448,6 +455,9 @@ func loadAnchors(dir string) ([]anchor, error) {
 	}
 	var out []anchor
 	for _, f := range files {
+		if filepath.Base(f) == verifiedFile {
+			continue
+		}
 		b, err := os.ReadFile(f)
 		if err != nil {
 			return nil, err
@@ -480,6 +490,60 @@ func loadAnchors(dir string) ([]anchor, error) {
 		out = append(out, a)
 	}
 	return out, nil
+}
+
+// loadVerified reads dir's verified.json, {rubric: hash}; no file is an
+// empty record, since no rubric has been verified yet.
+func loadVerified(dir string) (map[string]string, error) {
+	b, err := os.ReadFile(filepath.Join(dir, verifiedFile))
+	if errors.Is(err, fs.ErrNotExist) {
+		return map[string]string{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	v := map[string]string{}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return nil, fmt.Errorf("%s: %v", verifiedFile, err)
+	}
+	return v, nil
+}
+
+// recordVerified sets each held rubric's entry in dir's verified.json to
+// its current hash and leaves every other entry as it was.
+func recordVerified(dir string, held []string) error {
+	v, err := loadVerified(dir)
+	if err != nil {
+		return err
+	}
+	for _, name := range held {
+		v[name] = rubricHash(rubrics[name])
+	}
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, verifiedFile), append(b, '\n'), 0o644)
+}
+
+// anchoredRubrics names the rubrics that have an anchor under dir. It
+// reads only each file's rubric and passes over what it cannot read, so
+// a report never fails on it; a missing dir has none.
+func anchoredRubrics(dir string) map[string]bool {
+	files, _ := filepath.Glob(filepath.Join(dir, "*.json"))
+	out := map[string]bool{}
+	for _, f := range files {
+		if filepath.Base(f) == verifiedFile {
+			continue
+		}
+		var a struct {
+			Rubric string `json:"rubric"`
+		}
+		if b, err := os.ReadFile(f); err == nil && json.Unmarshal(b, &a) == nil && a.Rubric != "" {
+			out[a.Rubric] = true
+		}
+	}
+	return out
 }
 
 // anchorHolds says whether one judging of anchor a came out as it must.
@@ -520,8 +584,10 @@ func anchorRuns(t *testing.T) int {
 // reply is judged EVAL_ANCHOR_RUNS times (default 3) and must come out as
 // its anchor says every time. A criterion whose verdict differs between
 // runs of the same reply is reported by name, since a question the judge
-// disagrees with itself on is reworded until it doesn't. It runs the real
-// judge on the person's subscription; EVAL_JUDGE=off skips it.
+// disagrees with itself on is reworded until it doesn't. Each rubric
+// whose anchors all held is recorded in verified.json with its hash,
+// even when other rubrics' anchors failed. It runs the real judge on the
+// person's subscription; EVAL_JUDGE=off skips it.
 func TestRubricAnchors(t *testing.T) {
 	if os.Getenv("EVAL_JUDGE") == "off" {
 		t.Skip("EVAL_JUDGE=off")
@@ -537,9 +603,37 @@ func TestRubricAnchors(t *testing.T) {
 		t.Fatal("the judge needs `claude` on PATH, logged in to a Claude subscription")
 	}
 	runs := anchorRuns(t)
+	var mu sync.Mutex
+	held := map[string]bool{}
+	for _, a := range anchors {
+		held[a.Rubric] = true
+	}
+	// The subtests run in parallel after this function returns, so the
+	// record is written once they have all finished.
+	t.Cleanup(func() {
+		var names []string
+		for name, ok := range held {
+			if ok {
+				names = append(names, name)
+			}
+		}
+		slices.Sort(names)
+		if err := recordVerified(anchorsDir, names); err != nil {
+			t.Errorf("recording verified rubrics: %v", err)
+			return
+		}
+		t.Logf("verified: %s", strings.Join(names, ", "))
+	})
 	for _, a := range anchors {
 		t.Run(strings.TrimSuffix(a.File, ".json"), func(t *testing.T) {
 			t.Parallel()
+			defer func() {
+				if t.Failed() {
+					mu.Lock()
+					held[a.Rubric] = false
+					mu.Unlock()
+				}
+			}()
 			r := rubrics[a.Rubric]
 			seen := map[string][]bool{}
 			for i := range runs {
@@ -904,5 +998,66 @@ func TestJudgeAnchors(t *testing.T) {
 		if _, err := loadAnchors(d); err == nil {
 			t.Errorf("%s: loaded", name)
 		}
+	}
+}
+
+// TestJudgeVerified: a missing verified.json is an empty record;
+// recordVerified sets the held rubrics' hashes and keeps every other
+// entry; loadAnchors and anchoredRubrics pass over the file.
+func TestJudgeVerified(t *testing.T) {
+	saved := rubrics
+	t.Cleanup(func() { rubrics = saved })
+	rubrics = map[string]*Rubric{}
+	r := rubric(&Rubric{Name: "anchored", Criteria: judgeTestRubric.Criteria})
+
+	dir := t.TempDir()
+	if v, err := loadVerified(dir); err != nil || len(v) != 0 {
+		t.Fatalf("no file: %v, %v", v, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, verifiedFile), []byte(`{"anchored":"old","other":"kept"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := recordVerified(dir, []string{"anchored"}); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(filepath.Join(dir, verifiedFile))
+	if want := "{\n  \"anchored\": \"" + rubricHash(r) + "\",\n  \"other\": \"kept\"\n}\n"; string(b) != want {
+		t.Errorf("verified.json = %s, want %s", b, want)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "good.json"), []byte(`{"rubric":"anchored","reply":"r","want":"pass"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	as, err := loadAnchors(dir)
+	if err != nil || len(as) != 1 {
+		t.Errorf("anchors beside verified.json = %+v, %v", as, err)
+	}
+	if got := anchoredRubrics(dir); len(got) != 1 || !got["anchored"] {
+		t.Errorf("anchoredRubrics = %v", got)
+	}
+	if got := anchoredRubrics(filepath.Join(dir, "absent")); len(got) != 0 {
+		t.Errorf("anchoredRubrics of a missing dir = %v", got)
+	}
+}
+
+// TestJudgeAnchorsDir: every anchor file in the tree loads, and
+// verified.json is not taken for one.
+func TestJudgeAnchorsDir(t *testing.T) {
+	files, _ := filepath.Glob(filepath.Join(anchorsDir, "*.json"))
+	want := 0
+	for _, f := range files {
+		if filepath.Base(f) != verifiedFile {
+			want++
+		}
+	}
+	as, err := loadAnchors(anchorsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(as) != want || want < 36 {
+		t.Errorf("loaded %d anchors of %d files, want all and at least 36", len(as), want)
+	}
+	if _, err := loadVerified(anchorsDir); err != nil {
+		t.Error(err)
 	}
 }

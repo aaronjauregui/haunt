@@ -196,15 +196,32 @@ What code cannot grade, the content and tone of a reply, a judge grades:
 to the tone questions too, which come from wisp's persona and the rules
 every ghost has.
 
-A rubric is only trusted once the judge agrees with its anchors: saved
-replies under `cmd/haunt/testdata/eval/anchors/` that must pass or must
-fail.
+A rubric's anchors are hand-written replies under
+`cmd/haunt/testdata/eval/anchors/`, each with a decided verdict: it must
+pass, or must fail and fail the criteria it names.
 
     go test -tags eval -run TestRubricAnchors ./cmd/haunt
 
-judges each anchor three times and fails a criterion the judge answers
-differently across runs; such a question is reworded until it does not.
-Run it after changing a rubric.
+judges each anchor three times and fails an anchor that comes out
+otherwise, or a criterion the judge answers differently across runs;
+such a question is reworded until it does not. What the anchors prove
+is that the judge is consistent on known replies: it gives the verdict
+decided for each, every time. They do not show that it grades unseen
+replies as a person would. The agreement rates on labelled anchors are
+the accuracy measure: how often the judge agrees with human labels on
+real replies, given separately for replies labelled pass and labelled
+fail.
+
+Each rubric whose anchors all held is recorded in
+`cmd/haunt/testdata/eval/anchors/verified.json` with its hash, the same
+hash a run's `results.json` records, and the test rewrites only those
+entries, even when other rubrics' anchors failed. The file is committed,
+so a rubric's change and its re-verification travel together. A run
+whose rubric's hash differs from the recorded one warns of it in the
+report's header (see [Reading a run](#reading-a-run)); a change to the
+shared tone questions or the prompt's template changes every rubric's
+hash. Run `TestRubricAnchors` after changing a rubric, and commit
+`verified.json` with the change.
 
 ### Reading a run
 
@@ -227,7 +244,13 @@ took. The second is what the run cost:
 that is, the model the judge ran on and what `claude --version`
 printed, the model's tokens over every trial as prompt/cached/out, and
 the judge's cost in dollars as the CLI reports it, which on a
-subscription is notional. The tokens are read from the brain's
+subscription is notional. Below them the header lists a warning for
+each rubric the run used that has anchors but whose hash is not the one
+in `verified.json`: `warning: rubric memory changed since its anchors
+last passed`, or `never verified against its anchors` when it has no
+entry there. Its verdicts in this run come from wording the anchors
+have not been checked against. A rubric with no anchors is never
+warned about. The tokens are read from the brain's
 `decide:`, `speak:` and `reflect:` lines in each trial's log. The case
 table's last column is a case's mean tokens per trial, over the trials
 that logged any. A value that is absent, from a trial whose log has no

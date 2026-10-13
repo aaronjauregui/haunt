@@ -791,6 +791,37 @@ func TestEvalHarnessStrict(t *testing.T) {
 	}
 }
 
+// TestEvalHarnessRubricWarnings: the report's header warns of an
+// anchored rubric whose hash differs from verified.json's or is missing
+// from it, and says nothing of a matching one or one with no anchors.
+func TestEvalHarnessRubricWarnings(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		verified map[string]string
+		want     string
+	}{
+		{"changed", map[string]string{"x": "bbb"}, "warning: rubric x changed since its anchors last passed"},
+		{"matching", map[string]string{"x": "aaa"}, ""},
+		{"missing", map[string]string{}, "warning: rubric x never verified against its anchors"},
+	} {
+		run := &evalRun{Rubrics: map[string]string{"x": "aaa", "loose": "ccc"},
+			verified: tc.verified, anchored: map[string]bool{"x": true}}
+		run.finish(time.Now())
+		report := run.report()
+		header := report[:strings.Index(report, "## Cases")]
+		if tc.want == "" {
+			if strings.Contains(header, "warning") {
+				t.Errorf("%s: warns:\n%s", tc.name, header)
+			}
+		} else if !strings.Contains(header, tc.want) {
+			t.Errorf("%s: header lacks %q:\n%s", tc.name, tc.want, header)
+		}
+		if strings.Contains(header, "loose") {
+			t.Errorf("%s: warns of a rubric with no anchors:\n%s", tc.name, header)
+		}
+	}
+}
+
 // TestEvalHarnessPassK: pass^k is every trial passed; an error counts
 // against it, though not against the rate.
 func TestEvalHarnessPassK(t *testing.T) {
