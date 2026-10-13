@@ -310,7 +310,10 @@ a page or a file has a `!` line under it, and a reply whose opening words
 you gave it ([Putting words in its mouth](running.md#putting-words-in-its-mouth))
 has `· led with "Well, actually"` under it. `-n` counts turns here, and
 lines without `-why`. The reasons live in the ghost's own store and only
-the last dozen turns keep them. The conversation is read from
+the last dozen turns keep them: a reply before those says "no reasons
+kept for this one — it is older than the trace", and a newer one with
+none, such as a turn that failed, says "no reasons recorded for this
+one". The conversation is read from
 `transcript.db` without writing to it, so `haunt history` works whether
 the ghost is running or not, and it is the whole conversation: turns the
 ghost carries only as a summary are still shown, with the summary as

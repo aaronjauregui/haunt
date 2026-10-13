@@ -245,6 +245,18 @@ func (b *modelBrain) reflectDay(day string, away bool) {
 		}
 		return
 	}
+	// Its reasons, as run keeps them for a turn that ends: without them
+	// `haunt history -why` would find a silent row with none of its own.
+	// A failed reflection, like a failed turn, keeps none.
+	acted, _, _ := t.marks()
+	g.noteWhy(Why{
+		Time:       time.Now(),
+		User:       t.input,
+		SelfPrompt: true,
+		Suppressed: true,
+		Acted:      acted,
+		Window:     g.currentWindow(),
+	})
 	b.record(t, TranscriptRow{Kind: rowSilent})
 	if _, ok := b.diaryEntry(day); ok {
 		g.log.Info(hlog.Memory, "wrote the diary for %s (%s)", day, mode)

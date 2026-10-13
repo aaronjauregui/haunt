@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -128,10 +129,13 @@ func showHistory(w io.Writer, msgs []message, traces []ghost.Why, n int, why, as
 			continue
 		}
 		printLed(w, *t.final())
-		if t.whyKept {
+		switch {
+		case t.whyKept:
 			printWhy(w, t.why)
-		} else {
+		case t.whyGone:
 			fmt.Fprintln(w, "       (no reasons kept for this one — it is older than the trace)")
+		default:
+			fmt.Fprintln(w, "       (no reasons recorded for this one)")
 		}
 		printLooked(w, t, len(t.replies)-1)
 	}
@@ -154,6 +158,10 @@ type historyTurn struct {
 	// holds it (whyKept).
 	why     ghost.Why
 	whyKept bool
+	// whyGone says the final reply has no reasons because it is older
+	// than the oldest the ring still holds, rather than because none were
+	// recorded for it (a failed turn keeps none).
+	whyGone bool
 	// echoes is the turn's memory writes that repeat a page or a file
 	// read in it or shortly before (markEchoes).
 	echoes []echo
@@ -173,8 +181,8 @@ func (t *historyTurn) final() *message {
 }
 
 // mergeTurns groups the session's messages into turns and matches each
-// final reply to its reasons. A turn ends at a reply that is not interim,
-// or where the next input begins.
+// final reply to its reasons (matchTraces). A turn ends at a reply that is
+// not interim, or where the next input begins.
 func mergeTurns(msgs []message, traces []ghost.Why) []historyTurn {
 	var turns []historyTurn
 	open := false // whether the last turn can still take replies
@@ -191,11 +199,72 @@ func mergeTurns(msgs []message, traces []ghost.Why) []historyTurn {
 		t := &turns[len(turns)-1]
 		t.replies = append(t.replies, m)
 		if !m.Interim {
-			t.why, t.whyKept = traceFor(traces, m.Text)
 			open = false
 		}
 	}
+	matchTraces(turns, traces)
 	return turns
+}
+
+// whyWindow is how far apart a reply's transcript row and its reasons may
+// be and still be taken as one turn's. The driver notes the reasons a few
+// milliseconds before it writes the row, so the gap is tiny; ten seconds
+// leaves room for a slow store write or a clock step without reaching a
+// turn that began after it, which takes at least a model call to answer.
+const whyWindow = 10 * time.Second
+
+// matchTraces pairs final replies with the driver's reasons by time, not
+// by words: every silent turn's words are "", and a ghost can say the same
+// thing twice. The closest pair within whyWindow is taken first, then the
+// next closest, so each entry goes to at most one reply and a turn with no
+// reasons of its own (one that failed) cannot take a neighbour's by coming
+// first. A reply left without is marked whyGone when it predates the oldest
+// entry the ring still holds, so the printer can tell a turn the ring has
+// dropped from one that never had reasons.
+func matchTraces(turns []historyTurn, traces []ghost.Why) {
+	type pair struct {
+		turn, why int
+		gap       time.Duration
+	}
+	var pairs []pair
+	var oldest time.Time
+	for j, w := range traces {
+		if w.Time.IsZero() {
+			continue
+		}
+		if oldest.IsZero() || w.Time.Before(oldest) {
+			oldest = w.Time
+		}
+		for i := range turns {
+			f := turns[i].final()
+			// A failed turn records no reasons, so it has none to find.
+			if f == nil || f.Failed || f.Time.IsZero() {
+				continue
+			}
+			gap := w.Time.Sub(f.Time)
+			if gap < 0 {
+				gap = -gap
+			}
+			if gap <= whyWindow {
+				pairs = append(pairs, pair{i, j, gap})
+			}
+		}
+	}
+	slices.SortStableFunc(pairs, func(a, b pair) int { return cmp.Compare(a.gap, b.gap) })
+	used := make([]bool, len(traces))
+	for _, p := range pairs {
+		if used[p.why] || turns[p.turn].whyKept {
+			continue
+		}
+		used[p.why] = true
+		turns[p.turn].why, turns[p.turn].whyKept = traces[p.why], true
+	}
+	for i := range turns {
+		t := &turns[i]
+		if f := t.final(); f != nil && !t.whyKept {
+			t.whyGone = oldest.IsZero() || f.Time.Before(oldest.Add(-whyWindow))
+		}
+	}
 }
 
 // traceRecord is one turn of `haunt history -json`, for a program reading
@@ -390,20 +459,6 @@ func printLooked(w io.Writer, t historyTurn, reply int) {
 		}
 		fmt.Fprintln(w, line)
 	}
-}
-
-// traceFor finds the reasons behind a reply, and consumes the match so two
-// identical replies get their own record rather than sharing the first.
-func traceFor(traces []ghost.Why, reply string) (ghost.Why, bool) {
-	for i, w := range traces {
-		if w.Reply == reply {
-			// Blanked rather than removed: the slice is walked in order and
-			// removing would shift everything after it.
-			traces[i].Reply = "\x00consumed"
-			return w, true
-		}
-	}
-	return ghost.Why{}, false
 }
 
 // printWhy renders one reply's reasons under the line it explains, from

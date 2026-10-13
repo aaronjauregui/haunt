@@ -471,3 +471,26 @@ func TestReflectOnlyRetiresTheirs(t *testing.T) {
 		t.Errorf("past: %+v", where.Past)
 	}
 }
+
+// A reflection that ends keeps its reasons like any turn: silent, woken
+// by its own envelope, with what it did. Without them `haunt history -why`
+// would find its silent row with no record of its own.
+func TestReflectKeepsWhy(t *testing.T) {
+	yesterday := dayOf(daysAgo(1, 12))
+	g, b, _ := modelGhost(t, 0, diaryCall(yesterday, "We talked about the oven.", ""))
+	seedDay(t, b.tr, daysAgo(1, 10), 1, "the oven")
+	g.idle.Store(true)
+	b.nudge()
+	var whys []Why
+	if !eventually(func() bool {
+		whys, _ = DecodeWhy(mustGet(t, g, WhyStoreKey))
+		return len(whys) == 1
+	}) {
+		t.Fatalf("why = %+v", whys)
+	}
+	w := whys[0]
+	if !w.Suppressed || !w.SelfPrompt || w.Reply != "" || !strings.Contains(w.User, "kind=reflect") ||
+		!strings.Contains(w.User, yesterday) || w.Time.IsZero() || len(w.Acted) != 1 || w.Acted[0] != diaryName {
+		t.Errorf("why = %+v", w)
+	}
+}
